@@ -76,7 +76,7 @@ concoct plan <roadmap-id>
 
 ## CON-008 — Implement code and review transitions
 
-- Status: `active`
+- Status: `delivered`
 - Delivery: pending integration; archived evidence at `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/`
 - Priority: `high`
 - Depends on: None
