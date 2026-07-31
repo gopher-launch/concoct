@@ -123,8 +123,12 @@ concoct archive
 
 `archive` renders the Archivist prompt; it does not archive the task by itself.
 The Archivist preserves the approved plan, notes, reviews, and summary, then
-reconciles accepted capability evidence. For a Git-backed task, archival is
-committed on the task branch and stops before delivery to the recorded trunk.
+reconciles accepted capability evidence. After authoring those files, run
+`concoct archive --complete`; Concoct validates the complete transaction. For a
+Git-backed task it commits archival once on the task branch and stops before
+delivery to the recorded trunk. An exceptional unapproved transition requires
+both `--override-authority` and `--override-reason`, with exactly matching
+durable summary evidence.
 
 ### 6. Integrate the task
 
@@ -167,7 +171,7 @@ deterministic prompts to standard output. Pass `--output <path>` to create a new
 file containing the same bytes. Output is create-only: Concoct refuses to
 overwrite an existing file. Prompt rendering validates its starting state but
 does not persist the selected role's work. The explicit `code --complete`,
-`review --reserve`, and `review --complete` boundaries validate and persist
+`review --reserve`, `review --complete`, and `archive --complete` boundaries validate and persist
 role-authored evidence; they never generate implementation or review judgment.
 
 ## What Concoct installs

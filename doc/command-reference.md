@@ -474,7 +474,9 @@ No positional arguments. Required evidence includes a valid active task and note
 
 ### Valid starting states
 
-`review-approved` only. An override mechanism, if later designed, must be explicit and preserved; it is not part of this initial command contract.
+`review-approved` for ordinary completion. The exceptional completion form
+requires both `--override-authority <authority>` and `--override-reason
+<reason>` and exactly matching non-empty `override` summary metadata.
 
 ### Files read
 
@@ -503,6 +505,15 @@ After the rendered handoff is carried out, archival performs one ordered transac
    hash and pending delivery, and preserve current/active evidence;
 7. for non-Git tasks, mark delivery and clear current only after validation.
 
+Non-Git summaries must record the exact lifecycle pair `status: delivered` and
+`delivery: complete`; contradictory or missing lifecycle evidence is rejected
+before current-task cleanup.
+
+Plain `concoct archive` remains read-only prompt rendering. The Archivist
+authors the candidate transaction and invokes `concoct archive --complete`.
+Git metadata uses `archive-commit: self`, a non-recursive committed sentinel
+that resolves to the exact archival HEAD; clean retries reuse that commit.
+
 Source, tests, accepted task history, completed reviews, and unrelated roadmap items are never rewritten by archival.
 
 ### Prompt produced
@@ -521,6 +532,8 @@ validate. Non-Git: `ready` after delivery and current reset validate.
 - Capability impact is absent, unresolved, unsupported, or contradicted by accepted behavior.
 - Required artifacts, implementation, verification, or approval evidence is missing.
 - Archive destination exists or is unsafe.
+- An override is partial, does not exactly match durable summary evidence, or
+  is supplied for an ordinarily approved task.
 - Copy, summary creation, capability reconciliation, roadmap update, cross-reference validation, or current reset fails.
 
 Before current reset, every failure preserves `.concoct/current/`. A failure after any durable archive write reports the repository as `invalid`, enumerates completed and pending transaction steps, and directs the Archivist to reconcile forward without deleting evidence.

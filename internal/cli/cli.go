@@ -26,6 +26,8 @@ const usage = `Usage:
   concoct review --reserve
   concoct review --complete
   concoct archive [--output <path>]
+  concoct archive --complete
+  concoct archive --complete --override-authority <authority> --override-reason <reason>
   concoct integrate [--continue|--abort]
   concoct help
 `
@@ -66,6 +68,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		return nil
 	case "next", "roadmap", "plan", "code", "review", "archive":
+		if args[0] == "archive" && len(args) >= 2 && args[1] == "--complete" {
+			return runArchiveTransition(args[2:], stdout, stderr)
+		}
 		if (args[0] == "code" || args[0] == "review") && len(args) == 2 && args[1] == "--complete" {
 			return runRoleTransition(args[0], "complete", stdout)
 		}
@@ -98,6 +103,47 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprint(stderr, usage)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runArchiveTransition(args []string, stdout, stderr io.Writer) error {
+	override := workflow.ArchiveOverride{}
+	for len(args) > 0 {
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return fmt.Errorf("archive completion override flags require non-empty values")
+		}
+		switch args[0] {
+		case "--override-authority":
+			override.Authority = strings.TrimSpace(args[1])
+		case "--override-reason":
+			override.Reason = strings.TrimSpace(args[1])
+		default:
+			fmt.Fprint(stderr, usage)
+			return fmt.Errorf("unknown archive completion option %q", args[0])
+		}
+		args = args[2:]
+	}
+	if (override.Authority == "") != (override.Reason == "") {
+		return fmt.Errorf("unapproved archival requires both --override-authority and --override-reason")
+	}
+	base, err := callerDir()
+	if err != nil {
+		return err
+	}
+	root, err := project.Discover(base)
+	if err != nil {
+		return err
+	}
+	result, err := workflow.CompleteArchive(root, override)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, result.Message)
+	if result.Committed {
+		fmt.Fprintf(stdout, "Commit: %s\n", result.Commit)
+	}
+	fmt.Fprint(stdout, workflow.Detect(root).String())
+	return nil
 }
 
 func runRoleTransition(command, action string, stdout io.Writer) error {

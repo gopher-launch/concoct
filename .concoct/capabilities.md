@@ -622,3 +622,72 @@ handoffs, unsafe Git context, or manufactured role judgment.
 - Direct agent execution, workflow diagnostics, recovery, history reporting,
   upgrades, and overlays remain roadmap intent rather than current capabilities.
 - Repository documentation and parts of the template retain stale paths and persona names from earlier layouts.
+## CAP-011 — Validated archive and capability reconciliation
+
+- Status: `active`
+- Audience: `project maintainers, developers, and coding agents`
+- Added by: `.concoct/archive/2026-07-31-CON-009-implement-archive-and-capability-reconciliation/summary.md`
+- Archive: `.concoct/archive/2026-07-31-CON-009-implement-archive-and-capability-reconciliation/summary.md`
+- Documentation: `README.md`, `doc/command-reference.md`, `doc/state-machine.md`, `doc/workflow.md`
+
+### Capability
+
+Concoct provides an explicit `archive --complete` boundary that validates
+Archivist-authored archive, summary, capability, roadmap, review, and task
+evidence before accepting an archival transition. Ordinary `archive` remains
+read-only role guidance, and exceptional completion requires matching durable
+authority and reason evidence.
+
+### User value
+
+Maintainers can turn approved work into traceable product capability truth with
+structural safeguards against incomplete, contradictory, unrelated, or
+premature archival changes.
+
+### Inputs
+
+An implementation-complete task with accepted sequential reviews, a
+deterministically named archive candidate, an authored summary, declared
+capability reconciliation, and lifecycle-appropriate roadmap and Git evidence.
+
+### Outputs and effects
+
+- Git-backed archival validates branch, base, operation, path, capability, and
+  roadmap boundaries; commits the accepted evidence once; records exact archival
+  HEAD through the non-recursive `self` sentinel; retains current task evidence;
+  and leaves delivery pending for integration.
+- Non-Git archival validates complete delivered evidence before clearing current
+  state and returning the project to `ready`.
+- Valid clean Git retries reuse only an exact, fully revalidated archival
+  transition, while invalid or interrupted attempts preserve durable evidence
+  with actionable failures.
+
+### Limitations
+
+- The Archivist remains responsible for semantic summary and capability wording;
+  the CLI validates structure, declared scope, provenance, and transaction
+  invariants rather than prose quality.
+- Non-Git repositories lack a committed pre-transition baseline, so preservation
+  relies on complete structural validation and cleanup-last ordering.
+- Git-backed delivery, squash integration, current cleanup, and accepted branch
+  deletion remain owned by the integration lifecycle in CAP-007.
+
+### Verification evidence
+
+- `internal/workflow/archive.go` validates archive candidates, lifecycle evidence,
+  capability impact, roadmap reconciliation, safe Git transitions, and retries.
+- `internal/workflow/archive_test.go` covers archive schemas, exact destinations,
+  all capability-impact types, unrelated-content preservation, and failure
+  preservation.
+- `internal/cli/transition_test.go` covers Git archival boundaries, corrupted
+  retries, pending delivery, and successful integration from produced evidence.
+- `.concoct/archive/2026-07-31-CON-009-implement-archive-and-capability-reconciliation/review-03.md`
+  records independent approval after two remediation rounds.
+
+### Related capabilities
+
+- `CAP-001` defines the durable workflow and acceptance roles.
+- `CAP-005` provides workflow state detection used to confirm archival outcomes.
+- `CAP-007` owns Git-backed integration and final delivery after archival.
+- `CAP-010` supplies validated implementation and review evidence consumed by
+  archive completion.

@@ -63,7 +63,7 @@ func (r *Repository) Branch() (string, error) {
 }
 func (r *Repository) Status() (string, error) { return r.run("status", "--short") }
 func (r *Repository) StatusEntries() ([]StatusEntry, error) {
-	c := exec.Command("git", "status", "--porcelain=v1", "-z")
+	c := exec.Command("git", "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	c.Dir = r.Root
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -145,6 +145,24 @@ func (r *Repository) ChangedPaths(base, head string) (map[string]struct{}, error
 	out, err := c.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git diff transaction paths: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	paths := make(map[string]struct{})
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path != "" {
+			paths[path] = struct{}{}
+		}
+	}
+	return paths, nil
+}
+
+// DiffPaths returns the paths changed by the exact old..new transition. Unlike
+// ChangedPaths, it does not widen the comparison through a merge base.
+func (r *Repository) DiffPaths(old, new string) (map[string]struct{}, error) {
+	c := exec.Command("git", "diff", "--name-only", "--no-renames", "-z", old, new)
+	c.Dir = r.Root
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git diff exact transition paths: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	paths := make(map[string]struct{})
 	for _, path := range strings.Split(string(out), "\x00") {

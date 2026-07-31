@@ -134,7 +134,7 @@ Directly launching or supervising an agent is outside this initial contract. A g
 | Latest blocked review, resolved with route `code` | responsible-role handoff, then `code` | Task Planner or Developer records resolution; Developer implements | `implementation-in-progress`, then `implementation-complete` |
 | Latest blocked review, resolved with route `review` | responsible-role handoff, then `review` | Task Planner or Developer records completed resolution; Reviewer reviews | One review outcome state |
 | `implementation-complete` after remediation | `review` | Reviewer using the next sequence | One review outcome state |
-| `review-approved` | `archive` | Archivist | Git: `archived`; non-Git: `ready` |
+| `review-approved` | `archive`, then `archive --complete` | Archivist + CLI validation | Git: `archived`; non-Git: `ready` |
 | `archived` | `integrate` | CLI transaction | `ready` or `integrating` |
 | `integrating` | `integrate --continue` / `--abort` | Human + CLI transaction | `ready` / `archived` |
 | Any initialized valid state | `status` | Read-only reporting; no persona | Unchanged |
@@ -188,6 +188,9 @@ Resolving a blocker is an explicit handoff under the responsible role. Product O
   validates the clean recorded Git entry boundary before creating only the next
   incomplete review path; `review --complete` validates and commits its single
   outcome.
+- `archive --complete` validates byte-identical task/review copies, summary
+  schema and sections, declared capability reconciliation, roadmap references,
+  and the Git or non-Git lifecycle boundary before committing or clearing state.
 - Product Owner work that changes roadmap content but creates no active task leaves state `ready`.
 - A failed validation, prompt rendering, or role precondition check leaves state unchanged.
 - Inspection, blocker routing, and recovery diagnostics are non-mutating unless the responsible role deliberately repairs an owned artifact.

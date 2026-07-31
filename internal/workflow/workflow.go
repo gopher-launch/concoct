@@ -168,7 +168,25 @@ func InspectGitContext(root string) (GitContext, error) {
 	if err := parseFront(data, &task); err != nil {
 		return GitContext{}, err
 	}
-	return GitContext{task.Git.Enabled, task.Git.Status == "archived", task.ID, task.Title, task.Git.Trunk, task.Git.TaskBranch, task.Git.Base, task.Git.ArchiveCommit}, nil
+	archiveCommit := task.Git.ArchiveCommit
+	if task.Git.Enabled && task.Git.Status == "archived" && archiveCommit == "self" {
+		repo, ok, openErr := gitrepo.Open(root)
+		if openErr != nil || !ok {
+			return GitContext{}, fmt.Errorf("resolve self archive commit: recorded Git repository unavailable")
+		}
+		archiveCommit, err = repo.Head()
+		if err != nil {
+			return GitContext{}, err
+		}
+		if err := repo.Clean(); err != nil {
+			return GitContext{}, fmt.Errorf("self archive commit is not a clean committed boundary: %w", err)
+		}
+		subject, err := repo.LastCommitSubject()
+		if err != nil || subject != "concoct: archive "+task.ID {
+			return GitContext{}, fmt.Errorf("self archive commit requires exact archival transition at HEAD")
+		}
+	}
+	return GitContext{task.Git.Enabled, task.Git.Status == "archived", task.ID, task.Title, task.Git.Trunk, task.Git.TaskBranch, task.Git.Base, archiveCommit}, nil
 }
 
 // InspectPromptContext reuses Detect as the authority for state validation and
@@ -543,6 +561,32 @@ func Detect(root string) Report {
 		if task.Git.ArchiveCommit == "" {
 			r.Diagnostics = append(r.Diagnostics, ".concoct/current/task-plan.md: archived Git task requires archive-commit")
 			return r
+		}
+		if task.Git.Status == "archived" && task.Git.ArchiveCommit == "self" {
+			repo, ok, openErr := gitrepo.Open(root)
+			if openErr != nil || !ok {
+				r.Diagnostics = append(r.Diagnostics, "self archive-commit requires the recorded Git repository")
+				return r
+			}
+			if branch, branchErr := repo.Branch(); branchErr != nil || branch != task.Git.TaskBranch {
+				r.Diagnostics = append(r.Diagnostics, "self archive-commit requires the recorded attached task branch")
+				return r
+			}
+			if cleanErr := repo.Clean(); cleanErr != nil {
+				r.Diagnostics = append(r.Diagnostics, "self archive-commit is not committed; run concoct archive --complete")
+				return r
+			}
+			subject, subjectErr := repo.LastCommitSubject()
+			if subjectErr != nil || subject != "concoct: archive "+task.ID {
+				r.Diagnostics = append(r.Diagnostics, "self archive-commit requires the exact archival transition at HEAD")
+				return r
+			}
+			if head, headErr := repo.Head(); headErr == nil {
+				r.GitArchiveCommit = head
+			} else {
+				r.OperationalError = headErr
+				return r
+			}
 		}
 		if _, err := os.Stat(filepath.Join(root, ".git", "concoct", "integrations", task.ID+".yaml")); err == nil || task.Git.Status == "integrating" {
 			r.State, r.Next = Integrating, "resolve and stage conflicts, then run concoct integrate --continue, or run concoct integrate --abort"

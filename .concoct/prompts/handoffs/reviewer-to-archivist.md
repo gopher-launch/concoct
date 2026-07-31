@@ -31,7 +31,8 @@ Archive transactionally:
 5. Add cross-references and validate the archive.
 6. For a Git-backed task, record pending roadmap reconciliation, set
    `git.status: archived`, commit all archival evidence on the recorded task
-   branch, and record that exact commit as `git.archive-commit`. Do not mark
+   branch, use the non-recursive `git.archive-commit: self` sentinel that the
+   completion boundary resolves to exact HEAD. Do not mark
    delivery or clear current state.
 7. For a non-Git task only, mark the roadmap item `delivered`, clear current
    state after validation, and confirm `ready`.
@@ -39,6 +40,10 @@ Archive transactionally:
 Do not approve work, alter source code, rewrite history, or copy planned capability claims without evidence.
 
 Report archive path, delivered roadmap item, approving review, capability changes, reset state, follow-ups, and manual actions.
+
+After authoring all evidence, run `concoct archive --complete`. Use the explicit
+authority/reason flags only for an authorized exceptional override and mirror
+their values exactly in summary front matter.
 
 Recommend `concoct integrate` for a Git-backed task. For a non-Git task,
 recommend `concoct next`.

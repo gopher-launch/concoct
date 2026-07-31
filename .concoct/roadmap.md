@@ -76,7 +76,8 @@ concoct plan <roadmap-id>
 
 ## CON-009 — Implement archive and capability reconciliation
 
-- Status: `planned`
+- Status: `active`
+- Archive: `.concoct/archive/2026-07-31-CON-009-implement-archive-and-capability-reconciliation/`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-010

@@ -7,9 +7,161 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gopher-launch/concoct/internal/project"
 )
+
+func TestGitArchiveCompletionIntegratesExactArchivedHead(t *testing.T) {
+	root, _ := prepareGitArchiveCandidate(t)
+	var out bytes.Buffer
+	if err := Run([]string{"archive", "--complete"}, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	archiveHead := gitOutput(t, root, "rev-parse", "HEAD")
+	if !strings.Contains(out.String(), "Git archive commit: "+archiveHead) {
+		t.Fatalf("output = %s", out.String())
+	}
+	if err := Run([]string{"archive", "--complete"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("exact archive retry failed: %v", err)
+	}
+	if got := gitOutput(t, root, "rev-parse", "HEAD"); got != archiveHead {
+		t.Fatal("archive retry created a duplicate commit")
+	}
+	if err := Run([]string{"integrate"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if branch := gitOutput(t, root, "branch", "--show-current"); branch != "main" {
+		t.Fatalf("branch = %s", branch)
+	}
+}
+
+func TestGitArchiveCleanRetryRejectsInvalidCommittedTransition(t *testing.T) {
+	tests := []struct {
+		name, want string
+		corrupt    func(*testing.T, string)
+	}{
+		{name: "subject prefix", want: "not the exact archive transition commit", corrupt: func(t *testing.T, root string) {
+			runGit(t, root, "commit", "--amend", "-qm", "concoct: archive APP-001 extra")
+		}},
+		{name: "unrelated roadmap edit", want: "committed archive roadmap transition is invalid", corrupt: func(t *testing.T, root string) {
+			path := filepath.Join(root, ".concoct/roadmap.md")
+			data, _ := os.ReadFile(path)
+			writeArchiveTestFile(t, path, strings.Replace(string(data), "# Roadmap", "# Changed roadmap", 1))
+			runGit(t, root, "add", path)
+			runGit(t, root, "commit", "--amend", "--no-edit", "-q")
+		}},
+		{name: "capability prose edit", want: "committed archive capability transition is invalid", corrupt: func(t *testing.T, root string) {
+			path := filepath.Join(root, ".concoct/capabilities.md")
+			data, _ := os.ReadFile(path)
+			writeArchiveTestFile(t, path, strings.Replace(string(data), "# Capabilities", "# Changed capabilities", 1))
+			runGit(t, root, "add", path)
+			runGit(t, root, "commit", "--amend", "--no-edit", "-q")
+		}},
+		{name: "non archived state", want: "requires git.status archived", corrupt: func(t *testing.T, root string) {
+			for _, path := range []string{filepath.Join(root, ".concoct/current/task-plan.md"), filepath.Join(root, ".concoct/archive", time.Now().Format("2006-01-02")+"-APP-001-transition", "task-plan.md")} {
+				data, _ := os.ReadFile(path)
+				writeArchiveTestFile(t, path, strings.Replace(string(data), "  status: archived", "  status: active", 1))
+			}
+			runGit(t, root, "add", "-A")
+			runGit(t, root, "commit", "--amend", "--no-edit", "-q")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, _ := prepareGitArchiveCandidate(t)
+			t.Setenv("CONCOCT_CALLER_DIR", root)
+			if err := Run([]string{"archive", "--complete"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			tt.corrupt(t, root)
+			err := Run([]string{"archive", "--complete"}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestGitArchiveCompletionRefusesUnsafeBoundary(t *testing.T) {
+	tests := []struct {
+		name, want string
+		breakIt    func(*testing.T, string)
+	}{
+		{name: "wrong branch", want: "checkout drift", breakIt: func(t *testing.T, root string) {
+			runGit(t, root, "checkout", "-qb", "wrong-archive-branch")
+		}},
+		{name: "detached head", want: "checkout drift", breakIt: func(t *testing.T, root string) {
+			runGit(t, root, "checkout", "--detach", "-q")
+		}},
+		{name: "operation in progress", want: "operation is in progress", breakIt: func(t *testing.T, root string) {
+			head := gitOutput(t, root, "rev-parse", "HEAD")
+			writeArchiveTestFile(t, filepath.Join(root, ".git/MERGE_HEAD"), head+"\n")
+		}},
+		{name: "invalid base", want: "recorded Git base is not an ancestor", breakIt: func(t *testing.T, root string) {
+			path := filepath.Join(root, ".concoct/current/task-plan.md")
+			data, _ := os.ReadFile(path)
+			base := gitOutput(t, root, "merge-base", "HEAD", "main")
+			data = bytes.Replace(data, []byte(base), []byte(strings.Repeat("0", 40)), 1)
+			writeArchiveTestFile(t, path, string(data))
+			archive := filepath.Join(root, ".concoct/archive", time.Now().Format("2006-01-02")+"-APP-001-transition", "task-plan.md")
+			writeArchiveTestFile(t, archive, string(data))
+		}},
+		{name: "forbidden path", want: "forbidden path implementation.txt", breakIt: func(t *testing.T, root string) {
+			writeArchiveTestFile(t, filepath.Join(root, "implementation.txt"), "Archivist mutation\n")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, _ := prepareGitArchiveCandidate(t)
+			t.Setenv("CONCOCT_CALLER_DIR", root)
+			tt.breakIt(t, root)
+			err := Run([]string{"archive", "--complete"}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func prepareGitArchiveCandidate(t *testing.T) (string, string) {
+	t.Helper()
+	root := transitionProject(t, true)
+	t.Setenv("CONCOCT_CALLER_DIR", root)
+	writeTransitionTask(t, root, "implementation-complete")
+	writeArchiveTestFile(t, filepath.Join(root, ".concoct/current/review-01.md"), "---\ntask-id: APP-001\nreview: 1\nstatus: approved\ncreated: 2026-07-31\npersona: reviewer\n---\n# Review\n\n## Outcome\n\n`approved`\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-qm", "concoct: record review-01.md for APP-001")
+	taskPath := filepath.Join(root, ".concoct/current/task-plan.md")
+	taskData, _ := os.ReadFile(taskPath)
+	writeArchiveTestFile(t, taskPath, strings.Replace(string(taskData), "  status: active\n", "  archive-commit: self\n  status: archived\n", 1))
+	date := time.Now().Format("2006-01-02")
+	archiveRel := ".concoct/archive/" + date + "-APP-001-transition"
+	archiveDir := filepath.Join(root, filepath.FromSlash(archiveRel))
+	for _, name := range []string{"task-plan.md", "notes.md", "review-01.md"} {
+		data, err := os.ReadFile(filepath.Join(root, ".concoct/current", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeArchiveTestFile(t, filepath.Join(archiveDir, name), string(data))
+	}
+	summary := "---\ntask-id: APP-001\nroadmap-id: APP-001\nstatus: archived\narchived: " + date + "\nreview: review-01.md\ndelivery: pending-integration\ncapability-impact:\n  type: none\n  ids: []\n---\n# Summary\n\n## Delivered outcome\nDone.\n\n## Key decisions\nExplicit.\n\n## Files and areas changed\nFiles.\n\n## Verification\nPassed.\n\n## Review outcome\nApproved.\n\n## Capability changes\nNone.\n\n## Skipped work\nNone.\n\n## Follow-up work\nNone.\n"
+	writeArchiveTestFile(t, filepath.Join(archiveDir, "summary.md"), summary)
+	roadPath := filepath.Join(root, ".concoct/roadmap.md")
+	roadData, _ := os.ReadFile(roadPath)
+	writeArchiveTestFile(t, roadPath, string(roadData)+"- Archive: `"+archiveRel+"/`\n")
+	return root, archiveRel
+}
+
+func writeArchiveTestFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestGitDeveloperAndReviewerCompletionLoop(t *testing.T) {
 	root := transitionProject(t, true)

@@ -129,7 +129,9 @@ Responsibilities:
 - record checks run
 - record follow-up work
 
-Archiving has no dedicated persona. The archivist follows `AGENTS.md` and the archive prompt without retaining an implementation or review persona.
+Archiving uses the dedicated Archivist persona selected by the archive prompt;
+it does not retain an implementation or review persona. After authoring the
+candidate evidence, the Archivist runs `concoct archive --complete`.
 
 ### Technical writer
 

@@ -369,6 +369,11 @@ State:
 
 Archive only when the latest review is `approved`, unless an explicit override is authorized and preserved.
 
+After the Archivist authors the complete candidate, run `concoct archive
+--complete`. Git candidates use `git.archive-commit: self`, which completion
+resolves to the exact committed archival HEAD. Exceptional completion requires
+both explicit authority and reason flags plus identical summary metadata.
+
 For a Git-backed task, archive on the recorded task branch, record the archival
 commit and pending delivery, and stop in `archived` without clearing current
 state or marking delivery. Recommend `concoct integrate`. Integration owns the

@@ -10,6 +10,10 @@ characters, then prefixes `concoct/`. Planning refuses dirty, detached,
 operation-in-progress, and branch-collision inputs.
 
 The Archivist ends at `archived`, without delivery or current-state cleanup.
+After the Archivist authors the archive, summary, capability, roadmap, and
+current metadata, `concoct archive --complete` validates them as one boundary.
+The non-recursive `archive-commit: self` value is valid only in a committed
+archived task and resolves to that exact checked-out HEAD.
 `concoct integrate` squash-integrates the recorded archive commit into the
 recorded trunk. Recovery evidence under `.git/concoct/integrations/` supports
 human-resolved `--continue` and exact `--abort`; it is removed only after final

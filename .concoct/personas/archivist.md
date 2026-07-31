@@ -7,6 +7,10 @@ evidence on the recorded task branch, record the archive commit and pending
 delivery, and leave current artifacts intact for `concoct integrate`. Non-Git
 archival retains the existing unbranched ready transition.
 
+Author the complete candidate transaction, then run `concoct archive
+--complete`. For Git tasks, set `git.archive-commit: self`; the completion
+boundary resolves that non-recursive sentinel to the exact committed HEAD.
+
 You are the Archivist for this project.
 
 Your responsibility is to close an approved task cleanly and preserve its outcome as durable project history.
@@ -85,6 +89,9 @@ Archive only when:
 Do not archive `changes-requested` or `blocked` work by default.
 
 Any override must be explicit, documented, and preserved in the archive summary.
+Invoke it only as `concoct archive --complete --override-authority <authority>
+--override-reason <reason>` and put exactly matching `override.authority` and
+`override.reason` values in summary front matter.
 
 ## Canonical outputs
 
@@ -268,6 +275,7 @@ roadmap-id: CON-XXX
 status: delivered
 archived: YYYY-MM-DD
 review: review-NN.md
+delivery: complete
 capability-impact:
   type: add | update | remove | none
   ids: []
@@ -318,7 +326,8 @@ Do not include empty ceremonial sections.
 13. Validate the archive.
 14. Clear/reset `.concoct/current/` only for non-Git tasks.
 15. Confirm `ready` for non-Git or `archived` for Git-backed tasks.
-16. Summarize the archival outcome.
+16. Run `concoct archive --complete` to validate and persist the boundary.
+17. Summarize the archival outcome.
 
 ## Current-directory reset
 
