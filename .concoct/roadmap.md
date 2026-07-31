@@ -362,10 +362,10 @@ materially drifted.
 
 ## CON-017 — Separate protocol, policy, and project guidance
 
-- Status: `candidate`
+- Status: `planned`
 - Priority: `high`
 - Depends on: None
-- Capability prerequisites: CAP-001, CAP-003, CAP-004, CAP-006
+- Capability prerequisites: CAP-001, CAP-004, CAP-006
 - Capability impact: separates Concoct invariants from configurable workflow policy and repository-owned conventions
 
 ### Outcome
@@ -373,6 +373,17 @@ materially drifted.
 Define explicit ownership and composition boundaries for Concoct protocol,
 project-selected workflow policy, and repository-owned project guidance while
 retaining `AGENTS.md` as a usable human- and agent-facing entry point.
+
+### Rationale
+
+Concoct currently distributes durable workflow rules, project guidance, and
+tool-specific entry points through the same installed template surface. The
+accepted template and adapter capabilities remain limited by stale references,
+empty guidance assets, and required project-specific customization. Establishing
+explicit ownership and composition boundaries is the prerequisite for correcting
+those limitations without making Concoct-specific upgrades overwrite repository
+truth, and it provides the foundation required by configurable policy and
+executable-owned workflow content.
 
 ### Requirements
 
