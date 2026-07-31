@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-07-30
+updated: 2026-07-31
 ---
 
 # Roadmap
@@ -1139,7 +1139,7 @@ model rather than introducing embedding as a new mechanism.
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: None
+- Depends on: CON-035
 - Capability prerequisites: CAP-003, CAP-005
 - Capability impact: establishes version identity and compatibility contracts for the executable, embedded workflow content, project schema, and future upgrades
 
@@ -1352,12 +1352,70 @@ requires intervention.
 
 ---
 
+## CON-035 — Adopt the Gopher Launch repository identity
+
+- Status: `planned`
+- Priority: `critical`
+- Depends on: None
+- Capability prerequisites: CAP-005
+- Capability impact: changes Concoct's canonical source, module, installation, and product namespace without changing workflow behavior
+
+### Outcome
+
+Make `github.com/gopher-launch/concoct` the canonical repository and Go module
+identity throughout the active product after the repository move, while
+preserving its Git history and the historical accuracy of archived artifacts.
+
+### Rationale
+
+The canonical repository has moved to the Gopher Launch organization, but the
+Go module, internal imports, and active product references still identify the
+former namespace. Leaving those identities split makes source installation,
+package resolution, release provenance, and contributor guidance unreliable.
+The migration must precede release and compatibility versioning so Concoct's
+first public release establishes the intended durable identity.
+
+### Requirements
+
+- Declare `github.com/gopher-launch/concoct` as the Go module path and use that
+  path for all internal imports.
+- Replace former `cthain/agent-workflow` and `cthain/concoct` references where
+  active source, tests, fixtures, generated content, configuration,
+  documentation, badges, or workflow guidance present them as canonical.
+- Preserve former repository names where changing them would rewrite history,
+  alter append-only artifacts, or misrepresent historical context.
+- Document source installation from the canonical repository without claiming
+  an `@latest` release before one exists; use `@main` or local-clone guidance
+  until CON-031 establishes the first release.
+- Keep the existing repository history intact and confirm the configured Git
+  remote identifies `github.com/gopher-launch/concoct`.
+- Reconcile Go module metadata and verify the complete supported build, test,
+  and installation paths after the identity change.
+
+### Acceptance criteria
+
+- `go.mod` declares `module github.com/gopher-launch/concoct`, and all internal
+  imports use that module path.
+- No active source, test, fixture, generated content, configuration, current
+  documentation, badge, or workflow guidance incorrectly presents a former
+  repository identity as canonical.
+- Historical and append-only artifacts remain historically accurate.
+- The project builds, its full test suite passes, and `go install
+  ./cmd/concoct` installs a working executable.
+- A fresh remote installation resolves
+  `github.com/gopher-launch/concoct/cmd/concoct@main`.
+- The configured Git remote uses the canonical repository identity, existing
+  history remains present, and the pre-migration `main` commit is an ancestor
+  of the accepted work.
+
+---
+
 ## Recommended implementation order
 
 Near-term delivery sequence:
 
 ```text
-CON-029  Human-first product onboarding
+CON-035  Canonical Gopher Launch repository identity
 CON-008  Code and review transitions
 CON-009  Archive and capability reconciliation
 ```
@@ -1371,9 +1429,8 @@ Everyday use: CON-019 → CON-027 → CON-020 → CON-023 → CON-025 → CON-02
 Scale:        CON-024
 ```
 
-Productization foundation follows `CON-031 → CON-017 → CON-030 → CON-014`,
-with CON-031 independently planable when its remaining compatibility decisions
-are resolved. CON-013 follows CON-014 and CON-031; CON-030 is already a
+Productization foundation follows `CON-035 → CON-031 → CON-017 → CON-030 → CON-014`.
+CON-013 follows CON-014 and CON-031; CON-030 is already a
 transitive prerequisite through CON-014 and is not duplicated on CON-013.
 Lifecycle execution follows `CON-017 → CON-032` for result semantics, then
 converges with the completed initial lifecycle, CON-018 policy, CON-030 embedded
