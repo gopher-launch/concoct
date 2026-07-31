@@ -244,6 +244,7 @@ Project maintainers can bootstrap the workflow reliably from an installed binary
 - Audience: `developers and coding agents`
 - Added by: `.concoct/archive/2026-07-30-CON-006-deterministic-prompt-rendering/`
 - Updated by: `.concoct/archive/2026-07-30-CON-015-isolate-integrate-git-tasks/`
+- Updated by: `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/`
 - Documentation: `README.md`, `doc/command-reference.md`, `doc/state-machine.md`
 
 ### Capability
@@ -284,8 +285,9 @@ rules.
 
 ### Limitations
 
-- Prompt commands provide guidance only; later roadmap work owns task/review
-  mutations, archival automation, and direct agent execution.
+- Prompt commands provide guidance only; CAP-010 provides separate validated
+  Developer and Reviewer completion boundaries. Archival automation and direct
+  agent execution remain future work.
 - Output files are create-only and existing destinations are never overwritten.
 - Archive-summary relevance is selected conservatively from identifiers in
   validated task and command context because no archive index exists.

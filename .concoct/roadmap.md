@@ -62,9 +62,9 @@ Delivered and cancelled items leave the active roadmap after their relationships
 are reconciled. Their identifiers remain reserved and must not be reused.
 
 Reserved historical identifiers: `CON-003`, `CON-004`, `CON-005`, `CON-006`,
-`CON-007`, `CON-015`, `CON-028`, `CON-029`, `CON-035`. Accepted delivery
-evidence is preserved by the corresponding capability records and archives;
-CON-004 was cancelled as redundant and has no delivery archive.
+`CON-007`, `CON-008`, `CON-015`, `CON-028`, `CON-029`, `CON-035`. Accepted
+delivery evidence is preserved by the corresponding capability records and
+archives; CON-004 was cancelled as redundant and has no delivery archive.
 
 A roadmap item should describe a coherent outcome. Detailed implementation steps belong in the task plan created by:
 
@@ -74,64 +74,12 @@ concoct plan <roadmap-id>
 
 ---
 
-## CON-008 — Implement code and review transitions
-
-- Status: `delivered`
-- Delivery: pending integration; archived evidence at `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007, CAP-008
-- Capability impact: adds developer and reviewer coordination
-
-### Outcome
-
-Add validated, durable role-completion bookkeeping around the existing
-prompt-rendering commands:
-
-```text
-concoct code
-concoct review
-```
-
-### Code requirements
-
-- Preserve prompt rendering and role judgment as the responsibility of
-  CAP-006 and the acting Developer.
-- Record implementation entry and completion without treating prompt rendering
-  as completed role work.
-- Validate Developer-owned task-plan and notes changes against the selected
-  implementation, continuation, remediation, or blocked-recovery mode.
-- Require disposition of unresolved review findings.
-- Do not modify completed review artifacts.
-
-### Review requirements
-
-- Reserve the next review sequence safely without overwriting an existing
-  review.
-- Validate that the acting Reviewer records exactly one of:
-  - `approved`;
-  - `changes-requested`;
-  - `blocked`.
-- Preserve review artifacts as append-only after completion.
-- Advance workflow state from the completed review without rewriting
-  Developer-owned history or manufacturing Reviewer judgment.
-
-### Acceptance criteria
-
-- The loop `code → review → code → review` works.
-- Review numbers are deterministic and collision-safe.
-- Status output recommends the correct next command.
-- Invalid role transitions fail safely.
-- Review artifacts are preserved for archive.
-
----
-
 ## CON-009 — Implement archive and capability reconciliation
 
 - Status: `planned`
 - Priority: `high`
-- Depends on: CON-008
-- Capability prerequisites: CAP-001, CAP-005, CAP-007
+- Depends on: None
+- Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-010
 - Capability impact: automates accepted-task archival and product-truth reconciliation across Git-backed and non-Git lifecycles
 
 ### Outcome
@@ -206,7 +154,7 @@ Include:
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-008, CON-009, CON-018, CON-030, CON-031, CON-032
+- Depends on: CON-009, CON-018, CON-030, CON-031, CON-032
 - Capability prerequisites: CAP-005, CAP-006, CAP-007, CAP-008, CAP-009
 - Capability impact: allows Concoct to invoke an agent for one recommended workflow action and validate its result
 
@@ -1194,7 +1142,6 @@ requires intervention.
 Near-term delivery sequence:
 
 ```text
-CON-008  Code and review transitions
 CON-009  Archive and capability reconciliation
 ```
 
