@@ -76,7 +76,7 @@ concoct plan <roadmap-id>
 
 ## CON-009 — Implement archive and capability reconciliation
 
-- Status: `active`
+- Status: `delivered`
 - Archive: `.concoct/archive/2026-07-31-CON-009-implement-archive-and-capability-reconciliation/`
 - Priority: `high`
 - Depends on: None
