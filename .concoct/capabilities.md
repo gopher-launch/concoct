@@ -57,7 +57,7 @@ The workflow produces and maintains human-readable roadmap, task-plan, notes, se
 - `.codex/skills/concoct/SKILL.md` defines the canonical artifacts, role workflows, state discipline, review outcomes, and archive process.
 - `.concoct/personas/product-owner.md`, `task-planner.md`, `developer.md`, `reviewer.md`, and `archivist.md` provide role-specific operating guidance.
 - `.concoct/roadmap.md` and `.concoct/current/` demonstrate the living artifact layout in this repository.
-- `doc/command-reference.md` defines the complete normative contract for the seven initial commands.
+- `doc/command-reference.md` defines the complete normative contract for the current command surface.
 - `doc/state-machine.md` defines workflow state from observable artifacts and specifies transitions, review recovery, invalid states, and archive atomicity.
 - `.concoct/archive/2026-07-29-CON-003-command-contract-state-machine/review-02.md` records approval of the command and state-machine contract.
 - `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/review-02.md` records approval of layered ownership, deterministic composition, and structural conflict validation.
@@ -635,7 +635,6 @@ handoffs, unsafe Git context, or manufactured role judgment.
   treat rendered guidance as role completion.
 - Direct agent execution, workflow diagnostics, recovery, history reporting,
   upgrades, and overlays remain roadmap intent rather than current capabilities.
-- Repository documentation and parts of the template retain stale paths and persona names from earlier layouts.
 ## CAP-011 — Validated archive and capability reconciliation
 
 - Status: `active`

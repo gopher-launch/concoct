@@ -271,7 +271,7 @@ Concoct installs durable workflow files into client repositories. As that instal
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-017, CON-030
+- Depends on: CON-030
 - Capability prerequisites: CAP-003, CAP-004, CAP-006
 - Capability impact: adds a supported customization layer for client-specific workflow guidance
 
@@ -283,8 +283,8 @@ content, using deterministic composition, source attribution, and compatibility
 validation.
 
 Overlays extend the project-guidance and workflow-policy layers established by
-CON-017. They are not the boundary between Concoct protocol and project-owned
-truth, and they cannot weaken protocol invariants.
+the current workflow contract. They are not the boundary between Concoct
+protocol and project-owned truth, and they cannot weaken protocol invariants.
 
 ### Rationale
 
@@ -331,7 +331,7 @@ Concoct's shared workflow contract must remain reusable and portable, while clie
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-017, CON-018
+- Depends on: CON-018
 - Capability prerequisites: CAP-001, CAP-003, CAP-005
 - Capability impact: adds safe Concoct onboarding for brownfield repositories
 
@@ -360,55 +360,13 @@ materially drifted.
 
 ---
 
-## CON-017 — Separate protocol, policy, and project guidance
-
-- Status: `delivered`
-- Archive: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-001, CAP-004, CAP-006
-- Capability impact: separates Concoct invariants from configurable workflow policy and repository-owned conventions
-
-### Outcome
-
-Define explicit ownership and composition boundaries for Concoct protocol,
-project-selected workflow policy, and repository-owned project guidance while
-retaining `AGENTS.md` as a usable human- and agent-facing entry point.
-
-### Rationale
-
-Concoct currently distributes durable workflow rules, project guidance, and
-tool-specific entry points through the same installed template surface. The
-accepted template and adapter capabilities remain limited by stale references,
-empty guidance assets, and required project-specific customization. Establishing
-explicit ownership and composition boundaries is the prerequisite for correcting
-those limitations without making Concoct-specific upgrades overwrite repository
-truth, and it provides the foundation required by configurable policy and
-executable-owned workflow content.
-
-### Requirements
-
-- Make evidence integrity, immutable completed reviews, and invalid-state handling Concoct-owned protocol.
-- Make required phases, controls, and Git strategy project-selected policy.
-- Keep naming, architecture, coding standards, and verification commands project-owned.
-- Permit Concoct-owned material to be upgraded without silently replacing project guidance.
-- Detect conflicts deterministically and render the effective instruction set with source attribution.
-- Allow project guidance to strengthen policy without weakening protocol invariants.
-
-### Acceptance criteria
-
-- Every effective instruction has an identifiable ownership layer and source.
-- Project-owned guidance survives initialization, composition, and supported upgrades unchanged unless explicitly reconciled.
-- Conflicting or invariant-weakening instructions fail with actionable diagnostics.
-- Existing default workflow behavior remains expressible through the layered model.
-
 ---
 
 ## CON-018 — Configure workflow policy
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-017
+- Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007
 - Capability impact: makes lifecycle requirements explicit and configurable
 
@@ -807,7 +765,7 @@ explicit bug provenance.
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-017
+- Depends on: None
 - Capability prerequisites: CAP-003, CAP-004, CAP-006
 - Capability impact: makes version-matched built-in prompts and personas part of the executable product distribution
 
@@ -911,7 +869,7 @@ separate schema discriminator lets the executable assess repository compatibilit
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-017
+- Depends on: None
 - Capability prerequisites: CAP-001, CAP-004, CAP-005, CAP-006, CAP-007, CAP-009
 - Capability impact: establishes machine-readable action, completion, and intervention contracts between Concoct and acting agents
 
@@ -1079,15 +1037,15 @@ The initial CLI lifecycle through archival is complete. Prioritize the
 flexibility work in three increments:
 
 ```text
-Foundation:   CON-017 → CON-018 → CON-016 → CON-021 → CON-022
+Foundation:   CON-018 → CON-016 → CON-021 → CON-022
 Everyday use: CON-019 → CON-027 → CON-020 → CON-023 → CON-025 → CON-026
 Scale:        CON-024
 ```
 
-Productization foundation follows `CON-031 → CON-017 → CON-030 → CON-014`.
+Productization foundation follows `CON-031 → CON-030 → CON-014`.
 CON-013 follows CON-014 and CON-031; CON-030 is already a
 transitive prerequisite through CON-014 and is not duplicated on CON-013.
-Lifecycle execution follows `CON-017 → CON-032` for result semantics, then
+Lifecycle execution follows `CON-032` for result semantics, then
 converges with the completed initial lifecycle, CON-018 policy, CON-030 embedded
 content, and CON-031 compatibility identity at CON-010. Repeating and durable
 orchestration then proceed as `CON-010 → CON-033 → CON-034`. This keeps a
