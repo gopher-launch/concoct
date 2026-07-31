@@ -362,7 +362,7 @@ materially drifted.
 
 ## CON-017 — Separate protocol, policy, and project guidance
 
-- Status: `active`
+- Status: `delivered`
 - Archive: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/`
 - Priority: `high`
 - Depends on: None
