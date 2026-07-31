@@ -62,9 +62,9 @@ Delivered and cancelled items leave the active roadmap after their relationships
 are reconciled. Their identifiers remain reserved and must not be reused.
 
 Reserved historical identifiers: `CON-003`, `CON-004`, `CON-005`, `CON-006`,
-`CON-015`. Accepted delivery evidence is preserved by the corresponding
-capability records and archives; CON-004 was cancelled as redundant and has no
-delivery archive.
+`CON-007`, `CON-015`, `CON-028`, `CON-029`, `CON-035`. Accepted delivery
+evidence is preserved by the corresponding capability records and archives;
+CON-004 was cancelled as redundant and has no delivery archive.
 
 A roadmap item should describe a coherent outcome. Detailed implementation steps belong in the task plan created by:
 
@@ -74,59 +74,18 @@ concoct plan <roadmap-id>
 
 ---
 
-## CON-007 — Implement active task planning
-
-- Status: `delivered`
-- Archive: `.concoct/archive/2026-07-30-CON-007-active-task-planning/` — accepted and archived on the task branch; delivery pending `concoct integrate`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007
-- Capability impact: adds roadmap-to-task transition
-
-### Outcome
-
-Implement:
-
-```text
-concoct plan <roadmap-id>
-```
-
-to turn one roadmap item into an active task-planning session.
-
-### Requirements
-
-- Validate that the roadmap item exists and is eligible for planning.
-- Validate that every declared capability prerequisite resolves to accepted
-  capability truth and that any documented limitation is compatible with the
-  planned outcome.
-- Refuse to overwrite an active task.
-- Read current capabilities and relevant archive history.
-- Generate the planner prompt.
-- Create task placeholders only when appropriate.
-- Update roadmap item status after a valid plan is established.
-- Preserve the roadmap identifier in task metadata.
-
-### Acceptance criteria
-
-- A roadmap item can be selected deterministically.
-- Active-task conflicts produce clear errors.
-- The task plan and notes use the artifact schema.
-- The generated planner prompt contains all required context.
-- `concoct status` reflects the planned task.
-
----
-
 ## CON-008 — Implement code and review transitions
 
 - Status: `planned`
 - Priority: `high`
-- Depends on: CON-007
-- Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007
+- Depends on: None
+- Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007, CAP-008
 - Capability impact: adds developer and reviewer coordination
 
 ### Outcome
 
-Implement role transitions for:
+Add validated, durable role-completion bookkeeping around the existing
+prompt-rendering commands:
 
 ```text
 concoct code
@@ -135,23 +94,26 @@ concoct review
 
 ### Code requirements
 
-- Read the active task plan and notes.
-- Read the latest review when one exists.
-- Detect normal implementation versus review remediation mode.
-- Generate a developer prompt with narrow file ownership.
+- Preserve prompt rendering and role judgment as the responsibility of
+  CAP-006 and the acting Developer.
+- Record implementation entry and completion without treating prompt rendering
+  as completed role work.
+- Validate Developer-owned task-plan and notes changes against the selected
+  implementation, continuation, remediation, or blocked-recovery mode.
 - Require disposition of unresolved review findings.
 - Do not modify completed review artifacts.
 
 ### Review requirements
 
-- Allocate the next review sequence safely.
-- Read prior reviews for context without blindly inheriting their conclusions.
-- Produce one of:
+- Reserve the next review sequence safely without overwriting an existing
+  review.
+- Validate that the acting Reviewer records exactly one of:
   - `approved`;
   - `changes-requested`;
   - `blocked`.
 - Preserve review artifacts as append-only after completion.
-- Update status without rewriting developer-owned history.
+- Advance workflow state from the completed review without rewriting
+  Developer-owned history or manufacturing Reviewer judgment.
 
 ### Acceptance criteria
 
@@ -956,132 +918,6 @@ explicit bug provenance.
 
 ---
 
-## CON-028 — Recommend the next project action
-
-- Status: `delivered`
-- Delivery: pending integration; archived evidence at `.concoct/archive/2026-07-30-CON-028-recommend-next-project-action/`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-008
-- Capability impact: adds an explicit Product Owner decision step between ready state and selection of the next workflow action
-
-### Outcome
-
-Provide `concoct next` as the single recommended command when a project is
-ready. It renders an evidence-backed Product Owner prompt that recommends the
-next valid action without selecting work, creating a task, or changing project
-lifecycle state.
-
-### Rationale
-
-Ready state currently presents an unexplained choice between roadmap intake and
-planning a known item. After initialization or accepted delivery, users need a
-clear decision step that considers strategy, eligibility, blockers, and other
-supported work origins before directing them into the appropriate existing
-workflow.
-
-### Requirements
-
-- Permit `concoct next` only from structurally valid ready state and keep the
-  command advisory and read-only.
-- Deterministically assemble authoritative roadmap, accepted capability,
-  dependency, prerequisite, relevant archive, and supported task-origin
-  evidence, then render it with the Product Owner guidance needed to make the
-  recommendation.
-- Keep semantic Product Owner judgment distinct from CLI validation: the CLI
-  must not claim to choose work merely because it assembled the prompt.
-- Require the Product Owner result to recommend exactly one of: planning an
-  eligible roadmap item; addressing another currently supported task origin;
-  refining or reconciling the roadmap; resolving a specific blocker or
-  inconsistency; or acknowledging that no actionable work is recorded.
-- Explain why the recommended action is next, cite its durable evidence and
-  blockers, and provide the exact follow-up command when one exists.
-- Do not let priority override unresolved delivery dependencies, unsupported
-  capability prerequisites, invalid evidence, or missing product decisions.
-- Support ordinary deterministic prompt output to stdout or a create-only
-  `--output <path>` destination with the existing output-safety contract.
-- Update ready-state status, successful integration output, documentation,
-  templates, help, skills, and applicable personas to recommend `concoct next`
-  consistently instead of presenting an unexplained roadmap-or-plan choice.
-- Preserve the boundaries among `status` for lifecycle state, `next` for work
-  recommendation, `roadmap` for product-direction changes, and `plan` for an
-  already selected eligible work origin.
-- Allow future task-origin types to participate when their accepted contracts
-  become available without making them delivery dependencies of this item.
-
-### Safety constraints
-
-- Invoking the command does not create or activate a task, change project
-  phase, or mutate roadmap, capability, bug, current-task, or archive artifacts.
-- Structurally missing or contradictory state remains invalid and is not
-  normalized into a recommendation prompt.
-- The prompt may recommend reconciliation but does not perform it as a side
-  effect of deciding what should happen next.
-- Implementation existence and passing checks are not treated as acceptance or
-  eligibility evidence.
-
-### Acceptance criteria
-
-- Ready-state status and successful integration recommend exactly `concoct
-  next`, giving a new or returning user one unambiguous next command.
-- `concoct next` renders a complete Product Owner prompt from authoritative
-  repository evidence without mutating workflow state or selecting work.
-- Prompt output is byte-deterministic for unchanged evidence and behaves
-  consistently on stdout and through `--output <path>`.
-- The Product Owner guidance covers an eligible roadmap item, a supported
-  non-roadmap origin, roadmap reconciliation, a specific blocker, and no
-  actionable recorded work as distinct recommendation outcomes.
-- Recommendations distinguish structural eligibility from product judgment,
-  explain their evidence, and never present blocked work as immediately
-  plannable.
-- Unsupported future origins are not implied to be available, while accepted
-  origin types can be incorporated without changing the command boundary.
-- Documentation, templates, help, personas, and skill guidance consistently
-  explain the roles of `status`, `next`, `roadmap`, and `plan`.
-- Repository-defined tests cover command-state validation, evidence assembly,
-  every recommendation outcome, non-mutation, output safety, and ready-state
-  guidance.
-
----
-
-## CON-029 — Introduce Concoct through a human-first README
-
-- Status: `delivered`
-- Delivery: pending integration; archived evidence at `.concoct/archive/2026-07-31-CON-029-human-first-readme/`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007
-- Capability impact: improves product onboarding and documents the supported workflow without changing runtime behavior
-
-### Outcome
-
-Present Concoct through a human-first README that explains what the product is,
-why it exists, who it serves, and how a developer completes a representative
-workflow from initialization through integration before introducing repository
-structure and contributor detail.
-
-### Requirements
-
-- Explain Concoct in product terms before describing repository structure.
-- Identify the intended user as a developer using repository-aware coding agents who wants a repeatable, inspectable development workflow.
-- Explain the value of durable context, defined agent roles, explicit transitions, independent review, and retained project history.
-- Provide a concise end-to-end quick start beginning with `concoct init hello-world` and covering the supported roadmap, planning, implementation, review, archival, and integration loop.
-- Distinguish executable commands, prompt-rendered role work, and future planned automation so the quick start does not overstate current behavior.
-- Present the normal user journey before internal file layout or contributor instructions.
-- Link to detailed workflow, command-reference, state-machine, and development documentation rather than duplicating it.
-- Describe Concoct as agent-neutral without implying identical integration behavior across every coding agent.
-- State current maturity and limitations honestly.
-
-### Acceptance criteria
-
-- A new user can determine from the opening section what Concoct does, why they might use it, and whether it fits their workflow.
-- A new user can follow a representative quick start without first understanding Concoct's internal repository structure.
-- Every command shown as executable is supported by current capability truth, and role-prompt commands are not presented as autonomous role execution.
-- Detailed technical and contributor information remains discoverable without dominating the introduction.
-- README examples agree with command help, current capabilities, and the documented state machine.
-
----
-
 ## CON-030 — Make built-in workflow content executable-owned
 
 - Status: `candidate`
@@ -1139,7 +975,7 @@ model rather than introducing embedding as a new mechanism.
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-035
+- Depends on: None
 - Capability prerequisites: CAP-003, CAP-005
 - Capability impact: establishes version identity and compatibility contracts for the executable, embedded workflow content, project schema, and future upgrades
 
@@ -1352,71 +1188,11 @@ requires intervention.
 
 ---
 
-## CON-035 — Adopt the Gopher Launch repository identity
-
-- Status: `delivered`
-- Delivery: pending integration; archived evidence at `.concoct/archive/2026-07-31-CON-035-adopt-the-gopher-launch-repository-identity/`
-- Priority: `critical`
-- Depends on: None
-- Capability prerequisites: CAP-005
-- Capability impact: changes Concoct's canonical source, module, installation, and product namespace without changing workflow behavior
-
-### Outcome
-
-Make `github.com/gopher-launch/concoct` the canonical repository and Go module
-identity throughout the active product after the repository move, while
-preserving its Git history and the historical accuracy of archived artifacts.
-
-### Rationale
-
-The canonical repository has moved to the Gopher Launch organization, but the
-Go module, internal imports, and active product references still identify the
-former namespace. Leaving those identities split makes source installation,
-package resolution, release provenance, and contributor guidance unreliable.
-The migration must precede release and compatibility versioning so Concoct's
-first public release establishes the intended durable identity.
-
-### Requirements
-
-- Declare `github.com/gopher-launch/concoct` as the Go module path and use that
-  path for all internal imports.
-- Replace former `cthain/agent-workflow` and `cthain/concoct` references where
-  active source, tests, fixtures, generated content, configuration,
-  documentation, badges, or workflow guidance present them as canonical.
-- Preserve former repository names where changing them would rewrite history,
-  alter append-only artifacts, or misrepresent historical context.
-- Document source installation from the canonical repository without claiming
-  an `@latest` release before one exists; use `@main` or local-clone guidance
-  until CON-031 establishes the first release.
-- Keep the existing repository history intact and confirm the configured Git
-  remote identifies `github.com/gopher-launch/concoct`.
-- Reconcile Go module metadata and verify the complete supported build, test,
-  and installation paths after the identity change.
-
-### Acceptance criteria
-
-- `go.mod` declares `module github.com/gopher-launch/concoct`, and all internal
-  imports use that module path.
-- No active source, test, fixture, generated content, configuration, current
-  documentation, badge, or workflow guidance incorrectly presents a former
-  repository identity as canonical.
-- Historical and append-only artifacts remain historically accurate.
-- The project builds, its full test suite passes, and `go install
-  ./cmd/concoct` installs a working executable.
-- A fresh remote installation resolves
-  `github.com/gopher-launch/concoct/cmd/concoct@main`.
-- The configured Git remote uses the canonical repository identity, existing
-  history remains present, and the pre-migration `main` commit is an ancestor
-  of the accepted work.
-
----
-
 ## Recommended implementation order
 
 Near-term delivery sequence:
 
 ```text
-CON-035  Canonical Gopher Launch repository identity
 CON-008  Code and review transitions
 CON-009  Archive and capability reconciliation
 ```
@@ -1430,7 +1206,7 @@ Everyday use: CON-019 → CON-027 → CON-020 → CON-023 → CON-025 → CON-02
 Scale:        CON-024
 ```
 
-Productization foundation follows `CON-035 → CON-031 → CON-017 → CON-030 → CON-014`.
+Productization foundation follows `CON-031 → CON-017 → CON-030 → CON-014`.
 CON-013 follows CON-014 and CON-031; CON-030 is already a
 transitive prerequisite through CON-014 and is not duplicated on CON-013.
 Lifecycle execution follows `CON-017 → CON-032` for result semantics, then
