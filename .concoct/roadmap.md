@@ -362,7 +362,8 @@ materially drifted.
 
 ## CON-017 — Separate protocol, policy, and project guidance
 
-- Status: `planned`
+- Status: `active`
+- Archive: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-004, CAP-006

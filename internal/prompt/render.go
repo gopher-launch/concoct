@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gopher-launch/concoct/internal/instruction"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
@@ -24,6 +25,10 @@ type roleSpec struct {
 }
 
 func Render(root string, request Request) ([]byte, error) {
+	effective, err := instruction.Compose(root)
+	if err != nil {
+		return nil, err
+	}
 	context, err := workflow.InspectPromptContext(root)
 	if err != nil {
 		return nil, err
@@ -127,6 +132,11 @@ func Render(root string, request Request) ([]byte, error) {
 		}
 		fmt.Fprintln(&b, "\n\nOrdering is deterministic presentation only. The CLI has not selected work; priority and semantic limitation compatibility remain Product Owner judgment.")
 	}
+	fmt.Fprintln(&b, "\n## Effective instruction sources")
+	for _, source := range effective.Sources {
+		fmt.Fprintf(&b, "\n- Layer `%s`; source `%s`", source.Layer, source.Path)
+	}
+	fmt.Fprintln(&b, "\n- Layer `task-context`; sources selected below for the active command")
 	fmt.Fprintln(&b, "\n## Exact inputs to read")
 	for _, path := range spec.reads {
 		fmt.Fprintf(&b, "\n- `%s`", path)
@@ -148,7 +158,7 @@ func Render(root string, request Request) ([]byte, error) {
 }
 
 func selectRole(root string, request Request, c workflow.PromptContext) (roleSpec, error) {
-	base := []string{"AGENTS.md", ".concoct/capabilities.md"}
+	base := []string{instruction.ProtocolPath, instruction.PolicyPath, instruction.GuidancePath, ".concoct/capabilities.md"}
 	switch request.Command {
 	case "next":
 		if c.Report.State != workflow.Ready {

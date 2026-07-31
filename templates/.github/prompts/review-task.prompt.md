@@ -1,10 +1,12 @@
 # Review active task
 
-Adopt the code reviewer persona in `.concoct/personas/code-reviewer.md` for this task.
+Adopt the Reviewer persona in `.concoct/personas/reviewer.md` for this task.
 
 Review the completed changes against:
 
 - `AGENTS.md`
+- `.concoct/protocol.md`
+- `.concoct/policy.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`
 
@@ -17,8 +19,8 @@ Produce a concise review covering:
 5. Any unrelated changes that should be separated.
 6. Whether the task is ready to archive.
 
-If useful, create or update:
+Reserve and create exactly the next sequential review:
 
 ```text
-.concoct/current/review.md
+.concoct/current/review-NN.md
 ```

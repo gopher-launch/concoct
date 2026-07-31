@@ -31,7 +31,7 @@ State is derived only from repository artifacts rooted at the project directory.
 
 State detection reads the smallest set of artifacts needed to establish a phase and validate its consistency:
 
-- `AGENTS.md` identifies a project with canonical project guidance.
+- `AGENTS.md` identifies a project through its repository-owned conventional entry point; `.concoct/protocol.md` and `.concoct/policy.md` provide the owned workflow layers.
 - `.concoct/capabilities.md` records accepted current behavior.
 - `.concoct/roadmap.md` records roadmap items, their stable identifiers, and their statuses.
 - `.concoct/current/task-plan.md` identifies the active task through `id`, `roadmap-id`, `status`, and `capability-impact` metadata. During remediation it also uses `remediates-review` to name the latest `changes-requested` review being addressed. After a blocked review, a `blocked-review-resolution` mapping names the exact blocked review, the authorized recorder, the resolution evidence, and whether the task returns to `code` or `review`.

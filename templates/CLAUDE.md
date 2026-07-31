@@ -1,8 +1,9 @@
 # CLAUDE.md
 
-Read and follow `AGENTS.md`.
+Read `.concoct/protocol.md`, `.concoct/policy.md`, and `AGENTS.md` in that order.
 
-`AGENTS.md` is the canonical project instruction file.
+`AGENTS.md` is the repository-owned conventional entry point; the protocol's
+protected controls cannot be weakened by policy or project guidance.
 
 Task prompts may select a role from `.concoct/personas/`. Read and adopt the selected persona for the current task. The persona supplements `AGENTS.md`; it does not override it.
 

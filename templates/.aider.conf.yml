@@ -1,11 +1,13 @@
 # Aider adapter for Concoct.
 #
-# AGENTS.md is the canonical project instruction file.
+# Protocol, policy, and AGENTS.md are the attributed instruction layers.
 # The planning files provide active task context.
 # Add the persona selected for the current role with Aider's --read option;
 # do not load multiple personas by default.
 
 read:
+  - .concoct/protocol.md
+  - .concoct/policy.md
   - AGENTS.md
   - .concoct/current/task-plan.md
   - .concoct/current/notes.md

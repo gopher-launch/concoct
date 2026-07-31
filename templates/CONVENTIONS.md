@@ -1,6 +1,6 @@
 # CONVENTIONS.md
 
-Read and follow `AGENTS.md`.
+Read `.concoct/protocol.md`, `.concoct/policy.md`, and `AGENTS.md` in that order.
 
 This file exists as a thin adapter for tools that prefer a generic conventions file.
 
@@ -17,6 +17,6 @@ Active task context lives in:
 .concoct/current/notes.md
 ```
 
-Role-specific working guidance lives in `.concoct/personas/`. Use the persona named by the current task prompt. Personas supplement the canonical instructions in `AGENTS.md`.
+Role-specific working guidance lives in `.concoct/personas/`. Use the persona named by the current task prompt after the attributed protocol, policy, and project-guidance layers.
 
 Use hyphens, not underscores, in file and directory names.

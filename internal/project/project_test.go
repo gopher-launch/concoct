@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gopher-launch/concoct/internal/instruction"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
@@ -18,7 +19,7 @@ func TestInitializeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Join(parent, "demo")
-	for _, path := range []string{"AGENTS.md", ".aider.conf.yml", ".codex/skills/concoct/SKILL.md", ".concoct/personas/developer.md", ".concoct/prompts/handoffs/task-planner-to-developer.md", ".concoct/current/bootstrap-prompt.md"} {
+	for _, path := range []string{"AGENTS.md", ".aider.conf.yml", ".codex/skills/concoct/SKILL.md", ".concoct/protocol.md", ".concoct/policy.md", ".concoct/personas/developer.md", ".concoct/prompts/handoffs/task-planner-to-developer.md", ".concoct/current/bootstrap-prompt.md"} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Errorf("missing %s: %v", path, err)
 		}
@@ -69,6 +70,27 @@ func TestInitializeEndToEnd(t *testing.T) {
 	}
 	if strings.Count(string(bootstrap), "Recommended next command: `concoct next`") != 1 || strings.Contains(string(bootstrap), "concoct roadmap or concoct plan") {
 		t.Fatalf("bootstrap does not recommend exactly concoct next: %s", bootstrap)
+	}
+}
+
+func TestInitializedGuidanceComposesWithoutMutation(t *testing.T) {
+	parent := t.TempDir()
+	if err := Initialize(parent, "layered", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "layered")
+	path := filepath.Join(root, "AGENTS.md")
+	custom := []byte("---\ninstruction-layer: project-guidance\nstrengthen-controls:\n  - evidence-integrity\n---\n# Custom project guidance\nexact bytes\n")
+	if err := os.WriteFile(path, custom, 0644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	if _, err := instruction.Compose(root); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Fatal("composition changed project-owned guidance")
 	}
 }
 

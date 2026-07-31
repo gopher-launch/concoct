@@ -24,11 +24,12 @@ than an ongoing dependency on a roadmap item.
 - Added by: `baseline inventory`
 - Archive: `.concoct/archive/2026-07-29-legacy-hitl-restructuring/` — baseline evidence; no approving review
 - Updated by: `.concoct/archive/2026-07-29-CON-003-command-contract-state-machine/`
+- Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
 - Documentation: `.codex/skills/concoct/SKILL.md`, `doc/workflow.md`
 
 ### Capability
 
-Concoct provides a Markdown-based workflow contract for moving substantial software work through product ownership, task planning, implementation, independent review, and archival. The contract defines canonical roadmap, capability, active-task, review, persona, prompt, and archive artifacts, their ownership, and the expected handoffs between roles. It also provides a normative reference for the initial command surface and an artifact-backed state machine covering valid transitions, remediation, blocked-review recovery, invalid evidence, and transactional archival.
+Concoct provides a Markdown-based workflow contract for moving substantial software work through product ownership, task planning, implementation, independent review, and archival. The contract separates non-overridable Concoct protocol, project-selected workflow policy, repository-owned project guidance, and active task context with explicit source attribution and artifact ownership. It defines canonical roadmap, capability, active-task, review, persona, prompt, and archive artifacts and provides an artifact-backed state machine covering valid transitions, remediation, blocked-review recovery, invalid evidence, and transactional archival.
 
 ### User value
 
@@ -59,6 +60,7 @@ The workflow produces and maintains human-readable roadmap, task-plan, notes, se
 - `doc/command-reference.md` defines the complete normative contract for the seven initial commands.
 - `doc/state-machine.md` defines workflow state from observable artifacts and specifies transitions, review recovery, invalid states, and archive atomicity.
 - `.concoct/archive/2026-07-29-CON-003-command-contract-state-machine/review-02.md` records approval of the command and state-machine contract.
+- `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/review-02.md` records approval of layered ownership, deterministic composition, and structural conflict validation.
 
 ### Related capabilities
 
@@ -108,16 +110,17 @@ Each prompt instructs an agent which persona and artifacts to read, which artifa
 
 ## CAP-003 — Reusable project workflow template
 
-- Status: `limited`
+- Status: `active`
 - Audience: `project maintainers`
 - Added by: `baseline inventory`
 - Archive: `.concoct/archive/2026-07-29-legacy-hitl-restructuring/` — baseline evidence; no approving review
 - Updated by: `.concoct/archive/2026-07-29-CON-005-go-cli-foundation/`
+- Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
 - Documentation: `README.md`, `templates/AGENTS.md`
 
 ### Capability
 
-Concoct supplies a reusable filesystem template for equipping another repository with canonical project instructions, Concoct workflow state, roadmap and capability schemas, role personas, transition prompts, and coding-agent adapters.
+Concoct supplies a reusable filesystem template for equipping another repository with a layered instruction contract, Concoct workflow state, roadmap and capability schemas, role personas, transition prompts, and coding-agent adapters. Concoct-owned protocol and default policy remain distinct from repository-owned `AGENTS.md` guidance.
 
 ### User value
 
@@ -133,9 +136,8 @@ The template defines conventional root files and tool adapters alongside Concoct
 
 ### Limitations
 
-- Several template references use older persona names that do not match the persona files currently shipped.
 - The API, code, and user writer persona files are empty.
-- Installed templates require project-specific customization before they constitute finished project guidance.
+- Repository conventions and product-specific guidance remain intentionally project-owned and may require project-specific customization.
 
 ### Verification evidence
 
@@ -155,11 +157,12 @@ The template defines conventional root files and tool adapters alongside Concoct
 - Audience: `developers using coding agents`
 - Added by: `baseline inventory`
 - Archive: `.concoct/archive/2026-07-29-legacy-hitl-restructuring/` — baseline evidence; no approving review
+- Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
 - Documentation: `doc/multi-agent-workflow.md`
 
 ### Capability
 
-Concoct provides thin adapters that direct Codex, Claude Code, GitHub Copilot, Aider, and tools that read a generic conventions file toward the same repository-owned instructions and active task context.
+Concoct provides thin adapters that direct Codex, Claude Code, GitHub Copilot, Aider, and tools that read a generic conventions file through the same attributed protocol, policy, repository guidance, personas, and active task context.
 
 ### User value
 
@@ -171,12 +174,11 @@ The adapter appropriate to the user's tool and the canonical files installed in 
 
 ### Outputs and effects
 
-The adapters point tools to `AGENTS.md`, `.concoct/current/task-plan.md`, `.concoct/current/notes.md`, and role guidance where supported.
+The adapters point tools to `AGENTS.md`, Concoct-owned protocol and policy, `.concoct/current/task-plan.md`, `.concoct/current/notes.md`, and role guidance where supported.
 
 ### Limitations
 
 - Adapters provide instructions only; they do not launch agents or enforce workflow transitions.
-- Some GitHub prompt templates refer to older persona filenames and need manual correction before those particular prompts can be used as written.
 
 ### Verification evidence
 
@@ -245,13 +247,17 @@ Project maintainers can bootstrap the workflow reliably from an installed binary
 - Added by: `.concoct/archive/2026-07-30-CON-006-deterministic-prompt-rendering/`
 - Updated by: `.concoct/archive/2026-07-30-CON-015-isolate-integrate-git-tasks/`
 - Updated by: `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/`
+- Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
 - Documentation: `README.md`, `doc/command-reference.md`, `doc/state-machine.md`
 
 ### Capability
 
 Concoct can render complete, deterministic prompts for Product Owner roadmap
 intake, task planning, development, independent review, and accepted archival
-from validated repository state. It selects the applicable persona and
+from validated repository state. Rendering first composes attributed protocol,
+policy, and project-guidance sources in deterministic order, rejects malformed,
+unsupported, conflicting, or invariant-weakening structural declarations without
+partial output, and preserves project-guidance bytes. It then selects the applicable persona and
 workflow mode, including implementation continuation, changes-requested
 remediation, blocked-review recovery routes, and Git-aware archival guidance.
 
@@ -292,6 +298,8 @@ rules.
 - Output files are create-only and existing destinations are never overwritten.
 - Archive-summary relevance is selected conservatively from identifiers in
   validated task and command context because no archive index exists.
+- Free-form prose is source-attributed but cannot be checked exhaustively for
+  semantic contradictions; suspected prose conflicts require human reconciliation.
 
 ### Verification evidence
 

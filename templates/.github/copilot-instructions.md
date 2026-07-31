@@ -1,8 +1,10 @@
 # GitHub Copilot Instructions
 
-Read and follow the repository's canonical agent instructions in `AGENTS.md`.
+Read `.concoct/protocol.md`, `.concoct/policy.md`, and the repository-owned
+`AGENTS.md` entry point, in that precedence order.
 
-Task prompts select a role from `.concoct/personas/`. Read and adopt the selected persona for that task; `AGENTS.md` remains authoritative if instructions conflict.
+Task prompts select a role from `.concoct/personas/`. Read and adopt the selected
+persona after the layered sources. Do not weaken protected protocol controls.
 
 For substantial implementation tasks, use the active planning files:
 

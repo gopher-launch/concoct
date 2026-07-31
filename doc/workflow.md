@@ -52,7 +52,7 @@ Concoct's source assets live in this repository's root-level directories. Projec
 
 The roles may be handled by different tools or by the same tool in different modes.
 
-Each role has reusable guidance under `.concoct/personas/`. A task prompt selects the appropriate persona; the persona supplements the canonical project instructions and active task context.
+Each role has reusable guidance under `.concoct/personas/`. A task prompt selects the appropriate persona after composing the attributed protocol, policy, repository guidance, and active task context described in `instruction-layers.md`.
 
 ## Durable files
 
@@ -130,9 +130,9 @@ CONVENTIONS.md
 
 Use one role persona at a time for the primary work being performed:
 
-- `.concoct/personas/planner.md` for creating or materially revising a plan
-- `.concoct/personas/code-developer.md` for implementation
-- `.concoct/personas/code-reviewer.md` for independent review
+- `.concoct/personas/task-planner.md` for creating or materially revising a plan
+- `.concoct/personas/developer.md` for implementation
+- `.concoct/personas/reviewer.md` for independent review
 - `.concoct/personas/doc-technical-writer-user.md` for end-user documentation
 - `.concoct/personas/doc-technical-writer-api.md` for API documentation
 - `.concoct/personas/doc-technical-writer-code.md` for code-oriented developer documentation

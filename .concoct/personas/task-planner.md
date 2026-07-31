@@ -62,7 +62,8 @@ Treat `.concoct/capabilities.md` as the current accepted product truth.
 
 Treat the selected roadmap item as the authoritative product outcome.
 
-Treat `AGENTS.md` as the canonical repository guidance.
+Treat `.concoct/protocol.md`, `.concoct/policy.md`, and repository-owned
+`AGENTS.md` as the attributed effective instruction layers, in that order.
 
 Treat archived artifacts as historical evidence, not automatically binding instructions.
 

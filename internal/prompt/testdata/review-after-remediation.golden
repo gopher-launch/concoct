@@ -6,6 +6,13 @@
 - Latest review: `review-01.md` (`changes-requested`)
 - Next review artifact: `.concoct/current/review-02.md`
 
+## Effective instruction sources
+
+- Layer `protocol`; source `.concoct/protocol.md`
+- Layer `policy`; source `.concoct/policy.md`
+- Layer `project-guidance`; source `AGENTS.md`
+- Layer `task-context`; sources selected below for the active command
+
 ## Exact inputs to read
 
 - `.concoct/capabilities.md`
@@ -13,6 +20,8 @@
 - `.concoct/current/review-01.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/personas/reviewer.md`
+- `.concoct/policy.md`
+- `.concoct/protocol.md`
 - `AGENTS.md`
 - `complete Git diff and relevant source, tests, and documentation`
 

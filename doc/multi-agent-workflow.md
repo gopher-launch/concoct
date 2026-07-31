@@ -36,7 +36,9 @@ Different agents may use different instruction mechanisms.
 Recommended adapters:
 
 ```text
-AGENTS.md                         # canonical shared instructions
+.concoct/protocol.md              # protected workflow controls
+.concoct/policy.md                # selected lifecycle policy
+AGENTS.md                         # repository-owned shared guidance
 CLAUDE.md                         # Claude Code adapter
 CONVENTIONS.md                    # generic adapter for tools that read convention files
 .aider.conf.yml                   # Aider adapter
@@ -56,7 +58,7 @@ The prompt for each role should explicitly select its persona from `.concoct/per
 
 ### Planner
 
-Persona: `.concoct/personas/planner.md`
+Persona: `.concoct/personas/task-planner.md`
 
 Owns:
 
@@ -73,7 +75,7 @@ Responsibilities:
 
 ### Implementer
 
-Persona: `.concoct/personas/code-developer.md`
+Persona: `.concoct/personas/developer.md`
 
 Owns:
 
@@ -96,7 +98,7 @@ Responsibilities:
 
 ### Reviewer
 
-Persona: `.concoct/personas/code-reviewer.md`
+Persona: `.concoct/personas/reviewer.md`
 
 Owns:
 
@@ -108,10 +110,10 @@ Owns:
 May create:
 
 ```text
-.concoct/current/review.md
+.concoct/current/review-NN.md
 ```
 
-Only create `review.md` when there is a meaningful separate review phase.
+Create the next zero-padded sequential review only during an independent review phase.
 
 ### Archivist
 
@@ -187,7 +189,7 @@ AGENTS.md
 If present, also read:
 
 ```text
-.concoct/current/review.md
+.concoct/current/review-NN.md
 ```
 
 ## Practical recommendation

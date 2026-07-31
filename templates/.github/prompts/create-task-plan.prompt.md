@@ -3,9 +3,11 @@
 Read and follow:
 
 - `AGENTS.md`
-- `.concoct/personas/planner.md`
+- `.concoct/protocol.md`
+- `.concoct/policy.md`
+- `.concoct/personas/task-planner.md`
 
-Adopt the planner persona in `.concoct/personas/planner.md` for this task.
+Adopt the Task Planner persona in `.concoct/personas/task-planner.md` for this task.
 
 Inspect the repository and turn the requested idea into implementation-ready contents for:
 

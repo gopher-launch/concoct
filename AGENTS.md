@@ -1,4 +1,20 @@
+---
+instruction-layer: project-guidance
+---
+
 # AGENTS.md
+
+## Instruction entry point
+
+Read these sources in precedence order before substantial work:
+
+1. `.concoct/protocol.md` — non-overridable Concoct controls.
+2. `.concoct/policy.md` — project-selected workflow policy.
+3. `AGENTS.md` — repository-owned guidance (this file).
+4. The selected persona and `.concoct/current/` task context.
+
+Project guidance may add stricter compatible requirements but may not weaken
+protocol controls. Concoct preserves this file as project-owned content.
 
 ## Project
 

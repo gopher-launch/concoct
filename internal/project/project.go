@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	concoct "github.com/gopher-launch/concoct"
+	"github.com/gopher-launch/concoct/internal/instruction"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
@@ -85,6 +86,9 @@ func Initialize(base, target string, out io.Writer) (err error) {
 	}
 	if _, err = Discover(target); err != nil {
 		return fmt.Errorf("validate initialized project: %w", err)
+	}
+	if _, err = instruction.Compose(target); err != nil {
+		return fmt.Errorf("validate initialized instruction layers: %w", err)
 	}
 	report := workflow.Detect(target)
 	if report.State != workflow.Ready {

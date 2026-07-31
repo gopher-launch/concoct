@@ -179,7 +179,9 @@ role-authored evidence; they never generate implementation or review judgment.
 Generated projects use a stable, agent-neutral contract:
 
 ```text
-AGENTS.md                          # canonical project instructions
+AGENTS.md                          # repository-owned instruction entry point
+.concoct/protocol.md               # Concoct-owned protected controls
+.concoct/policy.md                 # project-selected workflow policy
 .concoct/capabilities.md          # accepted product behavior
 .concoct/roadmap.md               # intended future outcomes
 .concoct/personas/                # role-specific guidance
@@ -198,6 +200,9 @@ CONVENTIONS.md
 .github/prompts/
 .codex/skills/concoct/SKILL.md
 ```
+
+See [instruction layers](doc/instruction-layers.md) for ownership, precedence,
+validation, source attribution, and legacy reconciliation.
 
 Concoct-owned state lives under `.concoct/`; conventional instructions and
 tool configuration remain at the generated project root.

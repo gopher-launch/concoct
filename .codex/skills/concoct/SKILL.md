@@ -25,23 +25,30 @@ human input
                       → product-owner / next task
 ```
 
-## Canonical instructions
+## Effective instructions
 
-Read and follow:
+Read and follow in precedence order:
 
 ```text
+.concoct/protocol.md
+.concoct/policy.md
 AGENTS.md
+selected persona and active task context
 ```
 
-`AGENTS.md` is the canonical project instruction file.
-
-Personas, prompts, plans, notes, reviews, roadmaps, capabilities, and archives supplement `AGENTS.md`. They do not override higher-priority instructions.
+The protocol is Concoct-owned and non-overridable. Policy is project-selected.
+`AGENTS.md` is repository-owned project guidance and the conventional entry
+point. Project guidance may strengthen protocol controls but may not weaken
+them. Rendered prompts attribute all layers and remain guidance rather than
+completed role evidence.
 
 ## Canonical artifacts
 
 Use these files in the project root:
 
-- `AGENTS.md` — standing repository instructions
+- `.concoct/protocol.md` — Concoct-owned invariant controls
+- `.concoct/policy.md` — project-selected lifecycle policy
+- `AGENTS.md` — repository-owned standing guidance and entry point
 - `.concoct/capabilities.md` — current accepted product capabilities
 - `.concoct/roadmap.md` — intended future product work
 - `.concoct/current/task-plan.md` — active implementation plan

@@ -88,6 +88,35 @@ func TestRenderRejectsWrongStateAndUnsatisfiedDependency(t *testing.T) {
 	}
 }
 
+func TestRenderRejectsInvariantWeakeningWithoutPartialOutput(t *testing.T) {
+	root := fixture(t, "", "", "")
+	write(t, filepath.Join(root, "AGENTS.md"), "---\ninstruction-layer: project-guidance\nweaken-controls:\n  - evidence-integrity\n---\n# Agents\n")
+	got, err := Render(root, Request{Command: "next"})
+	if err == nil || !strings.Contains(err.Error(), "evidence-integrity") {
+		t.Fatalf("weakening error = %v", err)
+	}
+	if got != nil {
+		t.Fatalf("partial prompt returned: %q", got)
+	}
+}
+
+func TestRenderRejectsPolicyProjectConflictWithoutPartialOutput(t *testing.T) {
+	root := fixture(t, "", "", "")
+	write(t, filepath.Join(root, "AGENTS.md"), "---\ninstruction-layer: project-guidance\ngit-strategy: direct-main\n---\n# Agents\n")
+	got, err := Render(root, Request{Command: "next"})
+	if err == nil {
+		t.Fatal("expected policy/project conflict")
+	}
+	for _, want := range []string{"project-guidance", "AGENTS.md", "git-strategy", "policy layer", ".concoct/policy.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+	if got != nil {
+		t.Fatalf("partial prompt returned: %q", got)
+	}
+}
+
 func TestNextCoversNoActionableWork(t *testing.T) {
 	root := fixture(t, "", "", "")
 	write(t, filepath.Join(root, ".concoct/roadmap.md"), "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n")
@@ -240,7 +269,9 @@ func TestPlanIncludesAcceptedPrerequisiteContextAndArchive(t *testing.T) {
 func fixture(t *testing.T, status, reviewStatus, extra string) string {
 	t.Helper()
 	root := t.TempDir()
-	write(t, filepath.Join(root, "AGENTS.md"), "# Agents\n")
+	write(t, filepath.Join(root, "AGENTS.md"), "---\ninstruction-layer: project-guidance\n---\n# Agents\n")
+	write(t, filepath.Join(root, ".concoct/protocol.md"), "---\ninstruction-layer: protocol\nprotected-controls:\n  - completed-review-immutability\n  - evidence-integrity\n  - invalid-state-refusal\n  - workflow-artifact-ownership\n---\n# Protocol\n")
+	write(t, filepath.Join(root, ".concoct/policy.md"), "---\ninstruction-layer: policy\nrequired-phases:\n  - planning\napproval-gates:\n  - independent-review\ngit-strategy: task-branch\n---\n# Policy\n")
 	roadStatus := "planned"
 	if status != "" {
 		roadStatus = "active"

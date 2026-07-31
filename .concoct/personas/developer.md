@@ -53,7 +53,8 @@ Before making changes, read:
 - relevant project documentation
 - relevant archive artifacts when referenced by the plan
 
-Treat `AGENTS.md` as the canonical project guidance.
+Treat `.concoct/protocol.md`, `.concoct/policy.md`, and repository-owned
+`AGENTS.md` as the attributed effective instruction layers, in that order.
 
 Treat `.concoct/current/task-plan.md` as the authoritative implementation scope.
 

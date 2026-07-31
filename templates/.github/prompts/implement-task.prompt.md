@@ -3,11 +3,13 @@
 Read and follow:
 
 - `AGENTS.md`
-- `.concoct/personas/code-developer.md`
+- `.concoct/protocol.md`
+- `.concoct/policy.md`
+- `.concoct/personas/developer.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`
 
-Adopt the code developer persona in `.concoct/personas/code-developer.md` for this task.
+Adopt the Developer persona in `.concoct/personas/developer.md` for this task.
 
 Then inspect the repository before making code changes.
 
