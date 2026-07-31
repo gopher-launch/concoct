@@ -1354,7 +1354,8 @@ requires intervention.
 
 ## CON-035 — Adopt the Gopher Launch repository identity
 
-- Status: `planned`
+- Status: `active`
+- Delivery: pending integration; archived evidence at `.concoct/archive/2026-07-31-CON-035-adopt-the-gopher-launch-repository-identity/`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-005

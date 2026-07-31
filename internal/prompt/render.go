@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cthain/concoct/internal/workflow"
+	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
 type Request struct {

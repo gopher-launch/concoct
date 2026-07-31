@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cthain/concoct/internal/gitrepo"
-	"github.com/cthain/concoct/internal/workflow"
+	"github.com/gopher-launch/concoct/internal/gitrepo"
+	"github.com/gopher-launch/concoct/internal/workflow"
 	"gopkg.in/yaml.v3"
 )
 

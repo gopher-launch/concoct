@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	concoct "github.com/cthain/concoct"
-	"github.com/cthain/concoct/internal/workflow"
+	concoct "github.com/gopher-launch/concoct"
+	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
 func Discover(start string) (string, error) {

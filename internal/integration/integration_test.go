@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cthain/concoct/internal/workflow"
+	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
 func TestLocalIntegrationAndCleanup(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cthain/concoct/internal/project"
+	"github.com/gopher-launch/concoct/internal/project"
 )
 
 func TestPromptStdoutAndFileOutputAreIdenticalAndNonDestructive(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cthain/concoct/internal/cli"
+	"github.com/gopher-launch/concoct/internal/cli"
 )
 
 func main() {

@@ -197,16 +197,24 @@ tool configuration remain at the generated project root.
 This repository currently provides source-build and source-checkout usage; it
 does not claim a packaged release channel.
 
+Install the current pre-release command directly from the canonical repository:
+
+```bash
+go install github.com/gopher-launch/concoct/cmd/concoct@main
+```
+
+Or build from a local checkout:
+
 ```bash
 go build -o ./bin/concoct ./cmd/concoct
 ./bin/concoct init ../my-new-project
 ```
 
-From this checkout, `./cmd/concoct/concoct` is a thin compatibility wrapper
+From this checkout, `./cmd/concoct/concoct.sh` is a thin compatibility wrapper
 around the same Go implementation:
 
 ```bash
-./cmd/concoct/concoct init ../my-new-project
+./cmd/concoct/concoct.sh init ../my-new-project
 ```
 
 ## Repository layout
@@ -228,7 +236,7 @@ around the same Go implementation:
 go test ./...
 go vet ./...
 go build ./cmd/concoct
-bash -n cmd/concoct/concoct
+bash -n cmd/concoct/concoct.sh
 ```
 
 Use hyphens rather than underscores in file and directory names. Keep
@@ -236,9 +244,8 @@ conventional, long-lived files such as `AGENTS.md`, `README.md`, `CHANGELOG.md`,
 and `CONTRIBUTING.md` at the root; use lowercase hyphenated Markdown filenames
 for task and workflow artifacts.
 
-## Manual repository rename
+## Canonical repository
 
-The local content is branded for the intended repository name `concoct`. A
-repository owner must still rename the GitHub repository, update its
-description and topics, confirm clone URL redirects, and update local remotes
-where needed.
+Concoct's canonical repository and Go module are
+`github.com/gopher-launch/concoct`. This source tree retains its existing Git
+history under the Gopher Launch organization.

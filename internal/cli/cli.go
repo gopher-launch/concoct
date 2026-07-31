@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cthain/concoct/internal/gitrepo"
-	"github.com/cthain/concoct/internal/integration"
-	"github.com/cthain/concoct/internal/project"
-	"github.com/cthain/concoct/internal/prompt"
-	"github.com/cthain/concoct/internal/workflow"
+	"github.com/gopher-launch/concoct/internal/gitrepo"
+	"github.com/gopher-launch/concoct/internal/integration"
+	"github.com/gopher-launch/concoct/internal/project"
+	"github.com/gopher-launch/concoct/internal/prompt"
+	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
 const usage = `Usage:

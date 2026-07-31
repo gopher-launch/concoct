@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cthain/concoct/internal/gitrepo"
+	"github.com/gopher-launch/concoct/internal/gitrepo"
 	"gopkg.in/yaml.v3"
 )
 
