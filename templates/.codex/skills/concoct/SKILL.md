@@ -270,8 +270,10 @@ Before finishing:
 Then recommend:
 
 ```text
-concoct review
+concoct code --complete
 ```
+
+After validation succeeds, recommend `concoct review`.
 
 ### Developer to Reviewer
 
@@ -289,6 +291,9 @@ Read:
 - relevant code, tests, and documentation.
 
 Create the next sequential review file.
+
+Use `concoct review --reserve` to claim its create-only path and
+`concoct review --complete` after authoring exactly one valid outcome.
 
 Assess:
 
@@ -338,7 +343,8 @@ After remediation:
 - update the task plan;
 - update notes;
 - add a fresh reviewer handoff;
-- recommend `concoct review`.
+- recommend `concoct code --complete`, followed by `concoct review` after
+  validation succeeds.
 
 ### Reviewer blocked
 

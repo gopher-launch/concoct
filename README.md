@@ -94,8 +94,10 @@ concoct code
 
 `code` renders the Developer prompt for the active task. A developer or coding
 agent follows it to make the scoped changes, run checks, record decisions and
-results, commit the complete transition on the task branch, and leave a durable
-handoff for review.
+results, and leave a durable handoff for review. Finish the authored transition
+with `concoct code --complete`; Concoct validates role ownership and resulting
+workflow evidence, including a handoff changed from the committed version, then
+commits the complete Git-backed transition once.
 
 ### 4. Review independently
 
@@ -103,9 +105,11 @@ handoff for review.
 concoct review
 ```
 
-`review` renders guidance for an independent Reviewer and identifies the next
-append-only review file. The Reviewer inspects the complete change and records
-exactly one outcome: `approved`, `changes-requested`, or `blocked`.
+`review` renders guidance for an independent Reviewer. Run
+`concoct review --reserve` to create the next append-only review path
+exclusively from the validated clean task checkout, complete that reservation
+with exactly one outcome (`approved`,
+`changes-requested`, or `blocked`), then run `concoct review --complete`.
 
 When changes are requested, run `concoct code` again. The Developer addresses
 each finding without rewriting prior reviews, records every disposition, and
@@ -162,7 +166,9 @@ Role commands (`next`, `roadmap`, `plan`, `code`, `review`, and `archive`) write
 deterministic prompts to standard output. Pass `--output <path>` to create a new
 file containing the same bytes. Output is create-only: Concoct refuses to
 overwrite an existing file. Prompt rendering validates its starting state but
-does not persist the selected role's work.
+does not persist the selected role's work. The explicit `code --complete`,
+`review --reserve`, and `review --complete` boundaries validate and persist
+role-authored evidence; they never generate implementation or review judgment.
 
 ## What Concoct installs
 

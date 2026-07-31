@@ -47,7 +47,17 @@ func (r *Repository) run(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (r *Repository) Head() (string, error) { return r.run("rev-parse", "HEAD") }
+func (r *Repository) Head() (string, error)              { return r.run("rev-parse", "HEAD") }
+func (r *Repository) LastCommitSubject() (string, error) { return r.run("log", "-1", "--format=%s") }
+func (r *Repository) FileAt(ref, path string) ([]byte, error) {
+	c := exec.Command("git", "show", ref+":"+path)
+	c.Dir = r.Root
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git show %s:%s: %w: %s", ref, path, err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
 func (r *Repository) Branch() (string, error) {
 	return r.run("symbolic-ref", "--quiet", "--short", "HEAD")
 }

@@ -20,8 +20,8 @@ upstreams remain local success.
 ## Contract status
 
 This reference defines the implemented command surface and its durable workflow
-contract. Role commands render guidance; `init`, Git-backed `plan`, and
-`integrate` perform the explicitly documented mutations.
+contract. Role commands render guidance; explicit code/review completion,
+Git-backed `plan`, and `integrate` perform the documented mutations.
 
 Workflow state names and transition validity are defined in [state-machine.md](state-machine.md). Project-relative paths in this reference are resolved from the Concoct-enabled project root.
 
@@ -359,7 +359,7 @@ Developer. In `review-changes-requested`, the prompt explicitly selects review-r
 
 ### Files created or updated
 
-The command itself updates none. During the role session, the Developer may update source, tests, task-required documentation, the task plan's technical details and phase statuses, and notes. The Developer must not update roadmap, capabilities, archived artifacts, or completed reviews.
+Plain `concoct code` updates nothing. During the role session, the Developer may update source, tests, task-required documentation, the task plan's technical details and phase statuses, and notes. The Developer must not update roadmap, capabilities, archived artifacts, or completed reviews. `concoct code --complete` validates that both task plan and notes changed, requires a complete reviewer handoff whose final handoff section differs from the version committed at `HEAD`, rejects forbidden workflow paths, and validates the resulting state before committing one Git-backed transition. Thus an unrelated notes edit cannot reuse a stale handoff. A clean retry reuses that exact completion commit. Non-Git tasks have no committed baseline to compare, so their artifact-level rule requires the final handoff section and all required headings in the current notes.
 
 Work begins by persisting task status `implementation-in-progress`. In remediation mode the task metadata also sets `remediates-review` to the exact latest `changes-requested` review. Successful completion records `implementation-complete`, verification evidence, and a reviewer handoff. Remediation records each finding as fixed, partially fixed, disputed with evidence, obsolete, or blocked; a completed remediation without dispositions for every finding is invalid.
 
@@ -384,7 +384,8 @@ Errors name the missing evidence or correct next role. Prior reviews remain unch
 
 ### Recommended next commands
 
-- `concoct review` after implementation completes.
+- `concoct code --complete` after authoring a complete Developer transition.
+- `concoct review` after completion validation succeeds.
 - `concoct code` to resume persisted in-progress work.
 - The responsible role or human handoff when work is blocked by scope, product intent, or authorization.
 
@@ -417,9 +418,20 @@ Reviewer.
 
 ### Files created or updated
 
-The command itself updates none and deterministically reserves or identifies the next collision-free sequence without creating a completed review. During the role session, the Reviewer creates exactly the next `.concoct/current/review-NN.md` with matching metadata and one outcome. A new review supersedes any task-level `remediates-review` reference for state detection; that stale field is removed during the next Developer-owned task-plan update when another remediation cycle begins. The Reviewer does not implement fixes, edit prior reviews, approve via notes, or update roadmap and capabilities.
+Plain `concoct review` updates nothing and identifies the next sequence.
+`concoct review --reserve` exclusively creates that exact path with recognizable
+`reserved` metadata, but only after validating the recorded Git trunk and base,
+attached task branch, clean worktree, and absence of another Git operation. A
+reservation is incomplete and does not advance state.
+The Reviewer replaces the reserved status with one supported outcome and adds
+the required review evidence. `concoct review --complete` accepts only that one
+review path, validates its matching task, number, persona, date, and exactly one
+documented outcome, then commits one Git-backed review transition. Prior reviews
+and Developer-owned files remain unchanged, and a clean retry reuses the exact
+review commit.
 
-If safe sequence reservation requires a durable mechanism, its design belongs to CON-008; incomplete reservations must not be mistaken for completed reviews.
+Malformed or abandoned reservations are preserved for inspection. Restore the
+generated reservation or complete it; Concoct never overwrites or renumbers it.
 
 ### Prompt produced
 

@@ -181,6 +181,13 @@ Resolving a blocker is an explicit handoff under the responsible role. Product O
 
 - `status` never changes workflow artifacts.
 - Successful prompt rendering by `next`, `roadmap`, `plan`, `code`, `review`, or `archive` never changes workflow state by itself.
+- `code --complete` validates Developer-owned output as a coherent whole before
+  committing it, including a Git-backed freshness comparison for the final
+  reviewer handoff section. Non-Git completion requires the complete current
+  handoff artifact because no committed baseline exists. `review --reserve`
+  validates the clean recorded Git entry boundary before creating only the next
+  incomplete review path; `review --complete` validates and commits its single
+  outcome.
 - Product Owner work that changes roadmap content but creates no active task leaves state `ready`.
 - A failed validation, prompt rendering, or role precondition check leaves state unchanged.
 - Inspection, blocker routing, and recovery diagnostics are non-mutating unless the responsible role deliberately repairs an owned artifact.

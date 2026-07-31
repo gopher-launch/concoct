@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-07-30
+updated: 2026-07-31
 ---
 
 # Capabilities
@@ -534,11 +534,89 @@ to an existing workflow command.
 - `CAP-006` supplies deterministic role-aware prompt rendering.
 - `CAP-008` supplies the shared structural planning-eligibility authority.
 
+## CAP-010 — Validated Developer and Reviewer completion
+
+- Status: `active`
+- Audience: `developers and coding agents`
+- Added by: `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/`
+- Documentation: `README.md`, `doc/command-reference.md`, `doc/state-machine.md`
+
+### Capability
+
+Concoct provides explicit, validated completion boundaries for Developer and
+Reviewer work while preserving ordinary `concoct code` and `concoct review`
+invocations as deterministic, read-only prompt rendering. It validates durable
+role-owned evidence through initial implementation, continuation, remediation,
+blocked-review recovery, sequential review reservation, and review
+finalization.
+
+### User value
+
+Humans and coding agents can advance the implementation and review loop through
+inspectable artifacts without false completion, overwritten reviews, stale
+handoffs, unsafe Git context, or manufactured role judgment.
+
+### Inputs
+
+- `concoct code --complete` accepts Developer-authored task-plan, notes,
+  implementation, test, and documentation changes from an eligible mode.
+- `concoct review --reserve` claims the exact next zero-padded review path from
+  implementation-complete state, and `concoct review --complete` accepts the
+  Reviewer-authored result at that reserved path.
+- Git-backed tasks require their recorded branch and base, a clean entry
+  boundary, and no unrelated Git operation. Non-Git tasks use the same artifact
+  contract without commit evidence.
+
+### Outputs and effects
+
+- Developer completion validates task status, mode-specific metadata, notes,
+  remediation dispositions where required, a complete reviewer handoff, review
+  immutability, allowed paths, and the resulting workflow state.
+- A valid review reservation is create-only and non-authoritative until the
+  same artifact is finalized with matching task, sequence, and persona metadata
+  plus exactly one supported outcome.
+- Completed reviews remain append-only, later review numbers are contiguous,
+  and the recorded outcome determines whether status recommends archive,
+  remediation, or blocker routing.
+- Complete Git-backed transitions are committed once and exact clean retries
+  reuse valid transition commits; invalid or interrupted work is preserved with
+  actionable recovery guidance.
+
+### Limitations
+
+- The CLI validates structural evidence and ownership boundaries but does not
+  implement code, write findings or dispositions, choose a review outcome, or
+  judge the semantic quality of role-authored content.
+- Non-Git repositories cannot prove changed paths or handoff freshness against
+  committed history, so they use resulting-artifact and handoff-completeness
+  validation.
+- Review reservation recovery is deliberately manual; malformed or abandoned
+  evidence is preserved rather than silently repaired or deleted.
+
+### Verification evidence
+
+- `internal/workflow/transition.go` implements Developer completion and
+  Reviewer reservation/finalization validation.
+- `internal/cli/transition_test.go` covers the complete loop, all review
+  outcomes, remediation, blocked recovery, ownership failures, reservation
+  collisions, Git boundaries and retries, stale handoffs, and non-Git parity.
+- `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/review-02.md`
+  records approval after focused boundary and handoff remediation.
+
+### Related capabilities
+
+- `CAP-001` defines the durable workflow and role-ownership contract.
+- `CAP-005` supplies project discovery and validated workflow status.
+- `CAP-006` supplies the state-preserving role prompts retained by these
+  completion commands.
+- `CAP-007` supplies the Git task identity and transition boundaries.
+- `CAP-008` supplies the validated active task from which implementation begins.
+
 ## Known capability gaps
 
-- Role commands render prompts and establish Git planning/integration
-  boundaries where applicable, but they do not directly execute persona work
-  or treat rendered guidance as role completion.
+- Role commands render prompts and validate explicit Developer and Reviewer
+  completion boundaries, but they do not directly execute persona work or
+  treat rendered guidance as role completion.
 - Direct agent execution, workflow diagnostics, recovery, history reporting,
   upgrades, and overlays remain roadmap intent rather than current capabilities.
 - Repository documentation and parts of the template retain stale paths and persona names from earlier layouts.

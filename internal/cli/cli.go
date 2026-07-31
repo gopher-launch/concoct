@@ -21,7 +21,10 @@ const usage = `Usage:
   concoct roadmap [--output <path>]
   concoct plan <roadmap-id> [--output <path>]
   concoct code [--output <path>]
+  concoct code --complete
   concoct review [--output <path>]
+  concoct review --reserve
+  concoct review --complete
   concoct archive [--output <path>]
   concoct integrate [--continue|--abort]
   concoct help
@@ -63,6 +66,12 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		return nil
 	case "next", "roadmap", "plan", "code", "review", "archive":
+		if (args[0] == "code" || args[0] == "review") && len(args) == 2 && args[1] == "--complete" {
+			return runRoleTransition(args[0], "complete", stdout)
+		}
+		if args[0] == "review" && len(args) == 2 && args[1] == "--reserve" {
+			return runRoleTransition(args[0], "reserve", stdout)
+		}
 		return runPrompt(args, stdout, stderr)
 	case "integrate":
 		mode := ""
@@ -89,6 +98,34 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprint(stderr, usage)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runRoleTransition(command, action string, stdout io.Writer) error {
+	base, err := callerDir()
+	if err != nil {
+		return err
+	}
+	root, err := project.Discover(base)
+	if err != nil {
+		return err
+	}
+	var result workflow.TransitionResult
+	if command == "code" {
+		result, err = workflow.CompleteDeveloper(root)
+	} else if action == "reserve" {
+		result, err = workflow.ReserveReview(root)
+	} else {
+		result, err = workflow.CompleteReview(root)
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, result.Message)
+	if result.Committed {
+		fmt.Fprintf(stdout, "Commit: %s\n", result.Commit)
+	}
+	fmt.Fprint(stdout, workflow.Detect(root).String())
+	return nil
 }
 
 func runPrompt(args []string, stdout, stderr io.Writer) error {

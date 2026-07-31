@@ -22,8 +22,8 @@ Review independently against:
 
 Run relevant checks where practical.
 
-Create the next sequential:
-`.concoct/current/review-NN.md`
+Run `concoct review --reserve`, then complete the exact reserved sequential
+`.concoct/current/review-NN.md`.
 
 Use exactly one outcome:
 - `approved`
@@ -41,6 +41,8 @@ Also assess:
 - prior finding disposition.
 
 Do not implement fixes, edit prior reviews, update roadmap/capabilities, or archive.
+
+Finalize the authored review with `concoct review --complete`.
 
 Next:
 - approved → `concoct archive`

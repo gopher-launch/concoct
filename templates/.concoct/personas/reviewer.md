@@ -56,7 +56,8 @@ Treat prior reviews as context, not conclusions you must inherit.
 
 ## Canonical output
 
-Create the next review artifact:
+Reserve the next review artifact with `concoct review --reserve`, then complete
+that exact path:
 
 ```text
 .concoct/current/review-NN.md
@@ -69,6 +70,9 @@ review-01.md
 review-02.md
 review-03.md
 ```
+
+After recording exactly one outcome, run `concoct review --complete` to
+validate role ownership and commit the Git-backed transition.
 
 Once completed, a review artifact is append-only and reviewer-owned.
 

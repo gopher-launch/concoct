@@ -275,11 +275,18 @@ At completion, add a handoff section to `notes.md` containing:
 ### Suggested review focus
 ```
 
+For Git-backed tasks, this final handoff section must differ from the version
+committed at `HEAD`; editing unrelated notes does not make an old handoff fresh.
+Non-Git tasks have no committed comparison point, so completion validates the
+complete final handoff section in the current notes as artifact-level evidence.
+
 The recommended next command is:
 
 ```text
-concoct review
+concoct code --complete
 ```
+
+After completion validation succeeds, recommend `concoct review`.
 
 ## Interaction with other personas
 

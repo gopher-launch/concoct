@@ -34,7 +34,7 @@ Before finishing:
 - add `## Handoff to reviewer` covering implementation, decisions, files changed, checks, risks, skipped work, capability impact, and suggested review focus.
 
 Recommend:
-`concoct review`
+`concoct code --complete`, then `concoct review` after validation succeeds
 
 For a Git-backed task, commit the complete implementation transition on the
 recorded task branch before review. Role entry requires an empty

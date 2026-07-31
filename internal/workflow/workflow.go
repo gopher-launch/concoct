@@ -680,6 +680,12 @@ func readReviews(cur string) ([]review, []string, error) {
 		} else if meta.Persona != "reviewer" {
 			diags = append(diags, n+": field persona must be reviewer")
 		}
+		if meta.Status == reservationStatus {
+			if !strings.Contains(string(data), "Replace status: reserved") || strings.Contains(string(data), "## Outcome") {
+				diags = append(diags, n+": malformed review reservation; restore the generated reservation or complete the review")
+			}
+			continue
+		}
 		if meta.Status != "approved" && meta.Status != "changes-requested" && meta.Status != "blocked" {
 			diags = append(diags, n+": outcome must be approved, changes-requested, or blocked")
 		}

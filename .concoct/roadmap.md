@@ -76,7 +76,8 @@ concoct plan <roadmap-id>
 
 ## CON-008 — Implement code and review transitions
 
-- Status: `planned`
+- Status: `active`
+- Delivery: pending integration; archived evidence at `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007, CAP-008
