@@ -62,9 +62,9 @@ Delivered and cancelled items leave the active roadmap after their relationships
 are reconciled. Their identifiers remain reserved and must not be reused.
 
 Reserved historical identifiers: `CON-003`, `CON-004`, `CON-005`, `CON-006`,
-`CON-007`, `CON-008`, `CON-015`, `CON-028`, `CON-029`, `CON-035`. Accepted
-delivery evidence is preserved by the corresponding capability records and
-archives; CON-004 was cancelled as redundant and has no delivery archive.
+`CON-007`, `CON-008`, `CON-009`, `CON-015`, `CON-028`, `CON-029`, `CON-035`.
+Accepted delivery evidence is preserved by the corresponding capability records
+and archives; CON-004 was cancelled as redundant and has no delivery archive.
 
 A roadmap item should describe a coherent outcome. Detailed implementation steps belong in the task plan created by:
 
@@ -74,89 +74,12 @@ concoct plan <roadmap-id>
 
 ---
 
-## CON-009 — Implement archive and capability reconciliation
-
-- Status: `delivered`
-- Archive: `.concoct/archive/2026-07-31-CON-009-implement-archive-and-capability-reconciliation/`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-010
-- Capability impact: automates accepted-task archival and product-truth reconciliation across Git-backed and non-Git lifecycles
-
-### Outcome
-
-Implement:
-
-```text
-concoct archive
-```
-
-as the acceptance boundary between completed work and current product truth.
-
-### Requirements
-
-Archive must:
-
-- require an approved review by default;
-- support a deliberate override only when explicitly requested;
-- inspect the completed task, notes, reviews, and repository changes;
-- determine or validate capability impact;
-- update `.concoct/capabilities.md`;
-- move current task artifacts into a dated archive directory;
-- create `summary.md`;
-- preserve pending delivery and active task evidence for Git-backed tasks until
-  `concoct integrate` completes the accepted integration;
-- update the roadmap item to `delivered` and clear `.concoct/current/` only at
-  the lifecycle's accepted delivery boundary;
-- leave non-Git projects ready for the next task after successful archival.
-
-### Archive structure
-
-```text
-.concoct/archive/YYYY-MM-DD-roadmap-id-short-task-name/
-  task-plan.md
-  notes.md
-  review-01.md
-  review-02.md
-  summary.md
-```
-
-### Summary requirements
-
-Include:
-
-- task and roadmap identifier;
-- delivered outcome;
-- key decisions;
-- files changed;
-- checks run;
-- review result;
-- capability changes;
-- skipped work;
-- follow-up work.
-
-### Acceptance criteria
-
-- Archive refuses unapproved work by default.
-- Capability truth is reconciled transactionally.
-- Git-backed archival ends in `archived`, preserves current task evidence, and
-  recommends `concoct integrate` without claiming delivery.
-- Non-Git archival marks delivery, clears current artifacts, and returns the
-  repository to `ready` after all durable writes succeed.
-- Successful Git integration performs final delivery bookkeeping and clears
-  current artifacts according to the accepted Git lifecycle in CAP-007.
-- Roadmap, capabilities, and archive remain cross-referenced.
-- Interrupted archival or integration remains recoverable without premature
-  capability or roadmap claims.
-
----
-
 ## CON-010 — Execute one recommended action through an agent adapter
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-009, CON-018, CON-030, CON-031, CON-032
-- Capability prerequisites: CAP-005, CAP-006, CAP-007, CAP-008, CAP-009
+- Depends on: CON-018, CON-030, CON-031, CON-032
+- Capability prerequisites: CAP-005, CAP-006, CAP-007, CAP-008, CAP-009, CAP-010, CAP-011
 - Capability impact: allows Concoct to invoke an agent for one recommended workflow action and validate its result
 
 ### Outcome
@@ -207,8 +130,8 @@ concoct exec
 
 - Status: `candidate`
 - Priority: `medium`
-- Depends on: CON-009
-- Capability prerequisites: CAP-001, CAP-005, CAP-007
+- Depends on: None
+- Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-011
 - Capability impact: adds maintenance and recovery support
 
 ### Outcome
@@ -262,8 +185,8 @@ concoct recover
 
 - Status: `candidate`
 - Priority: `low`
-- Depends on: CON-009
-- Capability prerequisites: CAP-001
+- Depends on: None
+- Capability prerequisites: CAP-001, CAP-011
 - Capability impact: adds historical reporting
 
 ### Outcome
@@ -746,8 +669,8 @@ needed to bring them into Concoct's durable model.
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-009, CON-019
-- Capability prerequisites: CAP-001, CAP-005, CAP-006
+- Depends on: CON-019
+- Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-011
 - Capability impact: adds a durable bug register and bug-origin task lifecycle without treating defects as product-roadmap work
 
 ### Outcome
@@ -1140,14 +1063,8 @@ requires intervention.
 
 ## Recommended implementation order
 
-Near-term delivery sequence:
-
-```text
-CON-009  Archive and capability reconciliation
-```
-
-After the initial CLI lifecycle is complete, prioritize the flexibility work in
-three increments:
+The initial CLI lifecycle through archival is complete. Prioritize the
+flexibility work in three increments:
 
 ```text
 Foundation:   CON-017 → CON-018 → CON-016 → CON-021 → CON-022

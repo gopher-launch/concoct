@@ -286,8 +286,9 @@ rules.
 ### Limitations
 
 - Prompt commands provide guidance only; CAP-010 provides separate validated
-  Developer and Reviewer completion boundaries. Archival automation and direct
-  agent execution remain future work.
+  Developer and Reviewer completion boundaries, and CAP-011 provides the
+  separate validated archival completion boundary. Direct agent execution
+  remains future work.
 - Output files are create-only and existing destinations are never overwritten.
 - Archive-summary relevance is selected conservatively from identifiers in
   validated task and command context because no archive index exists.
@@ -307,6 +308,8 @@ rules.
 - `CAP-001` defines the workflow and state contract used for eligibility.
 - `CAP-002` supplies the canonical manual prompt assets appended to rendering.
 - `CAP-005` supplies CLI project discovery and validated state detection.
+- `CAP-010` and `CAP-011` provide the explicit completion boundaries for the
+  Developer, Reviewer, and Archivist work prepared by these prompts.
 
 ## CAP-007 — Git-backed task isolation and integration
 
@@ -348,7 +351,8 @@ recoverable without requiring a hosting provider or remote.
   trunk/base identity before implementation.
 - Development, remediation, review, and Git archival reject checkout drift,
   contradictory metadata, dirty boundaries, and unrelated Git operations.
-- `concoct archive` renders Archivist guidance; a Git-backed archival pass
+- `concoct archive` renders Archivist guidance, and `concoct archive --complete`
+  validates and commits the authored Git-backed archival transition. It
   preserves current state, records pending delivery, and ends at `archived`.
 - `concoct integrate`, `concoct integrate --continue`, and
   `concoct integrate --abort` perform or recover the recorded local squash
@@ -387,6 +391,8 @@ recoverable without requiring a hosting provider or remote.
 - `CAP-005` supplies project discovery and validated state reporting.
 - `CAP-006` supplies deterministic role prompts, now including archival and
   Git-aware transition guidance.
+- `CAP-011` supplies the validated archival completion boundary whose accepted
+  Git evidence is consumed by integration.
 
 ## CAP-008 — Validated active task planning
 
