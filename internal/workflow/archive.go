@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gopher-launch/concoct/internal/gitrepo"
+	"github.com/gopher-launch/concoct/internal/instruction"
 )
 
 // ArchiveOverride is the explicit, durable authority used only when the latest
@@ -26,6 +27,10 @@ type archiveSummary struct {
 }
 
 func CompleteArchive(root string, override ArchiveOverride) (TransitionResult, error) {
+	policy, err := EffectivePolicy(root)
+	if err != nil {
+		return TransitionResult{}, err
+	}
 	taskData, populated, err := readPopulated(filepath.Join(root, ".concoct/current/task-plan.md"))
 	if err != nil || !populated {
 		return TransitionResult{}, fmt.Errorf("archive completion requires a populated active task")
@@ -33,6 +38,9 @@ func CompleteArchive(root string, override ArchiveOverride) (TransitionResult, e
 	var task taskMeta
 	if err := parseFront(taskData, &task); err != nil {
 		return TransitionResult{}, err
+	}
+	if task.Git.Enabled && !policy.Required(instruction.Integration) {
+		return TransitionResult{}, fmt.Errorf("Git-backed archival requires integration in the selected policy")
 	}
 	cur := filepath.Join(root, ".concoct/current")
 	reviews, diags, err := readReviews(cur)
@@ -42,18 +50,26 @@ func CompleteArchive(root string, override ArchiveOverride) (TransitionResult, e
 	if len(diags) > 0 {
 		return TransitionResult{}, fmt.Errorf("invalid review evidence: %s", strings.Join(diags, "; "))
 	}
+	if diagnostic := validatePolicyEvidence(root, policy, task); diagnostic != "" {
+		return TransitionResult{}, fmt.Errorf("invalid policy activity evidence: %s", diagnostic)
+	}
+	if len(reviews) > 0 && (activityExternallySatisfied(task, instruction.IndependentReview) || !policy.Required(instruction.IndependentReview)) {
+		return TransitionResult{}, fmt.Errorf("invalid review evidence: non-required or externally satisfied independent-review cannot coexist with immutable review evidence")
+	}
 	approved := len(reviews) > 0 && reviews[len(reviews)-1].meta.Status == "approved"
-	if !approved && (override.Authority == "" || override.Reason == "") {
+	externalReview := activityExternallySatisfied(task, instruction.IndependentReview)
+	reviewRequired := policy.Required(instruction.IndependentReview)
+	if reviewRequired && !approved && !externalReview && (override.Authority == "" || override.Reason == "") {
 		return TransitionResult{}, fmt.Errorf("latest review is not approved; archival requires explicit --override-authority and --override-reason evidence")
 	}
-	if approved && (override.Authority != "" || override.Reason != "") {
+	if (approved || !reviewRequired || externalReview) && (override.Authority != "" || override.Reason != "") {
 		return TransitionResult{}, fmt.Errorf("override flags are only valid when ordinary approved archival is unavailable")
 	}
 	if task.Status != "implementation-complete" {
 		return TransitionResult{}, fmt.Errorf("archive completion requires implementation-complete task evidence")
 	}
 
-	archiveRel, summary, err := validateArchiveCandidate(root, task, reviews, override)
+	archiveRel, summary, err := validateArchiveCandidate(root, task, reviews, override, policy)
 	if err != nil {
 		return TransitionResult{}, err
 	}
@@ -79,7 +95,7 @@ func CompleteArchive(root string, override ArchiveOverride) (TransitionResult, e
 	return TransitionResult{Message: "Archive transition completed at " + archiveRel}, nil
 }
 
-func validateArchiveCandidate(root string, task taskMeta, reviews []review, override ArchiveOverride) (string, archiveSummary, error) {
+func validateArchiveCandidate(root string, task taskMeta, reviews []review, override ArchiveOverride, policy instruction.Policy) (string, archiveSummary, error) {
 	archiveRel := deterministicArchivePath(task, time.Now())
 	archivePath := filepath.Join(root, filepath.FromSlash(archiveRel))
 	info, err := os.Stat(archivePath)
@@ -138,8 +154,12 @@ func validateArchiveCandidate(root string, task taskMeta, reviews []review, over
 		return "", s, fmt.Errorf("summary capability-impact does not match task-plan.md")
 	}
 	if override.Authority == "" {
-		if len(reviews) == 0 || s.Review != reviews[len(reviews)-1].name {
+		externalReview := activityExternallySatisfied(task, instruction.IndependentReview)
+		if policy.Required(instruction.IndependentReview) && !externalReview && (len(reviews) == 0 || s.Review != reviews[len(reviews)-1].name) {
 			return "", s, fmt.Errorf("summary review must name the latest approving review")
+		}
+		if (!policy.Required(instruction.IndependentReview) || externalReview) && s.Review != "" {
+			return "", s, fmt.Errorf("summary review must be empty when independent-review is explicitly not-required or externally satisfied")
 		}
 		if s.Override.Authority != "" || s.Override.Reason != "" {
 			return "", s, fmt.Errorf("ordinary archival summary must not claim override evidence")

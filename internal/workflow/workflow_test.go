@@ -169,6 +169,178 @@ func TestDiscoverableStatusDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestPolicyExternalSatisfactionRequiresSafeDurableEvidence(t *testing.T) {
+	valid := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - evidence.md\n"
+	root := fixture(t, "implementation-complete", "", valid)
+	report := Detect(root)
+	if report.State != Complete || report.Next != "concoct archive" {
+		t.Fatalf("state = %s: %v", report.State, report.Diagnostics)
+	}
+	if !strings.Contains(report.String(), "Policy independent-review: externally-satisfied") || !strings.Contains(report.String(), "source .concoct/policy.md") {
+		t.Fatalf("report = %s", report.String())
+	}
+
+	for name, extra := range map[string]string{
+		"missing reason":  strings.Replace(valid, "reason: external audit accepted the change\n", "", 1),
+		"unsafe evidence": strings.Replace(valid, "evidence.md", "../outside", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := Detect(fixture(t, "implementation-complete", "", extra))
+			if got.State != Invalid || len(got.Diagnostics) == 0 {
+				t.Fatalf("report = %#v", got)
+			}
+			if strings.Contains(got.String(), "externally-satisfied") {
+				t.Fatalf("invalid evidence was rendered as satisfied:\n%s", got.String())
+			}
+		})
+	}
+}
+
+func TestPolicyExternalSatisfactionRejectsSymlinkedParent(t *testing.T) {
+	extra := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - linked/audit.md\n"
+	root := fixture(t, "implementation-complete", "", extra)
+	outside := t.TempDir()
+	write(t, filepath.Join(outside, "audit.md"), "accepted\n")
+	if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	got := Detect(root)
+	if got.State != Invalid || !strings.Contains(strings.Join(got.Diagnostics, " "), "non-symlink") {
+		t.Fatalf("report = %#v", got)
+	}
+}
+
+func TestPolicyExternalSatisfactionAllowsBenignDoubleDotFilename(t *testing.T) {
+	extra := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - audit..md\n"
+	root := fixture(t, "implementation-complete", "", extra)
+	write(t, filepath.Join(root, "audit..md"), "accepted\n")
+	got := Detect(root)
+	if got.State != Complete || got.Next != "concoct archive" {
+		t.Fatalf("report = %#v", got)
+	}
+}
+
+func TestInvalidTaskNeverRendersExternalEvidenceAsSatisfied(t *testing.T) {
+	extra := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - evidence.md\n"
+	root := fixture(t, "implementation-complete", "", extra)
+	path := filepath.Join(root, ".concoct/current/task-plan.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, path, strings.Replace(string(data), "title: Demo task", "title:", 1))
+	got := Detect(root)
+	if got.State != Invalid || strings.Contains(got.String(), "externally-satisfied") {
+		t.Fatalf("report = %#v\n%s", got, got.String())
+	}
+}
+
+func TestPolicyExternalSatisfactionRejectsUnsupportedActivity(t *testing.T) {
+	extra := "policy-activity-evidence:\n  - activity: development\n    disposition: externally-satisfied\n    reason: another system built the change\n    recorded-by: developer\n    evidence:\n      - evidence.md\n"
+	got := Detect(fixture(t, "implementation-complete", "", extra))
+	if got.State != Invalid || !strings.Contains(strings.Join(got.Diagnostics, " "), "only for independent-review") {
+		t.Fatalf("report = %#v", got)
+	}
+}
+
+func TestPolicyDispositionMatrix(t *testing.T) {
+	reports := []Report{
+		Detect(fixture(t, "planned", "", "")),
+		Detect(fixture(t, "implementation-complete", "approved", "")),
+		Detect(fixture(t, "implementation-complete", "", "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - evidence.md\n")),
+	}
+	nonRequiredRoot := fixture(t, "implementation-complete", "", "")
+	policyPath := filepath.Join(nonRequiredRoot, ".concoct/policy.md")
+	policy, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy = []byte(strings.Replace(strings.Replace(string(policy), "  - independent-review\n  - archival\n  - integration\n", "  - archival\n  - integration\nnot-required-reasons:\n  - independent-review: repository accepts developer verification\n", 1), "  - reviewer-approval-before-archive\n", "", 1))
+	write(t, policyPath, string(policy))
+	reports = append(reports, Detect(nonRequiredRoot))
+
+	wantDispositions := map[string]bool{"completed": true, "not-required": true, "not-applicable": true, "externally-satisfied": true, "blocked": true}
+	seen := map[string]bool{}
+	for _, report := range reports {
+		if report.State == Invalid {
+			t.Fatalf("matrix fixture invalid: %#v", report)
+		}
+		if len(report.PolicyActivities) != 6 {
+			t.Fatalf("activity count = %d", len(report.PolicyActivities))
+		}
+		for _, activity := range report.PolicyActivities {
+			if !wantDispositions[activity.Disposition] {
+				t.Fatalf("unknown disposition %#v", activity)
+			}
+			if activity.Requirement != "required" && activity.Requirement != "not-required" {
+				t.Fatalf("unknown requirement %#v", activity)
+			}
+			if activity.Source != ".concoct/policy.md" || activity.Reason == "" {
+				t.Fatalf("incomplete attribution %#v", activity)
+			}
+			seen[activity.Disposition] = true
+		}
+	}
+	for disposition := range wantDispositions {
+		if !seen[disposition] {
+			t.Errorf("disposition %s was not resolved", disposition)
+		}
+	}
+}
+
+func TestGitTaskRejectsPolicyThatOmitsIntegration(t *testing.T) {
+	root := fixture(t, "implementation-complete", "approved", "git:\n  enabled: true\n  trunk: trunk\n  task-branch: concoct/app-001-demo\n  base: abc123\n")
+	policyPath := filepath.Join(root, ".concoct/policy.md")
+	data, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "  - integration\n", "not-required-reasons:\n  - integration: non-Git delivery only\n", 1))
+	if err := os.WriteFile(policyPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := Detect(root)
+	if got.State != Invalid || !strings.Contains(strings.Join(got.Diagnostics, " "), "requires integration") {
+		t.Fatalf("report = %#v", got)
+	}
+}
+
+func TestReserveReviewRefusesExternallySatisfiedReview(t *testing.T) {
+	extra := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - evidence.md\n"
+	root := fixture(t, "implementation-complete", "", extra)
+	if _, err := ReserveReview(root); err == nil || !strings.Contains(err.Error(), "not required") {
+		t.Fatalf("reserve error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".concoct/current/review-01.md")); !os.IsNotExist(err) {
+		t.Fatalf("reservation created review: %v", err)
+	}
+}
+
+func TestExternalReviewSatisfactionRejectsReviewEvidence(t *testing.T) {
+	extra := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - evidence.md\n"
+	got := Detect(fixture(t, "implementation-complete", "approved", extra))
+	if got.State != Invalid || !strings.Contains(strings.Join(got.Diagnostics, " "), "cannot coexist") {
+		t.Fatalf("report = %#v", got)
+	}
+}
+
+func TestNotRequiredReviewRejectsReviewEvidence(t *testing.T) {
+	root := fixture(t, "implementation-complete", "approved", "")
+	path := filepath.Join(root, ".concoct/policy.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(strings.Replace(string(data), "  - independent-review\n  - archival\n  - integration\n", "  - archival\n  - integration\nnot-required-reasons:\n  - independent-review: external audit is required\n", 1), "  - reviewer-approval-before-archive\n", "", 1))
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := Detect(root)
+	if got.State != Invalid || !strings.Contains(strings.Join(got.Diagnostics, " "), "cannot coexist") {
+		t.Fatalf("report = %#v", got)
+	}
+}
+
 func TestInspectNextActionEvidenceUsesPlanEligibility(t *testing.T) {
 	root := fixture(t, "", "", "")
 	write(t, filepath.Join(root, ".concoct/roadmap.md"), "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n## APP-001 — Eligible\n- Status: `planned`\n- Priority: `high`\n- Depends on: `none`\n## APP-002 — Blocked\n- Status: `planned`\n- Priority: `critical`\n- Depends on: APP-003\n")
@@ -234,7 +406,8 @@ func TestInspectPlanEligibilityValidatesCapabilityPrerequisites(t *testing.T) {
 func fixture(t *testing.T, status, reviewStatus, extra string) string {
 	t.Helper()
 	root := t.TempDir()
-	write(t, filepath.Join(root, "AGENTS.md"), "# Agents\n")
+	write(t, filepath.Join(root, "AGENTS.md"), "---\ninstruction-layer: project-guidance\n---\n# Agents\n")
+	write(t, filepath.Join(root, ".concoct/policy.md"), "---\ninstruction-layer: policy\nrequired-phases:\n  - product-ownership\n  - task-planning\n  - development\n  - independent-review\n  - archival\n  - integration\napproval-gates:\n  - reviewer-approval-before-archive\n  - archive-before-integration\ngit-strategy: task-branch-with-squash-integration\n---\n# Policy\n")
 	write(t, filepath.Join(root, ".concoct/roadmap.md"), roadmap(map[bool]string{true: "active", false: "planned"}[status != ""]))
 	write(t, filepath.Join(root, ".concoct/capabilities.md"), "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Capabilities\n")
 	if status != "" {

@@ -42,8 +42,8 @@ Every role prompt includes the selected persona, exact required context, allowed
 | `roadmap` | Prepare Product Owner work | Optional human input supplied outside the command contract | `ready` | Guidance, capabilities, roadmap, archive summaries | Product Owner | CLI: none; role: roadmap only | Product Owner handoff | `ready` | Yes | `plan <id>` or `roadmap` |
 | `plan` | Prepare one active task | Roadmap ID | `ready` | Guidance, capabilities, roadmap, history, repository evidence | Task Planner | Git CLI: safe task branch; role: task plan, notes, selected roadmap status | Planner handoff | `planned` | Yes | `code` |
 | `code` | Prepare implementation or remediation | Active task | `planned`, `implementation-in-progress`, `review-changes-requested` | Guidance, capabilities, task, notes, applicable reviews, repository | Developer | CLI: none; role: scoped implementation, tests/docs, plan, notes | Developer handoff | `implementation-complete` via in-progress | Yes | `review` |
-| `review` | Prepare independent review | Reviewable active task | `implementation-complete` | Guidance, capabilities, task, notes, all reviews, diff and relevant files | Reviewer | CLI: none; role: next review only | Reviewer handoff | Outcome-bearing review state | Yes | Outcome-dependent |
-| `archive` | Prepare accepted archival | Approved active task | `review-approved` | All canonical task, review, product, and implementation evidence | Archivist | Archive and capabilities; Git tasks preserve pending delivery/current evidence | Archivist handoff | Git: `archived`; non-Git: `ready` | Yes | Git: `integrate`; non-Git: `roadmap` or `plan <id>` |
+| `review` | Prepare independent review | Reviewable active task | `implementation-complete` when independent review resolves required | Guidance, capabilities, task, notes, all reviews, diff and relevant files | Reviewer | CLI: none; role: next review only | Reviewer handoff | Outcome-bearing review state | Yes | Outcome-dependent |
+| `archive` | Prepare accepted archival | Approved active task or policy-valid externally satisfied review | `review-approved`, or `implementation-complete` when review resolves satisfied | All canonical task, review, product, and implementation evidence | Archivist | Archive and capabilities; Git tasks preserve pending delivery/current evidence | Archivist handoff | Git: `archived`; non-Git: `ready` | Yes | Git: `integrate`; non-Git: `roadmap` or `plan <id>` |
 | `integrate` | Integrate accepted Git task | Archived Git task | `archived`, `integrating`, `integrated` | Recorded Git and recovery evidence | None | Squash integration, recovery, delivery bookkeeping, cleanup | None | `ready`, or recoverable `integrating`/`archived` | Yes | State-dependent |
 
 The detailed contracts below expand every matrix cell.
@@ -150,7 +150,7 @@ None.
 
 ### Prompt produced
 
-None. It prints a structured human-readable report containing, when applicable: project name, active roadmap item, normative phase, task status, latest review, review outcome, capability impact, diagnostics, and recommended next action.
+None. It prints a structured human-readable report containing, when applicable: project name, active roadmap item, normative phase, task status, latest review, review outcome, capability impact, every policy activity's requirement, disposition, reason, and source, diagnostics, and recommended next action. Invalid task evidence is diagnosed and is never echoed as an accepted disposition.
 
 ### Resulting state
 
@@ -168,7 +168,7 @@ Invalid state is a successful diagnostic outcome only when the report can reliab
 
 - `ready`: `concoct next`.
 - `planned` or `implementation-in-progress`: `concoct code`.
-- `implementation-complete`: `concoct review`.
+- `implementation-complete`: `concoct review`, or `concoct archive` when independent review is explicitly non-required or externally satisfied.
 - `review-changes-requested`: `concoct code`.
 - `review-approved`: `concoct archive`.
 - `review-blocked`: responsible-role or human handoff from the review.
@@ -364,13 +364,13 @@ Developer. In `review-changes-requested`, the prompt explicitly selects review-r
 
 ### Files created or updated
 
-Plain `concoct code` updates nothing. During the role session, the Developer may update source, tests, task-required documentation, the task plan's technical details and phase statuses, and notes. The Developer must not update roadmap, capabilities, archived artifacts, or completed reviews. `concoct code --complete` validates that both task plan and notes changed, requires a complete reviewer handoff whose final handoff section differs from the version committed at `HEAD`, rejects forbidden workflow paths, and validates the resulting state before committing one Git-backed transition. Thus an unrelated notes edit cannot reuse a stale handoff. A clean retry reuses that exact completion commit. Non-Git tasks have no committed baseline to compare, so their artifact-level rule requires the final handoff section and all required headings in the current notes.
+Plain `concoct code` updates nothing. During the role session, the Developer may update source, tests, task-required documentation, the task plan's technical details and phase statuses, and notes. The Developer must not update roadmap, capabilities, archived artifacts, or completed reviews. `concoct code --complete` validates that both task plan and notes changed and requires a complete fresh outgoing handoff. When independent review remains unresolved, this is `## Handoff to reviewer` with `### Suggested review focus`. When policy resolves review as explicitly non-required or externally satisfied, it is `## Handoff to archivist` with `### Suggested archive focus`. The final selected handoff section must differ from the version committed at `HEAD`; unrelated notes edits cannot reuse stale evidence. Completion also rejects forbidden workflow paths and validates the resulting state before committing one Git-backed transition. A clean retry reuses that exact completion commit. Non-Git tasks have no committed baseline to compare, so their artifact-level rule requires the selected final handoff section and all required headings in the current notes.
 
-Work begins by persisting task status `implementation-in-progress`. In remediation mode the task metadata also sets `remediates-review` to the exact latest `changes-requested` review. Successful completion records `implementation-complete`, verification evidence, and a reviewer handoff. Remediation records each finding as fixed, partially fixed, disputed with evidence, obsolete, or blocked; a completed remediation without dispositions for every finding is invalid.
+Work begins by persisting task status `implementation-in-progress`. In remediation mode the task metadata also sets `remediates-review` to the exact latest `changes-requested` review. Successful completion records `implementation-complete`, verification evidence, and the outgoing handoff selected by the resolved review disposition. Remediation records each finding as fixed, partially fixed, disputed with evidence, obsolete, or blocked; a completed remediation without dispositions for every finding is invalid.
 
 ### Prompt produced
 
-A Developer prompt with exact scope, mode, required reads, allowed writes, constraints and non-goals, verification, finding-disposition requirements when applicable, and the outgoing Reviewer handoff.
+A Developer prompt with exact scope, mode, required reads, allowed writes, constraints and non-goals, verification, finding-disposition requirements when applicable, and the resolved outgoing Reviewer or Archivist handoff.
 
 ### Resulting state
 
@@ -390,7 +390,7 @@ Errors name the missing evidence or correct next role. Prior reviews remain unch
 ### Recommended next commands
 
 - `concoct code --complete` after authoring a complete Developer transition.
-- `concoct review` after completion validation succeeds.
+- The resolved next command after completion: `concoct review` while review remains required, or `concoct archive` when review is explicitly non-required or externally satisfied.
 - `concoct code` to resume persisted in-progress work.
 - The responsible role or human handoff when work is blocked by scope, product intent, or authorization.
 

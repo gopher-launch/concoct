@@ -6,6 +6,7 @@ required-phases:
   - development
   - independent-review
   - archival
+  - integration
 approval-gates:
   - reviewer-approval-before-archive
   - archive-before-integration
@@ -18,7 +19,9 @@ This project-selected policy reproduces Concoct's accepted default lifecycle.
 Substantial tasks pass through Product Owner, Task Planner, Developer,
 independent Reviewer, and Archivist roles. Review approval is required before
 archival. Git-backed tasks use a clean recorded task branch, commit each role
-transition, archive before integration, and squash onto the recorded trunk.
+transition, archive before integration, and squash onto the recorded trunk;
+integration is a required lifecycle activity and resolves not-applicable only
+for non-Git tasks.
 
 The active persona, task plan, notes, and sequential reviews provide the
 role-specific and task-specific detail. General policy selection is reserved

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gopher-launch/concoct/internal/gitrepo"
+	"github.com/gopher-launch/concoct/internal/instruction"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,6 +37,21 @@ type Report struct {
 	State                                                                                                                            State
 	Diagnostics                                                                                                                      []string
 	OperationalError                                                                                                                 error
+	PolicyActivities                                                                                                                 []PolicyActivity
+}
+
+// PolicyActivity is the deterministic, inspectable disposition of one finite
+// policy activity. It never treats a missing artifact as a skip.
+type PolicyActivity struct{ Activity, Requirement, Disposition, Reason, Source string }
+
+// EffectivePolicy exposes the one composed policy authority to transition and
+// rendering consumers without duplicating policy parsing.
+func EffectivePolicy(root string) (instruction.Policy, error) {
+	effective, err := instruction.Compose(root)
+	if err != nil {
+		return instruction.Policy{}, err
+	}
+	return effective.Policy, nil
 }
 
 func (r Report) String() string {
@@ -54,6 +71,16 @@ func (r Report) String() string {
 	field("Git trunk", r.GitTrunk)
 	field("Git task branch", r.GitTaskBranch)
 	field("Git archive commit", r.GitArchiveCommit)
+	for _, activity := range r.PolicyActivities {
+		fmt.Fprintf(&b, "Policy %s: %s (%s", activity.Activity, activity.Disposition, activity.Requirement)
+		if activity.Reason != "" {
+			fmt.Fprintf(&b, "; %s", activity.Reason)
+		}
+		if activity.Source != "" {
+			fmt.Fprintf(&b, "; source %s", activity.Source)
+		}
+		fmt.Fprintln(&b, ")")
+	}
 	for _, d := range r.Diagnostics {
 		fmt.Fprintf(&b, "Diagnostic: %s\n", d)
 	}
@@ -62,16 +89,24 @@ func (r Report) String() string {
 }
 
 type taskMeta struct {
-	ID         string     `yaml:"id"`
-	Title      string     `yaml:"title"`
-	RoadmapID  string     `yaml:"roadmap-id"`
-	Status     string     `yaml:"status"`
-	Created    string     `yaml:"created"`
-	Updated    string     `yaml:"updated"`
-	Remediates string     `yaml:"remediates-review"`
-	Impact     impact     `yaml:"capability-impact"`
-	Resolution resolution `yaml:"blocked-review-resolution"`
-	Git        gitMeta    `yaml:"git"`
+	ID             string           `yaml:"id"`
+	Title          string           `yaml:"title"`
+	RoadmapID      string           `yaml:"roadmap-id"`
+	Status         string           `yaml:"status"`
+	Created        string           `yaml:"created"`
+	Updated        string           `yaml:"updated"`
+	Remediates     string           `yaml:"remediates-review"`
+	Impact         impact           `yaml:"capability-impact"`
+	Resolution     resolution       `yaml:"blocked-review-resolution"`
+	PolicyEvidence []policyEvidence `yaml:"policy-activity-evidence"`
+	Git            gitMeta          `yaml:"git"`
+}
+type policyEvidence struct {
+	Activity    string   `yaml:"activity"`
+	Disposition string   `yaml:"disposition"`
+	Reason      string   `yaml:"reason"`
+	Evidence    []string `yaml:"evidence"`
+	RecordedBy  string   `yaml:"recorded-by"`
 }
 type gitMeta struct {
 	Enabled            bool   `yaml:"enabled"`
@@ -167,6 +202,13 @@ func InspectGitContext(root string) (GitContext, error) {
 	var task taskMeta
 	if err := parseFront(data, &task); err != nil {
 		return GitContext{}, err
+	}
+	policy, err := EffectivePolicy(root)
+	if err != nil {
+		return GitContext{}, err
+	}
+	if task.Git.Enabled && !policy.Required(instruction.Integration) {
+		return GitContext{}, fmt.Errorf("Git-backed task requires integration in the selected policy")
 	}
 	archiveCommit := task.Git.ArchiveCommit
 	if task.Git.Enabled && task.Git.Status == "archived" && archiveCommit == "self" {
@@ -402,8 +444,20 @@ func PlanItemTitle(root, id string) (string, error) {
 var itemHeading = regexp.MustCompile(`(?m)^## ([A-Z][A-Z0-9-]*-[0-9]+)\s+—`)
 var reviewName = regexp.MustCompile(`^review-([0-9]{2})\.md$`)
 
-func Detect(root string) Report {
-	r := Report{State: Invalid, Next: "repair the reported artifacts, then run concoct status"}
+func Detect(root string) (r Report) {
+	r = Report{State: Invalid, Next: "repair the reported artifacts, then run concoct status"}
+	effective, policyErr := instruction.Compose(root)
+	if policyErr != nil {
+		r.Diagnostics = append(r.Diagnostics, policyErr.Error())
+		return r
+	}
+	var resolvedTask *taskMeta
+	defer func() {
+		if r.State == Invalid {
+			resolvedTask = nil
+		}
+		r.PolicyActivities = resolvePolicy(effective.Policy, r, resolvedTask)
+	}()
 	roadData, err := os.ReadFile(filepath.Join(root, ".concoct", "roadmap.md"))
 	if err != nil {
 		r.OperationalError = fmt.Errorf("read .concoct/roadmap.md: %w", err)
@@ -488,9 +542,18 @@ func Detect(root string) Report {
 		r.Diagnostics = append(r.Diagnostics, ".concoct/current/task-plan.md: "+err.Error())
 		return r
 	}
+	if diagnostic := validatePolicyEvidence(root, effective.Policy, task); diagnostic != "" {
+		r.Diagnostics = append(r.Diagnostics, diagnostic)
+		return r
+	}
+	resolvedTask = &task
 	r.RoadmapItem = task.RoadmapID
 	r.TaskStatus = task.Status
 	r.CapabilityImpact = task.Impact.Type
+	if task.Git.Enabled && !effective.Policy.Required(instruction.Integration) {
+		r.Diagnostics = append(r.Diagnostics, "Git-backed task requires integration in the selected policy; add integration to required-phases")
+		return r
+	}
 	if task.Git.Enabled {
 		r.GitTrunk, r.GitTaskBranch, r.GitArchiveCommit = task.Git.Trunk, task.Git.TaskBranch, task.Git.ArchiveCommit
 		if task.Git.Trunk == "" || task.Git.TaskBranch == "" || task.Git.Base == "" {
@@ -544,6 +607,13 @@ func Detect(root string) Report {
 	if len(reviews) == 0 {
 		r.State = mapTask(task.Status)
 		r.Next = next(r.State)
+		if r.State == Complete && (!effective.Policy.Required(instruction.IndependentReview) || activityExternallySatisfied(task, instruction.IndependentReview)) {
+			r.Next = "concoct archive"
+		}
+		return r
+	}
+	if activityExternallySatisfied(task, instruction.IndependentReview) || !effective.Policy.Required(instruction.IndependentReview) {
+		r.Diagnostics = append(r.Diagnostics, "non-required or externally satisfied independent-review cannot coexist with immutable review evidence")
 		return r
 	}
 	latest := reviews[len(reviews)-1]
@@ -666,6 +736,142 @@ func historicalReview(reviews []review, name, outcome string) bool {
 		}
 	}
 	return false
+}
+
+func resolvePolicy(policy instruction.Policy, report Report, task *taskMeta) []PolicyActivity {
+	ordered := []instruction.Activity{instruction.ProductOwnership, instruction.TaskPlanning, instruction.Development, instruction.IndependentReview, instruction.Archival, instruction.Integration}
+	out := make([]PolicyActivity, 0, len(ordered))
+	for _, activity := range ordered {
+		entry := PolicyActivity{Activity: string(activity), Requirement: string(policy.Requirements[activity]), Source: instruction.PolicyPath}
+		if evidence, ok := policyEvidenceFor(task, activity); ok {
+			entry.Disposition, entry.Reason = "externally-satisfied", evidence.Reason+"; evidence: "+strings.Join(evidence.Evidence, ", ")
+		} else if !policy.Required(activity) {
+			entry.Disposition, entry.Reason = "not-required", policy.Reasons[activity]
+		} else if activity == instruction.Integration && report.GitTaskBranch == "" {
+			entry.Disposition, entry.Reason = "not-applicable", "active task is not Git-backed"
+		} else {
+			entry.Disposition, entry.Reason = policyDisposition(activity, report)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func policyEvidenceFor(task *taskMeta, activity instruction.Activity) (policyEvidence, bool) {
+	if task == nil {
+		return policyEvidence{}, false
+	}
+	for _, evidence := range task.PolicyEvidence {
+		if evidence.Activity == string(activity) {
+			return evidence, true
+		}
+	}
+	return policyEvidence{}, false
+}
+
+func activityExternallySatisfied(task taskMeta, activity instruction.Activity) bool {
+	evidence, ok := policyEvidenceFor(&task, activity)
+	return ok && evidence.Disposition == "externally-satisfied"
+}
+
+func validatePolicyEvidence(root string, policy instruction.Policy, task taskMeta) string {
+	seen := map[string]bool{}
+	for _, evidence := range task.PolicyEvidence {
+		activity, known := map[string]instruction.Activity{"product-ownership": instruction.ProductOwnership, "task-planning": instruction.TaskPlanning, "development": instruction.Development, "independent-review": instruction.IndependentReview, "archival": instruction.Archival, "integration": instruction.Integration}[evidence.Activity]
+		if !known {
+			return "policy-activity-evidence names unknown activity " + evidence.Activity
+		}
+		if seen[evidence.Activity] {
+			return "policy-activity-evidence duplicates activity " + evidence.Activity
+		}
+		seen[evidence.Activity] = true
+		if activity != instruction.IndependentReview {
+			return "policy-activity-evidence supports externally-satisfied only for independent-review; " + evidence.Activity + " must use canonical lifecycle evidence"
+		}
+		if evidence.Disposition != "externally-satisfied" {
+			return "policy-activity-evidence for " + evidence.Activity + " must use disposition externally-satisfied"
+		}
+		if strings.TrimSpace(evidence.Reason) == "" {
+			return "policy-activity-evidence for " + evidence.Activity + " requires a durable reason"
+		}
+		if evidence.RecordedBy != "developer" && evidence.RecordedBy != "task-planner" {
+			return "policy-activity-evidence for " + evidence.Activity + " has unauthorized recorded-by"
+		}
+		if len(evidence.Evidence) == 0 {
+			return "policy-activity-evidence for " + evidence.Activity + " requires repository-relative evidence"
+		}
+		if !policy.Required(activity) {
+			return "policy-activity-evidence for " + evidence.Activity + " is contradictory because the activity is explicitly not-required"
+		}
+		for _, path := range evidence.Evidence {
+			if diagnostic := validatePolicyEvidenceFile(root, path); diagnostic != "" {
+				return "policy-activity-evidence for " + evidence.Activity + " " + diagnostic + ": " + path
+			}
+		}
+	}
+	return ""
+}
+
+func validatePolicyEvidenceFile(root, rel string) string {
+	if rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, `\`) || strings.ContainsAny(rel, "*?#") || strings.Contains(rel, "://") || pathpkg.Clean(rel) != rel {
+		return "contains an unsafe evidence path"
+	}
+	current := root
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return "contains an unsafe evidence path"
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return "does not name a readable non-symlink file"
+		}
+		if i < len(parts)-1 && !info.IsDir() {
+			return "does not name a readable non-symlink file"
+		}
+		if i == len(parts)-1 && !info.Mode().IsRegular() {
+			return "does not name a readable non-symlink file"
+		}
+	}
+	f, err := os.Open(current)
+	if err != nil {
+		return "does not name a readable non-symlink file"
+	}
+	if err := f.Close(); err != nil {
+		return "does not name a readable non-symlink file"
+	}
+	return ""
+}
+
+func policyDisposition(activity instruction.Activity, report Report) (string, string) {
+	switch activity {
+	case instruction.ProductOwnership:
+		if report.RoadmapItem != "" || report.State == Ready {
+			return "completed", "canonical roadmap evidence"
+		}
+	case instruction.TaskPlanning:
+		if report.TaskStatus != "" {
+			return "completed", "active task-plan evidence"
+		}
+	case instruction.Development:
+		if report.TaskStatus == "implementation-complete" {
+			return "completed", "implementation-complete task evidence"
+		}
+	case instruction.IndependentReview:
+		if report.ReviewOutcome == "approved" {
+			return "completed", "latest immutable review is approved"
+		}
+	case instruction.Archival:
+		if report.State == Archived || report.State == Integrating || report.State == Integrated || report.State == Ready && report.RoadmapItem == "" {
+			return "completed", "archival or delivered repository evidence"
+		}
+	case instruction.Integration:
+		if report.State == Integrated || report.State == Ready && report.RoadmapItem == "" {
+			return "completed", "integration or delivered repository evidence"
+		}
+	}
+	return "blocked", "required durable evidence is not yet present"
 }
 
 type review struct {

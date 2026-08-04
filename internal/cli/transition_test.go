@@ -364,6 +364,37 @@ func TestNonGitCompletionUsesArtifactSemanticsWithoutCommit(t *testing.T) {
 	}
 }
 
+func TestNonGitCompletionUsesArchivistHandoffWhenReviewIsNotRequired(t *testing.T) {
+	root := transitionProject(t, true)
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(root, ".concoct/policy.md")
+	policy, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy = []byte(strings.Replace(strings.Replace(string(policy), "  - independent-review\n  - archival\n  - integration\n", "  - archival\n  - integration\nnot-required-reasons:\n  - independent-review: repository accepts developer verification\n", 1), "  - reviewer-approval-before-archive\n", "", 1))
+	if err := os.WriteFile(policyPath, policy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTransitionTaskWithBase(t, root, "implementation-complete", "", false)
+	if err := os.WriteFile(filepath.Join(root, ".concoct/current/notes.md"), []byte(archivistHandoff), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONCOCT_CALLER_DIR", root)
+	var out bytes.Buffer
+	if err := Run([]string{"code", "--complete"}, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Next: concoct archive") {
+		t.Fatalf("output = %q", out.String())
+	}
+	if err := Run([]string{"review", "--reserve"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "not required") {
+		t.Fatalf("review reservation error = %v", err)
+	}
+}
+
 const reviewerHandoff = `# Notes
 
 ## Handoff to reviewer
@@ -384,6 +415,27 @@ None.
 Adds coordination.
 ### Suggested review focus
 Transitions.`
+
+const archivistHandoff = `# Notes
+
+## Handoff to archivist
+
+### Implemented
+Done.
+### Key decisions
+Kept narrow.
+### Files changed
+Task files.
+### Verification
+Tests passed.
+### Known risks
+None.
+### Skipped or unresolved work
+None.
+### Capability impact
+Adds coordination.
+### Suggested archive focus
+Policy evidence.`
 
 func freshReviewerHandoff(implemented string) string {
 	return strings.Replace(reviewerHandoff, "# Notes\n\n", "", 1) + "\n" + implemented

@@ -122,6 +122,44 @@ func TestRenderRejectsWrongStateAndUnsatisfiedDependency(t *testing.T) {
 	}
 }
 
+func TestRenderUsesResolvedExternalReviewSatisfaction(t *testing.T) {
+	root := fixture(t, "implementation-complete", "", "")
+	path := filepath.Join(root, ".concoct/current/task-plan.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - evidence.md\n"
+	write(t, path, strings.Replace(string(data), "capability-impact:\n", evidence+"capability-impact:\n", 1))
+	if _, err := Render(root, Request{Command: "review"}); err == nil || !strings.Contains(err.Error(), "not required") {
+		t.Fatalf("review error = %v", err)
+	}
+	if _, err := Render(root, Request{Command: "archive"}); err != nil {
+		t.Fatalf("archive render: %v", err)
+	}
+}
+
+func TestDeveloperPromptUsesResolvedNonRequiredReviewHandoff(t *testing.T) {
+	root := fixture(t, "implementation-in-progress", "", "")
+	path := filepath.Join(root, ".concoct/policy.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(strings.Replace(string(data), "  - independent-review\n  - archival\n  - integration\n", "  - archival\n  - integration\nnot-required-reasons:\n  - independent-review: repository accepts developer verification\n", 1), "  - reviewer-approval-before-archive\n", "", 1))
+	write(t, path, string(data))
+
+	got, err := Render(root, Request{Command: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"## Policy-specific Developer handoff", "`## Handoff to archivist`", "leave a fresh Archivist handoff", "`concoct archive` after completion validation succeeds"} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("prompt missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderRejectsInvariantWeakeningWithoutPartialOutput(t *testing.T) {
 	root := fixture(t, "", "", "")
 	write(t, filepath.Join(root, "AGENTS.md"), "---\ninstruction-layer: project-guidance\nweaken-controls:\n  - evidence-integrity\n---\n# Agents\n")
@@ -336,7 +374,7 @@ func fixture(t *testing.T, status, reviewStatus, extra string) string {
 	root := t.TempDir()
 	write(t, filepath.Join(root, "AGENTS.md"), "---\ninstruction-layer: project-guidance\n---\n# Agents\n")
 	write(t, filepath.Join(root, ".concoct/protocol.md"), "---\ninstruction-layer: protocol\nprotected-controls:\n  - completed-review-immutability\n  - evidence-integrity\n  - invalid-state-refusal\n  - workflow-artifact-ownership\n---\n# Protocol\n")
-	write(t, filepath.Join(root, ".concoct/policy.md"), "---\ninstruction-layer: policy\nrequired-phases:\n  - planning\napproval-gates:\n  - independent-review\ngit-strategy: task-branch\n---\n# Policy\n")
+	write(t, filepath.Join(root, ".concoct/policy.md"), "---\ninstruction-layer: policy\nrequired-phases:\n  - product-ownership\n  - task-planning\n  - development\n  - independent-review\n  - archival\n  - integration\napproval-gates:\n  - reviewer-approval-before-archive\n  - archive-before-integration\ngit-strategy: task-branch-with-squash-integration\n---\n# Policy\n")
 	roadStatus := "planned"
 	if status != "" {
 		roadStatus = "active"

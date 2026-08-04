@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gopher-launch/concoct/internal/gitrepo"
+	"github.com/gopher-launch/concoct/internal/instruction"
 	"github.com/gopher-launch/concoct/internal/workflow"
 	"gopkg.in/yaml.v3"
 )
@@ -47,6 +48,13 @@ func Run(root, mode string, input io.Reader, output io.Writer) error {
 	}
 	if mode != "" {
 		return fmt.Errorf("unknown integration mode %q", mode)
+	}
+	policy, err := workflow.EffectivePolicy(root)
+	if err != nil {
+		return err
+	}
+	if !policy.Required(instruction.Integration) {
+		return fmt.Errorf("integration is not required by the selected policy")
 	}
 	c, err := workflow.InspectGitContext(root)
 	if err != nil {

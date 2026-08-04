@@ -26,7 +26,7 @@ var protected = []string{
 
 var allowedDeclarations = map[string][]string{
 	"protocol":         {"instruction-layer", "protected-controls"},
-	"policy":           {"instruction-layer", "required-phases", "approval-gates", "git-strategy", "strengthen-controls", "weaken-controls"},
+	"policy":           {"instruction-layer", "required-phases", "not-required-reasons", "approval-gates", "git-strategy", "strengthen-controls", "weaken-controls"},
 	"project-guidance": {"instruction-layer", "strengthen-controls", "weaken-controls"},
 }
 
@@ -39,7 +39,10 @@ type Source struct {
 }
 
 // Effective is the validated, deterministic instruction composition.
-type Effective struct{ Sources []Source }
+type Effective struct {
+	Sources []Source
+	Policy  Policy
+}
 
 // Compose loads protocol, policy, and project guidance in precedence order.
 // It returns no partial composition when any declaration is invalid.
@@ -92,6 +95,11 @@ func Compose(root string) (Effective, error) {
 					return Effective{}, fmt.Errorf("policy layer %s is missing %s; restore the default policy before rendering guidance", item.path, key)
 				}
 			}
+			policy, err := ParsePolicy(decl)
+			if err != nil {
+				return Effective{}, fmt.Errorf("compose policy layer from %s: %w; correct .concoct/policy.md before rendering guidance", item.path, err)
+			}
+			out.Policy = policy
 		}
 		out.Sources = append(out.Sources, Source{Layer: item.layer, Path: item.path, Content: data})
 	}
@@ -134,6 +142,7 @@ func (d declarationSet) keys() []string {
 
 func declarations(data []byte) (declarationSet, error) {
 	d := declarationSet{map[string]string{}, map[string][]string{}}
+	seen := map[string]bool{}
 	lines := strings.Split(string(data), "\n")
 	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "---" {
 		return d, fmt.Errorf("missing declaration front matter")
@@ -160,6 +169,13 @@ func declarations(data []byte) (declarationSet, error) {
 			return d, fmt.Errorf("malformed declaration %q", line)
 		}
 		current = strings.TrimSpace(parts[0])
+		if current == "" {
+			return d, fmt.Errorf("empty declaration key")
+		}
+		if seen[current] {
+			return d, fmt.Errorf("duplicate declaration %q", current)
+		}
+		seen[current] = true
 		value := strings.Trim(strings.TrimSpace(parts[1]), "`\"")
 		if value != "" {
 			d.scalar[current] = value

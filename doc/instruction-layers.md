@@ -37,6 +37,43 @@ The validator does not claim to prove arbitrary semantic contradictions in
 free-form Markdown. Such prose remains source-attributed and requires explicit
 human reconciliation.
 
+## Typed policy and activity evidence
+
+`required-phases` is a closed list: `product-ownership`, `task-planning`,
+`development`, `independent-review`, `archival`, and `integration`.
+The supported lifecycle requires product ownership, task planning, development,
+archival, and integration. Independent review is the one selectable activity:
+it may remain required or be explicitly omitted with a durable reason. The only
+managed `git-strategy` is `task-branch-with-squash-integration`. The known
+approval gates are `reviewer-approval-before-archive` and
+`archive-before-integration`; the former is present exactly when review is
+required, and the latter is mandatory. Unknown values, duplicates, unsupported
+omissions, and incompatible combinations are rejected before command output or
+state is returned.
+
+Status resolves every activity deterministically as `completed`,
+`not-required`, `not-applicable`, `externally-satisfied`, or `blocked`.
+An omitted independent review is explicitly `not-required` by the policy; an
+absent task artifact is never a skip. Integration is `not-applicable` only for
+a non-Git task. Every rendered activity names `.concoct/policy.md` as its
+requirement source; task evidence and canonical artifact reasons remain visible
+alongside that attribution.
+
+Every omission must have exactly one `not-required-reasons` list entry in the
+form `activity: reason`. Reasons are policy-owned durable evidence: an unknown,
+duplicate, blank, or required activity reason is rejected during composition.
+
+An active task may record an externally satisfied independent review in its
+front matter under `policy-activity-evidence`. The entry must name the required
+`independent-review` activity, provide a non-empty reason, be recorded by the
+Task Planner or Developer, and cite readable safe repository-relative evidence.
+No path component may be a symbolic link, so a regular file reached through a
+symlinked parent cannot escape the repository. Invalid evidence is diagnosed
+but never rendered as satisfied. The entry cannot contradict a `not-required`
+selection. Other activities require their canonical lifecycle evidence and
+cannot be externally satisfied. A valid external review permits archival
+without inventing a mutable review file.
+
 ## Ownership and compatibility
 
 Initialization installs project-owned policy and guidance. The executable supplies

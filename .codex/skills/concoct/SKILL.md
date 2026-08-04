@@ -261,7 +261,9 @@ Before finishing:
 2. Run relevant verification.
 3. Update `task-plan.md`.
 4. Update `notes.md`.
-5. Add a reviewer handoff covering:
+5. Add the policy-selected outgoing handoff: a Reviewer handoff while review
+   remains unresolved, or an Archivist handoff when review is explicitly
+   non-required or externally satisfied. Cover:
    - implemented work;
    - key decisions;
    - files changed;
@@ -269,7 +271,7 @@ Before finishing:
    - known risks;
    - skipped or unresolved work;
    - capability impact;
-   - suggested review focus.
+   - suggested review or archive focus.
 
 Then recommend:
 
@@ -277,7 +279,9 @@ Then recommend:
 concoct code --complete
 ```
 
-After validation succeeds, recommend `concoct review`.
+After validation succeeds, recommend the resolved next command: `concoct
+review` while review remains required, or `concoct archive` when review is
+explicitly non-required or externally satisfied.
 
 ### Developer to Reviewer
 

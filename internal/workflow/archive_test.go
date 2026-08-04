@@ -44,6 +44,68 @@ func TestCompleteArchiveRequiresExplicitMatchingOverride(t *testing.T) {
 	}
 }
 
+func TestCompleteArchiveRejectsGitPolicyWithoutIntegration(t *testing.T) {
+	root := fixture(t, "implementation-complete", "approved", "git:\n  enabled: true\n  trunk: trunk\n  task-branch: concoct/app-001-demo\n  base: abc123\n")
+	path := filepath.Join(root, ".concoct/policy.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "  - integration\n", "not-required-reasons:\n  - integration: non-Git delivery only\n", 1))
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompleteArchive(root, ArchiveOverride{}); err == nil || !strings.Contains(err.Error(), "requires integration") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCompleteArchiveRejectsInvalidExternalReviewEvidenceBeforeMutation(t *testing.T) {
+	valid := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - evidence.md\n"
+	tests := []struct {
+		name, evidence, want string
+		keepReview           bool
+	}{
+		{name: "missing reason", evidence: strings.Replace(valid, "    reason: external audit accepted the change\n", "", 1), want: "requires a durable reason"},
+		{name: "unsafe path", evidence: strings.Replace(valid, "evidence.md", "../outside.md", 1), want: "unsafe evidence path"},
+		{name: "unauthorized recorder", evidence: strings.Replace(valid, "recorded-by: developer", "recorded-by: reviewer", 1), want: "unauthorized recorded-by"},
+		{name: "immutable review contradiction", evidence: valid, keepReview: true, want: "cannot coexist with immutable review evidence"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := fixture(t, "implementation-complete", "approved", "")
+			archiveRel := authorArchiveFixture(t, root, false, "", "")
+			if !tt.keepReview {
+				if err := os.Remove(filepath.Join(root, ".concoct/current/review-01.md")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(filepath.Join(root, archiveRel, "review-01.md")); err != nil {
+					t.Fatal(err)
+				}
+				summaryPath := filepath.Join(root, archiveRel, "summary.md")
+				summary, err := os.ReadFile(summaryPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				write(t, summaryPath, strings.Replace(string(summary), "review: review-01.md\n", "review:\n", 1))
+			}
+			taskPath := filepath.Join(root, ".concoct/current/task-plan.md")
+			taskData, err := os.ReadFile(taskPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(t, taskPath, strings.Replace(string(taskData), "capability-impact:\n", tt.evidence+"capability-impact:\n", 1))
+			before := snapshot(t, root)
+			if _, err := CompleteArchive(root, ArchiveOverride{}); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+			if after := snapshot(t, root); after != before {
+				t.Fatal("archive completion mutated repository before rejecting invalid policy evidence")
+			}
+		})
+	}
+}
+
 func TestCompleteArchiveNonGitRejectsContradictoryLifecycleBeforeCleanup(t *testing.T) {
 	for _, replacement := range []string{"status: archived", "delivery: pending-integration", "delivery:"} {
 		t.Run(strings.ReplaceAll(replacement, ":", "-"), func(t *testing.T) {

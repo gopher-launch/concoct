@@ -49,41 +49,46 @@ func CompleteDeveloper(root string) (TransitionResult, error) {
 	if repo != nil && (!taskChanged || !notesChanged) {
 		return TransitionResult{}, fmt.Errorf("developer completion requires fresh changes to both .concoct/current/task-plan.md and .concoct/current/notes.md")
 	}
+	report := Detect(root)
+	if report.State != Complete {
+		return TransitionResult{}, fmt.Errorf("developer output is not a valid implementation-complete transition: %s", strings.Join(report.Diagnostics, "; "))
+	}
+	handoffHeading := "## Handoff to reviewer"
+	requiredHeadings := []string{"### Implemented", "### Verification", "### Known risks", "### Capability impact", "### Suggested review focus"}
+	if report.Next == "concoct archive" {
+		handoffHeading = "## Handoff to archivist"
+		requiredHeadings[len(requiredHeadings)-1] = "### Suggested archive focus"
+	}
 	notes, err := os.ReadFile(filepath.Join(root, ".concoct/current/notes.md"))
 	if err != nil {
 		return TransitionResult{}, err
 	}
-	handoff, err := reviewerHandoff(notes)
+	handoff, err := outgoingHandoff(notes, handoffHeading)
 	if err != nil {
 		return TransitionResult{}, err
 	}
-	for _, heading := range []string{"### Implemented", "### Verification", "### Known risks", "### Capability impact", "### Suggested review focus"} {
+	for _, heading := range requiredHeadings {
 		if !bytes.Contains(handoff, []byte(heading)) {
-			return TransitionResult{}, fmt.Errorf("notes.md lacks required fresh reviewer handoff heading %q", heading)
+			return TransitionResult{}, fmt.Errorf("notes.md lacks required fresh outgoing handoff heading %q", heading)
 		}
 	}
 	if repo != nil {
 		committedNotes, err := repo.FileAt("HEAD", ".concoct/current/notes.md")
 		if err != nil {
-			return TransitionResult{}, fmt.Errorf("read committed notes for reviewer handoff freshness: %w", err)
+			return TransitionResult{}, fmt.Errorf("read committed notes for outgoing handoff freshness: %w", err)
 		}
-		committedHandoff, committedErr := reviewerHandoff(committedNotes)
+		committedHandoff, committedErr := outgoingHandoff(committedNotes, handoffHeading)
 		if committedErr == nil && bytes.Equal(handoff, committedHandoff) {
-			return TransitionResult{}, fmt.Errorf("developer completion requires a fresh reviewer handoff; the current handoff is unchanged from HEAD")
+			return TransitionResult{}, fmt.Errorf("developer completion requires a fresh outgoing handoff; the current handoff is unchanged from HEAD")
 		}
-	}
-	report := Detect(root)
-	if report.State != Complete {
-		return TransitionResult{}, fmt.Errorf("developer output is not a valid implementation-complete transition: %s", strings.Join(report.Diagnostics, "; "))
 	}
 	return commitTransition(repo, gc, "concoct: complete "+gc.ID+" implementation", "Developer transition completed")
 }
 
-func reviewerHandoff(notes []byte) ([]byte, error) {
-	const heading = "## Handoff to reviewer"
+func outgoingHandoff(notes []byte, heading string) ([]byte, error) {
 	start := bytes.LastIndex(notes, []byte(heading))
 	if start < 0 {
-		return nil, fmt.Errorf("notes.md lacks required fresh reviewer handoff heading %q", heading)
+		return nil, fmt.Errorf("notes.md lacks required fresh outgoing handoff heading %q", heading)
 	}
 	return bytes.TrimSpace(notes[start:]), nil
 }
@@ -95,6 +100,9 @@ func ReserveReview(root string) (TransitionResult, error) {
 	}
 	if context.Report.State != Complete {
 		return TransitionResult{}, fmt.Errorf("review reservation requires implementation-complete state; found %s", context.Report.State)
+	}
+	if context.Report.Next != "concoct review" {
+		return TransitionResult{}, fmt.Errorf("review reservation is not required by the resolved policy; run %s", context.Report.Next)
 	}
 	path := filepath.Join(root, filepath.FromSlash(context.NextReview))
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)

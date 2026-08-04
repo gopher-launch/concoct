@@ -34,7 +34,7 @@ State detection reads the smallest set of artifacts needed to establish a phase 
 - `AGENTS.md` identifies a project through its repository-owned conventional entry point; the executable supplies the built-in protocol while `.concoct/policy.md` provides the project-selected workflow layer.
 - `.concoct/capabilities.md` records accepted current behavior.
 - `.concoct/roadmap.md` records roadmap items, their stable identifiers, and their statuses.
-- `.concoct/current/task-plan.md` identifies the active task through `id`, `roadmap-id`, `status`, and `capability-impact` metadata. During remediation it also uses `remediates-review` to name the latest `changes-requested` review being addressed. After a blocked review, a `blocked-review-resolution` mapping names the exact blocked review, the authorized recorder, the resolution evidence, and whether the task returns to `code` or `review`.
+- `.concoct/current/task-plan.md` identifies the active task through `id`, `roadmap-id`, `status`, and `capability-impact` metadata. During remediation it also uses `remediates-review` to name the latest `changes-requested` review being addressed. After a blocked review, a `blocked-review-resolution` mapping names the exact blocked review, the authorized recorder, the resolution evidence, and whether the task returns to `code` or `review`. Its optional `policy-activity-evidence` entries may externally satisfy one required activity only with a reason, authorized recorder, and safe repository-relative durable evidence.
 - `.concoct/current/notes.md` is required durable task context, but narrative text in it does not override structured task or review state.
 - `.concoct/current/review-NN.md` files record sequential review attempts. Each completed review has one outcome: `approved`, `changes-requested`, or `blocked`.
 - `.concoct/archive/*/` records completed tasks. Archive contents support validation and history reporting but do not make an active task current.
@@ -51,7 +51,7 @@ The states below are mutually exclusive. `invalid` is a detected condition, not 
 | `ready` | The project contract is valid; no populated active task or current review exists; roadmap and capability artifacts are readable and internally consistent. | `concoct next` |
 | `planned` | A valid task plan and notes exist; the plan maps to one eligible roadmap item; task status is `planned`; no review exists. | `concoct code` |
 | `implementation-in-progress` | The active task status is `implementation-in-progress`; required task artifacts are valid; after review, either `remediates-review` names the latest `changes-requested` review or a valid `blocked-review-resolution` names the latest `blocked` review and selects `code`. | `concoct code` to continue or resume |
-| `implementation-complete` | The active task status is `implementation-complete`; required task artifacts are valid; either no review exists, `remediates-review` names the latest `changes-requested` review and notes contain its completed finding dispositions, or a valid `blocked-review-resolution` names the latest `blocked` review and selects `review`. | `concoct review` |
+| `implementation-complete` | The active task status is `implementation-complete`; required task artifacts are valid; either no review exists, `remediates-review` names the latest `changes-requested` review and notes contain its completed finding dispositions, or a valid `blocked-review-resolution` names the latest `blocked` review and selects `review`. A policy-valid externally satisfied independent review instead recommends archival. | `concoct review` or `concoct archive` |
 | `review-changes-requested` | The highest valid sequential review is complete with outcome `changes-requested` and matches the active task. | `concoct code` |
 | `review-approved` | The highest valid sequential review is complete with outcome `approved`, matches the active task, and archive prerequisites including resolved capability impact are present. | `concoct archive` |
 | `archived` | A Git-backed approved task has committed archive evidence and a recorded archival commit; delivery and current cleanup remain pending. | `concoct integrate` |
@@ -183,8 +183,10 @@ Resolving a blocker is an explicit handoff under the responsible role. Product O
 - Successful prompt rendering by `next`, `roadmap`, `plan`, `code`, `review`, or `archive` never changes workflow state by itself.
 - `code --complete` validates Developer-owned output as a coherent whole before
   committing it, including a Git-backed freshness comparison for the final
-  reviewer handoff section. Non-Git completion requires the complete current
-  handoff artifact because no committed baseline exists. `review --reserve`
+  policy-selected outgoing handoff: Reviewer while review is unresolved, or
+  Archivist when review is explicitly non-required or externally satisfied.
+  Non-Git completion requires the complete current handoff artifact because no
+  committed baseline exists. `review --reserve`
   validates the clean recorded Git entry boundary before creating only the next
   incomplete review path; `review --complete` validates and commits its single
   outcome.

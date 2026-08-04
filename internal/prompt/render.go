@@ -34,7 +34,7 @@ func Render(root string, request Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	spec, err := selectRole(root, request, context)
+	spec, err := selectRole(root, request, context, effective.Policy)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +93,16 @@ func Render(root string, request Request) ([]byte, error) {
 	}
 	if request.Command == "review" {
 		fmt.Fprintf(&b, "- Next review artifact: `%s`\n", context.NextReview)
+	}
+	if !effective.Policy.IsDefault() && request.Command != "next" && request.Command != "roadmap" {
+		fmt.Fprintln(&b, "\n## Policy activity dispositions")
+		for _, activity := range context.Report.PolicyActivities {
+			fmt.Fprintf(&b, "\n- `%s`: `%s` (%s; source `%s`)", activity.Activity, activity.Disposition, activity.Reason, activity.Source)
+		}
+		if request.Command == "code" && reviewSatisfied(context, effective.Policy) {
+			fmt.Fprintln(&b, "\n\n## Policy-specific Developer handoff")
+			fmt.Fprintln(&b, "\nIndependent review is already resolved. On completion, add a fresh `## Handoff to archivist` section with the usual implementation, decisions, files, verification, risks, skipped work, and capability-impact evidence, plus `### Suggested archive focus`. `concoct code --complete` validates this outgoing handoff instead of a reviewer handoff.")
+		}
 	}
 	if request.Command == "plan" {
 		fmt.Fprintln(&b, "\n## Accepted capability prerequisites")
@@ -167,7 +177,7 @@ func Render(root string, request Request) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func selectRole(root string, request Request, c workflow.PromptContext) (roleSpec, error) {
+func selectRole(root string, request Request, c workflow.PromptContext, policy instruction.Policy) (roleSpec, error) {
 	base := []string{instruction.PolicyPath, instruction.GuidancePath, ".concoct/capabilities.md"}
 	switch request.Command {
 	case "next":
@@ -204,10 +214,19 @@ func selectRole(root string, request Request, c workflow.PromptContext) (roleSpe
 		}
 		reads := append(base, ".concoct/current/task-plan.md", ".concoct/current/notes.md")
 		reads = append(reads, c.ReviewFiles...)
-		return roleSpec{"developer", source, resource, mode, "Implement or remediate the active task, record verification and decisions, set honest task status, and leave a fresh reviewer handoff. Completed reviews are append-only.", "`concoct review` after completion, or `concoct code` while work remains in progress", reads, []string{"task-scoped source, tests, and documentation", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}}, nil
+		next := "`concoct review` after completion, or `concoct code` while work remains in progress"
+		outcome := "Implement or remediate the active task, record verification and decisions, set honest task status, and leave a fresh reviewer handoff. Completed reviews are append-only."
+		if reviewSatisfied(c, policy) {
+			next = "`concoct archive` after completion validation succeeds, or `concoct code` while work remains in progress"
+			outcome = "Implement the active task, record verification and decisions, set honest task status, and leave a fresh Archivist handoff because independent review is already resolved. Completed reviews remain append-only."
+		}
+		return roleSpec{"developer", source, resource, mode, outcome, next, reads, []string{"task-scoped source, tests, and documentation", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}}, nil
 	case "review":
 		if c.Report.State != workflow.Complete {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "implementation-complete")
+		}
+		if c.Report.Next != "concoct review" {
+			return roleSpec{}, fmt.Errorf("concoct review is not required by the resolved policy; run %s", c.Report.Next)
 		}
 		mode := "independent-review"
 		if c.ResolutionRoute == "review" {
@@ -219,8 +238,8 @@ func selectRole(root string, request Request, c workflow.PromptContext) (roleSpe
 		reads = append(reads, c.ReviewFiles...)
 		return roleSpec{"reviewer", "built-in:handoff-developer-to-reviewer", "handoff-developer-to-reviewer", mode, "Independently assess the implementation and create exactly the named next sequential review with one outcome: approved, changes-requested, or blocked. Do not implement fixes.", "approved → `concoct archive`; changes requested → `concoct code`; blocked → responsible role or human", reads, []string{c.NextReview}}, nil
 	case "archive":
-		if c.Report.State != workflow.Approved {
-			return roleSpec{}, wrongState(request.Command, c.Report.State, "review-approved")
+		if c.Report.State != workflow.Approved && !(c.Report.State == workflow.Complete && reviewSatisfied(c, policy)) {
+			return roleSpec{}, wrongState(request.Command, c.Report.State, "review-approved, or implementation-complete when independent-review is explicitly not-required or externally satisfied")
 		}
 		reads := append(base, ".concoct/roadmap.md", ".concoct/current/task-plan.md", ".concoct/current/notes.md", "complete implementation and Git evidence")
 		reads = append(reads, c.ReviewFiles...)
@@ -228,6 +247,18 @@ func selectRole(root string, request Request, c workflow.PromptContext) (roleSpe
 	default:
 		return roleSpec{}, fmt.Errorf("unsupported prompt command %q", request.Command)
 	}
+}
+
+func reviewSatisfied(c workflow.PromptContext, policy instruction.Policy) bool {
+	if !policy.Required(instruction.IndependentReview) {
+		return true
+	}
+	for _, activity := range c.Report.PolicyActivities {
+		if activity.Activity == string(instruction.IndependentReview) && activity.Disposition == "externally-satisfied" {
+			return true
+		}
+	}
+	return false
 }
 
 func valueOrNone(value string) string {

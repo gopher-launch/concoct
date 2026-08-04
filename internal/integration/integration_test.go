@@ -36,6 +36,45 @@ func TestLocalIntegrationAndCleanup(t *testing.T) {
 	}
 }
 
+func TestIntegrationRejectsPolicyOmission(t *testing.T) {
+	root, _, _ := setupArchived(t, false)
+	path := filepath.Join(root, ".concoct/policy.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "  - integration\n", "not-required-reasons:\n  - integration: non-Git delivery only\n", 1))
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(root, "", &bytes.Buffer{}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "requires integration") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAbortPreparedRecoveryDoesNotDependOnCurrentPolicyComposition(t *testing.T) {
+	root, _, pre := setupArchived(t, false)
+	archive := git(t, root, "rev-parse", "HEAD~1")
+	policyPath := filepath.Join(root, ".concoct/policy.md")
+	write(t, root, ".concoct/policy.md", "---\ninstruction-layer: policy\nrequired-phases: []\n---\n# Invalid current policy\n")
+	git(t, root, "add", ".concoct/policy.md")
+	git(t, root, "commit", "-qm", "corrupt current guidance after recovery preparation")
+	path := filepath.Join(root, ".git", "concoct", "integrations", "APP-001.yaml")
+	r := recovery{TaskID: "APP-001", Trunk: "trunk", TaskBranch: "concoct/app-001-demo", ArchiveCommit: archive, PreIntegrationHead: pre, Phase: "prepared"}
+	if err := writeRecovery(path, r, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(root, "abort", &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("recovery record remains: %v", err)
+	}
+	if _, err := os.Stat(policyPath); err != nil {
+		t.Fatalf("abort discarded current policy evidence: %v", err)
+	}
+}
+
 func TestConflictContinueAndAbortRetry(t *testing.T) {
 	t.Run("continue", func(t *testing.T) {
 		root, _, _ := setupArchived(t, true)
@@ -308,7 +347,8 @@ func TestRecoveryRefusesUnrelatedTrunkChanges(t *testing.T) {
 func setupArchived(t *testing.T, conflict bool) (root, road, pre string) {
 	t.Helper()
 	root = t.TempDir()
-	write(t, root, "AGENTS.md", "# Agents\n")
+	write(t, root, "AGENTS.md", "---\ninstruction-layer: project-guidance\n---\n# Agents\n")
+	write(t, root, ".concoct/policy.md", "---\ninstruction-layer: policy\nrequired-phases:\n  - product-ownership\n  - task-planning\n  - development\n  - independent-review\n  - archival\n  - integration\napproval-gates:\n  - reviewer-approval-before-archive\n  - archive-before-integration\ngit-strategy: task-branch-with-squash-integration\n---\n# Policy\n")
 	write(t, root, ".concoct/capabilities.md", "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Capabilities\n")
 	write(t, root, ".concoct/roadmap.md", "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n## APP-001 — Demo\n- Status: `planned`\n")
 	git(t, root, "init", "-q", "-b", "trunk")

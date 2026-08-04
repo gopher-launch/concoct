@@ -26,6 +26,23 @@ trunk upstream prompts before push unless `.concoct/config.yaml` contains
 
 `Concoct` turns ideas into implementation-ready plans that any capable coding agent can execute.
 
+## Policy-selected lifecycle
+
+The executable composes `.concoct/policy.md` into a closed typed activity model
+before detecting state or rendering a role. Product ownership, task planning,
+development, archival, and managed integration remain required. Independent
+review may remain required, be explicitly non-required with a policy-owned
+reason, or be externally satisfied by authorized task evidence whose readable
+repository-relative path contains no symbolic-link component. Status and
+non-default role prompts show each activity's requirement, disposition, reason,
+and policy source.
+
+Missing artifacts never imply a skip. Invalid or contradictory policy evidence
+refuses new commands without being rendered as satisfied. An already-recorded
+Git integration recovery remains available through `--continue` or `--abort`
+even if current guidance becomes invalid, because recovery preserves or unwinds
+an existing transaction rather than authorizing a new lifecycle transition.
+
 ## The loop
 
 ```text
@@ -37,7 +54,7 @@ Planner turns the product roadmap into task artifacts
   ↓
 Developer implements tasks
   ↓
-Reviewer checks the result
+Reviewer checks the result when required
   ↓
 Archivist records the outcome
   ↓

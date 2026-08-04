@@ -9,11 +9,18 @@ assigns clear Product Owner, Planner, Developer, Reviewer, and Archivist roles,
 and makes every transition inspectable.
 
 The result is a repeatable loop: decide what matters, plan it, implement it,
-review it independently, and retain the accepted outcome for the next task.
+resolve the configured review requirement, and retain the accepted outcome for
+the next task.
 
 ```text
 idea → plan → implement → review → archive → integrate
 ```
+
+The installed `.concoct/policy.md` selects a closed supported lifecycle. The
+default requires independent review. A repository may instead record review as
+explicitly non-required with a durable reason, or a task may cite safe durable
+evidence that the required review was externally satisfied. Protocol controls,
+planning, development, archival, and managed Git integration remain mandatory.
 
 ## Is Concoct a fit?
 
@@ -94,18 +101,19 @@ concoct code
 
 `code` renders the Developer prompt for the active task. A developer or coding
 agent follows it to make the scoped changes, run checks, record decisions and
-results, and leave a durable handoff for review. Finish the authored transition
-with `concoct code --complete`; Concoct validates role ownership and resulting
-workflow evidence, including a handoff changed from the committed version, then
-commits the complete Git-backed transition once.
+results, and leave a durable handoff for the resolved next role. Finish the
+authored transition with `concoct code --complete`; Concoct validates role
+ownership and resulting workflow evidence, including a Reviewer or Archivist
+handoff changed from the committed version, then commits the complete
+Git-backed transition once.
 
-### 4. Review independently
+### 4. Review independently when required
 
 ```bash
 concoct review
 ```
 
-`review` renders guidance for an independent Reviewer. Run
+Under the default policy, `review` renders guidance for an independent Reviewer. Run
 `concoct review --reserve` to create the next append-only review path
 exclusively from the validated clean task checkout, complete that reservation
 with exactly one outcome (`approved`,
@@ -115,6 +123,10 @@ When changes are requested, run `concoct code` again. The Developer addresses
 each finding without rewriting prior reviews, records every disposition, and
 hands the task back for the next `concoct review`. Repeat until approved.
 
+When status reports independent review as `not-required` or
+`externally-satisfied`, the Developer handoff and next command point directly
+to `concoct archive`; creating a review reservation is refused.
+
 ### 5. Archive the accepted result
 
 ```bash
@@ -122,7 +134,7 @@ concoct archive
 ```
 
 `archive` renders the Archivist prompt; it does not archive the task by itself.
-The Archivist preserves the approved plan, notes, reviews, and summary, then
+The Archivist preserves the accepted plan, notes, applicable reviews, and summary, then
 reconciles accepted capability evidence. After authoring those files, run
 `concoct archive --complete`; Concoct validates the complete transaction. For a
 Git-backed task it commits archival once on the task branch and stops before

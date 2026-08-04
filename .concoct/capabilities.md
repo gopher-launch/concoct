@@ -25,6 +25,7 @@ than an ongoing dependency on a roadmap item.
 - Archive: `.concoct/archive/2026-07-29-legacy-hitl-restructuring/` — baseline evidence; no approving review
 - Updated by: `.concoct/archive/2026-07-29-CON-003-command-contract-state-machine/`
 - Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
+- Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Documentation: `.codex/skills/concoct/SKILL.md`, `doc/workflow.md`
 
 ### Capability
@@ -230,6 +231,7 @@ executable-rendered protocol and role guidance where supported.
 
 ## CAP-005 — Executable CLI initialization and workflow status
 
+- Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
 - Added by: `.concoct/archive/2026-07-29-CON-005-go-cli-foundation/`
@@ -284,6 +286,7 @@ Project maintainers can bootstrap the workflow reliably from an installed binary
 
 ## CAP-006 — Deterministic role-aware prompt rendering
 
+- Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `developers and coding agents`
 - Added by: `.concoct/archive/2026-07-30-CON-006-deterministic-prompt-rendering/`
@@ -367,6 +370,7 @@ rules.
 
 ## CAP-007 — Git-backed task isolation and integration
 
+- Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `developers and coding agents`
 - Added by: `.concoct/archive/2026-07-30-CON-015-isolate-integrate-git-tasks/`
@@ -450,6 +454,7 @@ recoverable without requiring a hosting provider or remote.
 
 ## CAP-008 — Validated active task planning
 
+- Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `developers and coding agents`
 - Added by: `.concoct/archive/2026-07-30-CON-007-active-task-planning/`
@@ -526,6 +531,7 @@ rendering for a completed planning transition.
 
 ## CAP-009 — Evidence-backed next-action recommendation
 
+- Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
 - Added by: `.concoct/archive/2026-07-30-CON-028-recommend-next-project-action/`
@@ -598,6 +604,7 @@ to an existing workflow command.
 
 ## CAP-010 — Validated Developer and Reviewer completion
 
+- Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `developers and coding agents`
 - Added by: `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/`
@@ -683,6 +690,7 @@ handoffs, unsafe Git context, or manufactured role judgment.
   upgrades, and overlays remain roadmap intent rather than current capabilities.
 ## CAP-011 — Validated archive and capability reconciliation
 
+- Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
 - Added by: `.concoct/archive/2026-07-31-CON-009-implement-archive-and-capability-reconciliation/summary.md`

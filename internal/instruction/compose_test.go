@@ -88,6 +88,21 @@ func TestComposeRejectsUnsupportedDeclarationsByLayer(t *testing.T) {
 	}
 }
 
+func TestComposeRejectsDuplicatePolicyDeclaration(t *testing.T) {
+	root := fixture(t, "")
+	path := filepath.Join(root, PolicyPath)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(data), "git-strategy:", "git-strategy: task-branch-with-squash-integration\ngit-strategy:", 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Compose(root); err == nil || !strings.Contains(err.Error(), "duplicate declaration") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func fixture(t *testing.T, guidance string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -99,7 +114,7 @@ func fixture(t *testing.T, guidance string) string {
 		}
 	}
 	write(ProtocolPath, "---\ninstruction-layer: protocol\nprotected-controls:\n  - evidence-integrity\n  - completed-review-immutability\n  - workflow-artifact-ownership\n  - invalid-state-refusal\n---\n# Protocol\n")
-	write(PolicyPath, "---\ninstruction-layer: policy\nrequired-phases:\n  - planning\napproval-gates:\n  - independent-review\ngit-strategy: task-branch\n---\n# Policy\n")
+	write(PolicyPath, "---\ninstruction-layer: policy\nrequired-phases:\n  - product-ownership\n  - task-planning\n  - development\n  - independent-review\n  - archival\n  - integration\napproval-gates:\n  - reviewer-approval-before-archive\n  - archive-before-integration\ngit-strategy: task-branch-with-squash-integration\n---\n# Policy\n")
 	write(GuidancePath, "---\ninstruction-layer: project-guidance\n"+guidance+"---\n# Agents\ncustom bytes\n")
 	return root
 }
