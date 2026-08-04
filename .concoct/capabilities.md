@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-07-31
+updated: 2026-08-04
 ---
 
 # Capabilities
@@ -29,7 +29,7 @@ than an ongoing dependency on a roadmap item.
 
 ### Capability
 
-Concoct provides a Markdown-based workflow contract for moving substantial software work through product ownership, task planning, implementation, independent review, and archival. The contract separates non-overridable Concoct protocol, project-selected workflow policy, repository-owned project guidance, and active task context with explicit source attribution and artifact ownership. It defines canonical roadmap, capability, active-task, review, persona, prompt, and archive artifacts and provides an artifact-backed state machine covering valid transitions, remediation, blocked-review recovery, invalid evidence, and transactional archival.
+Concoct provides a Markdown-based workflow contract for moving substantial software work through product ownership, task planning, implementation, independent review, and archival. The contract separates non-overridable executable-owned protocol, project-selected workflow policy, repository-owned project guidance, and active task context with explicit source attribution and artifact ownership. It defines canonical roadmap, capability, active-task, review, and archive artifacts; supplies version-matched personas and handoffs while rendering role guidance; and provides an artifact-backed state machine covering valid transitions, remediation, blocked-review recovery, invalid evidence, and transactional archival.
 
 ### User value
 
@@ -37,7 +37,8 @@ Humans and agents can preserve product direction, task state, decisions, review 
 
 ### Inputs
 
-A repository whose participants follow `AGENTS.md` and the relevant Concoct artifacts and role guidance.
+A repository whose participants follow `AGENTS.md`, the relevant Concoct artifacts,
+and the executable-rendered role guidance.
 
 ### Outputs and effects
 
@@ -68,40 +69,56 @@ The workflow produces and maintains human-readable roadmap, task-plan, notes, se
 - `CAP-003` packages the contract for use in another repository.
 - `CAP-004` connects several coding-agent tools to the shared contract.
 
-## CAP-002 — Manual role-transition prompts
+## CAP-002 — Reusable role-transition guidance
 
 - Status: `active`
 - Audience: `developers and coding agents`
 - Added by: `baseline inventory`
 - Archive: `.concoct/archive/2026-07-29-legacy-hitl-restructuring/` — baseline evidence; no approving review
-- Documentation: `.concoct/prompts/README.md`
+- Updated by: `.concoct/archive/2026-08-04-CON-030-make-built-in-workflow-content-executable-owned/summary.md`
+- Documentation: `README.md`, `doc/workflow.md`, `doc/command-reference.md`
 
 ### Capability
 
-Concoct provides reusable prompts for roadmap intake and for handoffs from product owner to task planner, task planner to developer, developer to reviewer, reviewer to developer or archivist, blocked reviewer to the responsible role, and archivist back to product owner.
+Concoct provides reusable, version-matched guidance for roadmap intake and for
+handoffs from Product Owner to Task Planner, Task Planner to Developer,
+Developer to Reviewer, Reviewer to Developer or Archivist, blocked Reviewer to
+the responsible role, and Archivist back to Product Owner. The executable owns
+these built-in resources and exposes their logical identifiers and exact bytes
+through `concoct defaults list` and `concoct defaults show`.
 
 ### User value
 
-Users can run the workflow manually with an agent while keeping role boundaries, required inputs, allowed mutations, completion evidence, and next actions explicit.
+Users can run the workflow with a human or agent while keeping role boundaries,
+required inputs, allowed mutations, completion evidence, and next actions
+explicit and matched to the installed executable.
 
 ### Inputs
 
-The repository's current workflow artifacts and the prompt matching the desired transition.
+The repository's current workflow artifacts and the executable resource matching
+the desired transition.
 
 ### Outputs and effects
 
-Each prompt instructs an agent which persona and artifacts to read, which artifacts the selected role may update, what outcome to produce, and which transition should follow.
+Each handoff tells the acting human or agent which inputs apply, which artifacts
+the selected role may update, what outcome to produce, and which transition
+should follow. CAP-006 selects and renders these resources with validated
+repository context.
 
 ### Limitations
 
-- Manual prompt use still requires a human or agent to select and supply the
-  appropriate asset; CAP-006 provides executable selection and rendering for
-  the initial roadmap, planning, development, and review roles.
+- Built-in resources are inspectable guidance, not autonomous role execution or
+  proof that the requested work was completed.
+- Former project-local protocol, persona, and handoff copies are ignored; Concoct
+  does not migrate or delete them automatically.
 
 ### Verification evidence
 
-- `.concoct/prompts/roadmap/human-roadmap-input.md`
-- `.concoct/prompts/handoffs/`
+- `internal/defaults/defaults.go` defines the stable built-in resource registry.
+- `internal/defaults/defaults_test.go` verifies stable listing, reading, and
+  unknown-resource diagnostics.
+- `.concoct/archive/2026-08-04-CON-030-make-built-in-workflow-content-executable-owned/review-04.md`
+  records approval of executable ownership and inspection behavior.
 
 ### Related capabilities
 
@@ -133,7 +150,11 @@ The contents of `templates/` and project-specific edits to the installed placeho
 
 ### Outputs and effects
 
-The template defines conventional root files and tool adapters alongside Concoct-owned material under `.concoct/`, including `current/`, `archive/`, personas, prompts, a roadmap, and a capability ledger.
+The initialized project contains conventional root files and tool adapters
+alongside project-owned Concoct material under `.concoct/`, including policy,
+configuration, `current/`, `archive/`, a roadmap, and a capability ledger.
+Built-in protocol, personas, handoffs, and prompt documentation remain embedded
+in the executable and are not installed as mutable project files.
 
 ### Limitations
 
@@ -142,9 +163,15 @@ The template defines conventional root files and tool adapters alongside Concoct
 
 ### Verification evidence
 
-- `templates/` contains the root adapters, `.concoct/` artifact hierarchy, persona files, prompts, and placeholder current-task files.
-- `internal/project/project_test.go` verifies complete embedded template copying and real-Git initialization behavior.
-- `.concoct/archive/2026-07-29-CON-005-go-cli-foundation/review-03.md` records approval of caller-directory-independent initialization with root files, dotfiles, nested content, personas, prompts, staged files, and no generated commit.
+- `templates/` contains the distributed source material for project-owned outputs
+  and executable resources.
+- `internal/project/project_test.go` verifies selective project-owned output,
+  exclusion of built-in protocol/persona/handoff files, and real-Git
+  initialization behavior.
+- `.concoct/archive/2026-07-29-CON-005-go-cli-foundation/review-03.md` records
+  approval of the original caller-directory-independent initialization,
+  staging, and no-generated-commit foundation later narrowed by CON-030's
+  accepted ownership boundary.
 
 ### Related capabilities
 
@@ -172,11 +199,15 @@ Teams can use the file-based workflow with multiple coding-agent tools without m
 
 ### Inputs
 
-The adapter appropriate to the user's tool and the canonical files installed in the project.
+The adapter appropriate to the user's tool, the project-owned files installed in
+the repository, and the version-matched executable guidance rendered for the
+selected role.
 
 ### Outputs and effects
 
-The adapters point tools to `AGENTS.md`, Concoct-owned protocol and policy, `.concoct/current/task-plan.md`, `.concoct/current/notes.md`, and role guidance where supported.
+The adapters point tools to repository-owned `AGENTS.md`, project policy,
+`.concoct/current/task-plan.md`, `.concoct/current/notes.md`, and the
+executable-rendered protocol and role guidance where supported.
 
 ### Limitations
 
@@ -200,11 +231,15 @@ The adapters point tools to `AGENTS.md`, Concoct-owned protocol and policy, `.co
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
 - Added by: `.concoct/archive/2026-07-29-CON-005-go-cli-foundation/`
+- Updated by: `.concoct/archive/2026-08-04-CON-030-make-built-in-workflow-content-executable-owned/summary.md`
 - Documentation: `README.md`, `doc/command-reference.md`, `doc/state-machine.md`
 
 ### Capability
 
-Concoct provides a Go CLI with `init` and read-only `status` commands. It can create a Concoct-enabled Git repository from the complete embedded project template and derive deterministic workflow state from canonical repository artifacts.
+Concoct provides a Go CLI with `init` and read-only `status` commands. It can
+create a Concoct-enabled Git repository from the selectively installed,
+project-owned portion of its embedded distribution and derive deterministic
+workflow state from canonical repository artifacts.
 
 ### User value
 
@@ -217,7 +252,10 @@ Project maintainers can bootstrap the workflow reliably from an installed binary
 
 ### Outputs and effects
 
-- `init` copies root files, dotfiles, nested templates, personas, and prompts; writes bootstrap guidance; initializes Git; stages generated files; and creates no commit.
+- `init` copies project-owned root files, dotfiles, adapters, policy, truth, and
+  state; excludes built-in protocol, personas, handoffs, and prompt
+  documentation; writes bootstrap guidance; initializes Git; stages generated
+  files; and creates no commit.
 - `status` discovers the project, validates roadmap, capability, task, notes, review, remediation, and blocked-review evidence, then reports the applicable state and next action without modifying the repository.
 - Malformed, incomplete, contradictory, or representative interrupted-archive evidence is reported as `invalid` with actionable diagnostics.
 
