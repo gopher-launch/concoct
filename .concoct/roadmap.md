@@ -62,8 +62,8 @@ Delivered and cancelled items leave the active roadmap after their relationships
 are reconciled. Their identifiers remain reserved and must not be reused.
 
 Reserved historical identifiers: `CON-003`, `CON-004`, `CON-005`, `CON-006`,
-`CON-007`, `CON-008`, `CON-009`, `CON-015`, `CON-028`, `CON-029`, `CON-030`,
-`CON-035`.
+`CON-007`, `CON-008`, `CON-009`, `CON-015`, `CON-018`, `CON-028`, `CON-029`,
+`CON-030`, `CON-035`.
 Accepted delivery evidence is preserved by the corresponding capability records
 and archives; CON-004 was cancelled as redundant and has no delivery archive.
 
@@ -79,7 +79,7 @@ concoct plan <roadmap-id>
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-018, CON-031, CON-032
+- Depends on: CON-031, CON-032
 - Capability prerequisites: CAP-005, CAP-006, CAP-007, CAP-008, CAP-009, CAP-010, CAP-011
 - Capability impact: allows Concoct to invoke an agent for one recommended workflow action and validate its result
 
@@ -332,7 +332,7 @@ Concoct's shared workflow contract must remain reusable and portable, while clie
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-018
+- Depends on: None
 - Capability prerequisites: CAP-001, CAP-003, CAP-005
 - Capability impact: adds safe Concoct onboarding for brownfield repositories
 
@@ -361,45 +361,11 @@ materially drifted.
 
 ---
 
----
-
-## CON-018 — Configure workflow policy
-
-- Status: `delivered`
-- Archive: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007
-- Capability impact: makes lifecycle requirements explicit and configurable
-
-### Outcome
-
-Allow a repository to select a small typed policy for required, conditional,
-externally satisfied, unsupported, or inapplicable workflow activities without
-turning Concoct into an arbitrary workflow-graph engine.
-
-### Requirements
-
-- Resolve each governed activity to visible evidence such as `completed`, `not-required`, `not-applicable`, `externally-satisfied`, or `blocked`.
-- Require a reason when policy permits a phase or control to be skipped.
-- Keep contradictory evidence invalid, completed reviews immutable, capability impact resolved before acceptance, and archival factual.
-- Generate handoffs and transition recommendations from effective policy and actual repository state.
-- Preserve the current happy path as the supported default profile.
-
-### Acceptance criteria
-
-- Two repositories can select different supported lifecycle policies without changing Concoct protocol.
-- Status and rendered prompts expose the resolved requirement and disposition of every governed activity.
-- Invalid or invariant-weakening policy is rejected deterministically.
-- Absence of an artifact is never silently interpreted as an authorized skip.
-
----
-
 ## CON-019 — Support multiple task origins
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-018
+- Depends on: None
 - Capability prerequisites: CAP-001, CAP-005
 - Capability impact: allows repository work that does not originate in the product roadmap
 
@@ -430,7 +396,7 @@ investigations, experiments, review findings, and external changes.
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-018
+- Depends on: None
 - Capability prerequisites: CAP-007
 - Capability impact: generalizes Git integration while preserving task-branch behavior as the default managed strategy
 
@@ -520,7 +486,7 @@ what remains uncertain.
 
 - Status: `candidate`
 - Priority: `medium`
-- Depends on: CON-018, CON-019
+- Depends on: CON-019
 - Capability prerequisites: CAP-001
 - Capability impact: adds reusable, inspectable policy presets for common kinds of work
 
@@ -580,7 +546,7 @@ branches, worktrees, contributors, interruptions, and external reviews.
 
 - Status: `candidate`
 - Priority: `medium`
-- Depends on: CON-018, CON-020, CON-023
+- Depends on: CON-020, CON-023
 - Capability prerequisites: CAP-005, CAP-006
 - Capability impact: makes configured workflow behavior and state interpretation directly inspectable
 
@@ -986,7 +952,7 @@ The initial CLI lifecycle through archival is complete. Prioritize the
 flexibility work in three increments:
 
 ```text
-Foundation:   CON-018 → CON-016 → CON-021 → CON-022
+Foundation:   CON-016 → CON-021 → CON-022
 Everyday use: CON-019 → CON-027 → CON-020 → CON-023 → CON-025 → CON-026
 Scale:        CON-024
 ```
@@ -994,7 +960,8 @@ Scale:        CON-024
 Productization proceeds from CON-031 compatibility identity to CON-014 overlays,
 which build on the accepted executable-owned content capabilities. CON-013
 follows CON-014 and CON-031. Lifecycle execution follows `CON-032` for result
-semantics, then converges with the completed initial lifecycle, CON-018 policy,
+semantics, then converges with the completed initial lifecycle and accepted
+policy,
 the accepted embedded-content capabilities, and CON-031 compatibility identity
 at CON-010. Repeating and durable
 orchestration then proceed as `CON-010 → CON-033 → CON-034`. This keeps a
