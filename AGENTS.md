@@ -8,10 +8,10 @@ instruction-layer: project-guidance
 
 Read these sources in precedence order before substantial work:
 
-1. `.concoct/protocol.md` — non-overridable Concoct controls.
+1. The Concoct executable's built-in protocol — non-overridable controls.
 2. `.concoct/policy.md` — project-selected workflow policy.
 3. `AGENTS.md` — repository-owned guidance (this file).
-4. The selected persona and `.concoct/current/` task context.
+4. The executable-rendered persona and `.concoct/current/` task context.
 
 Project guidance may add stricter compatible requirements but may not weaken
 protocol controls. Concoct preserves this file as project-owned content.
@@ -30,7 +30,9 @@ Concoct's source content lives in root-level directories:
 
 - Concoct is managed by Concoct and its workflow/task artifacts live in the `.concoct/` directory.
 - `cmd/`, `doc/`, and `templates/` contain reusable workflow material.
-- `templates/` contains the exact filesystem structure copied into generated projects.
+- `templates/` contains both the project-owned files selectively installed into
+  generated projects and the executable-owned Markdown resources embedded in
+  the binary.
 
 Generated projects place Concoct-owned state under `.concoct/`. The executable
 supplies built-in protocol, personas, and handoffs through rendered prompts;
@@ -56,17 +58,20 @@ project root.
 
 ## Working on Concoct
 
-For substantial tasks, read `current/task-plan.md`, `current/notes.md`, and the
-relevant executable-rendered persona. Keep material decisions in the notes and
-archive completed work under `archive/`.
+For substantial tasks, read `.concoct/current/task-plan.md`,
+`.concoct/current/notes.md`, and the relevant executable-rendered persona. Keep
+material decisions in the notes and archive completed work under
+`.concoct/archive/`.
 
 Before finishing changes to templates or initialization:
 
-1. Run `bash -n cmd/concoct/concoct`.
-2. Run `./cmd/concoct/concoct` against a temporary parent directory.
+1. Run `bash -n cmd/concoct/concoct.sh`.
+2. Run `./cmd/concoct/concoct.sh init <temporary-project-path>` against a
+   temporary parent directory.
 3. Confirm dotfiles, nested project-owned templates, and planning directories
    were copied; confirm built-in protocol, persona, and prompt files were not.
 4. Confirm the generated project is a Git repository and contains its bootstrap prompt.
 5. Run `git diff --check` and search for stale branding or paths.
 
-Preserve executable permissions on `cmd/concoct/concoct`. Never initialize or commit generated test projects inside this repository.
+Preserve executable permissions on `cmd/concoct/concoct.sh`. Never initialize
+or commit generated test projects inside this repository.

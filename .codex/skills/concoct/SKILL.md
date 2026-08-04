@@ -30,13 +30,14 @@ human input
 Read and follow in precedence order:
 
 ```text
-.concoct/protocol.md
+.concoct executable built-in protocol
 .concoct/policy.md
 AGENTS.md
-selected persona and active task context
+selected executable-rendered persona and active task context
 ```
 
-The protocol is Concoct-owned and non-overridable. Policy is project-selected.
+The executable supplies the Concoct-owned, non-overridable protocol and the
+selected persona. Policy is project-selected.
 `AGENTS.md` is repository-owned project guidance and the conventional entry
 point. Project guidance may strengthen protocol controls but may not weaken
 them. Rendered prompts attribute all layers and remain guidance rather than
@@ -46,7 +47,7 @@ completed role evidence.
 
 Use these files in the project root:
 
-- `.concoct/protocol.md` — Concoct-owned invariant controls
+- executable-built-in protocol — Concoct-owned invariant controls (not installed)
 - `.concoct/policy.md` — project-selected lifecycle policy
 - `AGENTS.md` — repository-owned standing guidance and entry point
 - `.concoct/capabilities.md` — current accepted product capabilities
@@ -55,8 +56,7 @@ Use these files in the project root:
 - `.concoct/current/notes.md` — durable task context and handoffs
 - `.concoct/current/review-NN.md` — sequential review artifacts
 - `.concoct/archive/` — completed task history
-- `.concoct/personas/` — role-specific guidance
-- `.concoct/prompts/` — reusable human-input and transition prompts
+- executable-rendered personas and handoffs — role-specific guidance (not installed)
 
 Do not create extra workflow artifacts unless the task genuinely needs them.
 
@@ -152,15 +152,12 @@ The archive should preserve:
 
 ## Personas
 
-Adopt the persona selected by the current prompt or workflow state.
+Adopt the executable-owned persona rendered in the current prompt or selected
+by workflow state.
 
-Canonical personas:
-
-- `.concoct/personas/product-owner.md`
-- `.concoct/personas/task-planner.md`
-- `.concoct/personas/developer.md`
-- `.concoct/personas/reviewer.md`
-- `.concoct/personas/archivist.md`
+Canonical personas are executable resources selected by logical ID:
+`persona-product-owner`, `persona-task-planner`, `persona-developer`,
+`persona-reviewer`, and `persona-archivist`.
 
 Additional audience-specific documentation personas may exist.
 
@@ -181,7 +178,7 @@ In particular:
 When a human provides a product idea, concern, request, or change in direction:
 
 1. Read `AGENTS.md`.
-2. Read the Product Owner persona.
+2. Read the Product Owner persona rendered by `concoct roadmap`.
 3. Read `capabilities.md`.
 4. Read `roadmap.md`.
 5. Read relevant archive summaries.
@@ -207,7 +204,7 @@ concoct plan <roadmap-id>
 Before creating an active plan:
 
 1. Read `AGENTS.md`.
-2. Read the Task Planner persona.
+2. Read the Task Planner persona rendered by `concoct plan <roadmap-id>`.
 3. Read `capabilities.md`.
 4. Read `roadmap.md`.
 5. Read relevant archive history.
@@ -239,7 +236,7 @@ concoct code
 Before editing code:
 
 1. Read `AGENTS.md`.
-2. Read the Developer persona.
+2. Read the Developer persona rendered by `concoct code`.
 3. Read `capabilities.md`.
 4. Read the active task plan.
 5. Read notes.
@@ -390,7 +387,7 @@ Non-Git tasks retain the direct ready transition.
 Before archiving:
 
 1. Read `AGENTS.md`.
-2. Read the Archivist persona.
+2. Read the Archivist persona rendered by `concoct archive`.
 3. Read capabilities, roadmap, task plan, notes, all reviews, relevant changes, tests, and documentation.
 4. Validate metadata, roadmap ID, approval, capability impact, required artifacts, implementation presence, and archive destination.
 

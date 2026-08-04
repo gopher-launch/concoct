@@ -56,7 +56,9 @@ The workflow produces and maintains human-readable roadmap, task-plan, notes, se
 ### Verification evidence
 
 - `.codex/skills/concoct/SKILL.md` defines the canonical artifacts, role workflows, state discipline, review outcomes, and archive process.
-- `.concoct/personas/product-owner.md`, `task-planner.md`, `developer.md`, `reviewer.md`, and `archivist.md` provide role-specific operating guidance.
+- `templates/.concoct/personas/product-owner.md`, `task-planner.md`,
+  `developer.md`, `reviewer.md`, and `archivist.md` are the readable Markdown
+  sources for executable-owned role guidance.
 - `.concoct/roadmap.md` and `.concoct/current/` demonstrate the living artifact layout in this repository.
 - `doc/command-reference.md` defines the complete normative contract for the current command surface.
 - `doc/state-machine.md` defines workflow state from observable artifacts and specifies transitions, review recovery, invalid states, and archive atomicity.
