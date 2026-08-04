@@ -763,7 +763,7 @@ explicit bug provenance.
 
 ## CON-030 — Make built-in workflow content executable-owned
 
-- Status: `active`
+- Status: `delivered`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-003, CAP-004, CAP-006
