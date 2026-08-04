@@ -365,7 +365,7 @@ materially drifted.
 
 ## CON-018 — Configure workflow policy
 
-- Status: `active`
+- Status: `delivered`
 - Archive: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/`
 - Priority: `high`
 - Depends on: None
