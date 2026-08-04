@@ -5,7 +5,7 @@ Act as the Task Planner for this repository.
 
 Read:
 - `AGENTS.md`
-- `.concoct/personas/task-planner.md`
+- the selected executable-owned Task Planner persona rendered in this prompt
 - `.concoct/capabilities.md`
 - `.concoct/roadmap.md`
 - relevant archive summaries

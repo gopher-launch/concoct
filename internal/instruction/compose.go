@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/gopher-launch/concoct/internal/defaults"
 )
 
 const (
@@ -42,12 +44,18 @@ type Effective struct{ Sources []Source }
 // Compose loads protocol, policy, and project guidance in precedence order.
 // It returns no partial composition when any declaration is invalid.
 func Compose(root string) (Effective, error) {
-	paths := []struct{ layer, path string }{
-		{"protocol", ProtocolPath}, {"policy", PolicyPath}, {"project-guidance", GuidancePath},
+	paths := []struct{ layer, path, resource string }{
+		{"protocol", "built-in:protocol", "protocol"}, {"policy", PolicyPath, ""}, {"project-guidance", GuidancePath, ""},
 	}
 	var out Effective
 	for _, item := range paths {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(item.path)))
+		var data []byte
+		var err error
+		if item.resource != "" {
+			data, err = defaults.Read(item.resource, "instruction composition")
+		} else {
+			data, err = os.ReadFile(filepath.Join(root, filepath.FromSlash(item.path)))
+		}
 		if err != nil {
 			return Effective{}, fmt.Errorf("compose %s layer from %s: %w; restore the required source before rendering guidance", item.layer, item.path, err)
 		}

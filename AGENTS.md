@@ -32,7 +32,11 @@ Concoct's source content lives in root-level directories:
 - `cmd/`, `doc/`, and `templates/` contain reusable workflow material.
 - `templates/` contains the exact filesystem structure copied into generated projects.
 
-Generated projects place Concoct-owned state and personas under `.concoct/`. Conventional files and tool adapters such as `AGENTS.md`, `.codex/`, and `.github/` remain at the generated project root.
+Generated projects place Concoct-owned state under `.concoct/`. The executable
+supplies built-in protocol, personas, and handoffs through rendered prompts;
+they are not installed as mutable project files. Conventional files and tool
+adapters such as `AGENTS.md`, `.codex/`, and `.github/` remain at the generated
+project root.
 
 ## Design principles
 
@@ -52,13 +56,16 @@ Generated projects place Concoct-owned state and personas under `.concoct/`. Con
 
 ## Working on Concoct
 
-For substantial tasks, read `current/task-plan.md`, `current/notes.md`, and the relevant persona under `personas/`. Keep material decisions in the notes and archive completed work under `archive/`.
+For substantial tasks, read `current/task-plan.md`, `current/notes.md`, and the
+relevant executable-rendered persona. Keep material decisions in the notes and
+archive completed work under `archive/`.
 
 Before finishing changes to templates or initialization:
 
 1. Run `bash -n cmd/concoct/concoct`.
 2. Run `./cmd/concoct/concoct` against a temporary parent directory.
-3. Confirm dotfiles, nested templates, personas, and planning directories were copied.
+3. Confirm dotfiles, nested project-owned templates, and planning directories
+   were copied; confirm built-in protocol, persona, and prompt files were not.
 4. Confirm the generated project is a Git repository and contains its bootstrap prompt.
 5. Run `git diff --check` and search for stale branding or paths.
 

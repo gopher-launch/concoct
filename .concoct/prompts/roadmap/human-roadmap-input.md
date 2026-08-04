@@ -5,7 +5,7 @@ Act as the Product Owner for this repository.
 
 Read:
 - `AGENTS.md`
-- `.concoct/personas/product-owner.md`
+- the selected executable-owned Product Owner persona rendered in this prompt
 - `.concoct/capabilities.md`
 - `.concoct/roadmap.md`
 - relevant `.concoct/archive/**/summary.md` files

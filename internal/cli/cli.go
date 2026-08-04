@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gopher-launch/concoct/internal/defaults"
 	"github.com/gopher-launch/concoct/internal/gitrepo"
 	"github.com/gopher-launch/concoct/internal/integration"
 	"github.com/gopher-launch/concoct/internal/project"
@@ -16,6 +17,8 @@ import (
 
 const usage = `Usage:
   concoct init <project>
+  concoct defaults list
+  concoct defaults show <logical-id>
   concoct status
   concoct next [--output <path>]
   concoct roadmap [--output <path>]
@@ -38,6 +41,23 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	switch args[0] {
+	case "defaults":
+		if len(args) == 2 && args[1] == "list" {
+			for _, r := range defaults.List() {
+				fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.ID, r.Kind, defaults.Provenance)
+			}
+			return nil
+		}
+		if len(args) == 3 && args[1] == "show" {
+			data, err := defaults.Read(args[2], "defaults show")
+			if err != nil {
+				return err
+			}
+			_, err = stdout.Write(data)
+			return err
+		}
+		fmt.Fprint(stderr, usage)
+		return fmt.Errorf("defaults requires `list` or `show <logical-id>`")
 	case "init":
 		if len(args) != 2 || strings.TrimSpace(args[1]) == "" {
 			fmt.Fprint(stderr, usage)

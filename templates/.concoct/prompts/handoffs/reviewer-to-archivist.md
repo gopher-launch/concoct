@@ -5,7 +5,7 @@ Act as the Archivist for this repository.
 
 Read:
 - `AGENTS.md`
-- `.concoct/personas/archivist.md`
+- the selected executable-owned Archivist persona rendered in this prompt
 - `.concoct/capabilities.md`
 - `.concoct/roadmap.md`
 - `.concoct/current/task-plan.md`

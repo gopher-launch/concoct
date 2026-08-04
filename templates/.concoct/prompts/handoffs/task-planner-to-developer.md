@@ -5,7 +5,7 @@ Act as the Developer for this repository.
 
 Read:
 - `AGENTS.md`
-- `.concoct/personas/developer.md`
+- the selected executable-owned Developer persona rendered in this prompt
 - `.concoct/capabilities.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`

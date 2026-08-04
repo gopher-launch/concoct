@@ -11,7 +11,7 @@ repository-owned project guidance and remains the conventional entry point.
 
 Read these sources in precedence order before substantial work:
 
-1. `.concoct/protocol.md` — Concoct-owned non-overridable controls.
+1. The Concoct executable's built-in protocol — non-overridable controls.
 2. `.concoct/policy.md` — project-selected workflow policy.
 3. `AGENTS.md` — repository-owned project guidance (this file).
 4. The persona selected by the prompt and `.concoct/current/` task context.
@@ -57,7 +57,7 @@ Substantial work uses:
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`
 - `.concoct/current/review-NN.md` for sequential independent reviews
-- `.concoct/personas/` for role-specific operating guidance
+- role-specific operating guidance rendered by the Concoct executable
 
 Read current files before updating them. Keep durable decisions and verification
 results in notes, and do not create workflow ceremony for trivial work.

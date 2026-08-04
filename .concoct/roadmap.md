@@ -763,54 +763,251 @@ explicit bug provenance.
 
 ## CON-030 — Make built-in workflow content executable-owned
 
-- Status: `planned`
+- Status: `active`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-003, CAP-004, CAP-006
-- Capability impact: makes version-matched built-in prompts and personas part of the executable product distribution
+- Capability impact: makes version-matched built-in prompts, personas, and workflow guidance part of the executable product distribution
+- Archive: `.concoct/archive/2026-08-04-CON-030-make-built-in-workflow-content-executable-owned/`
 
 ### Outcome
 
 Make Concoct's built-in prompts, personas, and other product-owned workflow
 guidance immutable, inspectable resources of the executable while retaining
-their readable Markdown sources. Initialized projects receive project-owned
-state and guidance rather than runtime copies of product defaults.
+their readable Markdown sources. Initialized projects receive only
+project-owned truth, guidance, configuration, and state rather than mutable
+runtime copies of product defaults.
+
+CON-030 establishes the self-contained executable foundation. CON-014 later
+adds the optional ability for a project to tune built-in behaviour through
+explicit overlays.
 
 ### Rationale
 
-Built-in guidance affects executable behavior. Materializing mutable copies in
-every initialized repository creates accidental forks, makes behavior depend on
+Built-in guidance affects executable behaviour. Materializing mutable copies in
+every initialized repository creates accidental forks, makes behaviour depend on
 initialization date, and complicates upgrades. The CLI already embeds the
 complete template distribution; this outcome changes the ownership and runtime
 model rather than introducing embedding as a new mechanism.
 
+Concoct is under active development and has no stable release or backward-
+compatibility commitment. This item therefore establishes the intended product
+model directly without adding legacy detection, migration, or compatibility
+machinery.
+
+### Product decisions
+
+#### Runtime ownership boundary
+
+Everything currently under `concoct/templates/` is initially treated as
+product-owned runtime content. Planning must inventory those files and identify
+any whose generated output is deliberately repository-owned, but the template
+or generation logic remains executable-owned.
+
+Product-owned runtime content:
+
+- is compiled into the Concoct executable;
+- is version-matched to that executable;
+- is immutable at runtime;
+- is not copied into initialized repositories;
+- remains readable Markdown in the Concoct source repository; and
+- can be inspected through supported CLI commands.
+
+The source-tree location is an implementation detail. Runtime code identifies
+embedded resources using stable logical identifiers rather than paths beneath
+`concoct/templates/`.
+
+#### Repository-owned content
+
+Initialized repositories contain only content whose meaning belongs to that
+specific project, including:
+
+- roadmap and capability records;
+- project configuration;
+- explicit project guidance and conventions;
+- current task state;
+- task plans, notes, reviews, and other lifecycle artifacts;
+- archive history;
+- repository-specific adapters; and
+- generated state required to operate or resume the workflow.
+
+Initialization must not create editable copies of built-in prompts, personas,
+or general workflow instructions.
+
+Ownership of an executable-owned template and ownership of its generated output
+may differ. For example, the executable may own the logic or skeleton used to
+create a roadmap while the resulting roadmap is project-owned.
+
+#### File classification
+
+During planning, inventory every file currently materialized by `concoct init`
+and assign it to exactly one of these classifications. If a file mixes ownership
+concerns, split those concerns rather than assigning the whole file to one side.
+
+| Classification                       | Ownership                           | Treatment                                       |
+| ------------------------------------ | ----------------------------------- | ----------------------------------------------- |
+| Built-in prompts                     | Executable                          | Embed and stop installing                       |
+| Built-in personas                    | Executable                          | Embed and stop installing                       |
+| General workflow guidance            | Executable                          | Embed and stop installing                       |
+| Roadmap and capabilities             | Project                             | Continue storing in the repository              |
+| Project instructions and conventions | Project                             | Continue storing in the repository              |
+| Current-task and lifecycle artifacts | Project-generated state             | Continue storing in the repository              |
+| Archived task artifacts              | Project history                     | Continue storing in the repository              |
+| Configuration                        | Project                             | Continue storing in the repository              |
+| External-agent adapters              | Project or installation integration | Preserve according to their operational purpose |
+| Examples and samples                 | Documentation                       | Do not install unless explicitly requested      |
+
+#### Persona composition
+
+Current persona files are product-owned built-ins.
+
+A built-in persona defines generic role behaviour, responsibilities, decision
+boundaries, and professional defaults. It must not contain facts or decisions
+specific to the Concoct repository merely because Concoct uses itself for its
+own development.
+
+If an existing persona mixes generic role behaviour with project-specific
+guidance:
+
+- retain generic role behaviour in the embedded persona;
+- move actual project truth into an appropriate repository-owned artifact; and
+- render that project evidence into the effective prompt where required.
+
+The effective prompt is composed from immutable executable resources and current
+repository evidence. It is not sourced from a mutable persona copied into the
+repository.
+
+#### Resource identifiers
+
+Embedded resources receive stable logical identifiers independent of source-tree
+paths. The identifier scheme distinguishes resource kind and name, for example:
+
+- `prompt/plan`
+- `prompt/code`
+- `prompt/review`
+- `persona/planner`
+- `persona/developer`
+- `persona/reviewer`
+
+The exact identifiers may be refined during planning, but they must:
+
+- be stable across source-tree reorganizations;
+- be unique within the executable;
+- be suitable for inspection and future targeting by CON-014 overlays; and
+- avoid exposing Go package paths or template-directory paths as product API.
+
+CON-030 establishes the identifier and lookup model. It does not implement
+project overlays.
+
+#### Inspection and provenance
+
+Existing role-specific prompt commands remain the supported way to inspect a
+fully rendered, project-aware prompt.
+
+Also provide a general built-in-resource inspection command family:
+
+```text
+concoct defaults list
+concoct defaults show <logical-id>
+```
+
+`concoct defaults list` reports each logical identifier, resource kind, and
+executable provenance. `concoct defaults show` prints the exact embedded source
+content.
+
+The two inspection paths answer different questions:
+
+- Prompt commands show what Concoct would render for a role in the current
+  project.
+- Defaults commands show the built-in content shipped by the current executable.
+
+Provenance identifies at least the Concoct executable version and logical
+resource identifier. Source-tree paths may appear as diagnostic metadata but are
+not part of the supported resource identity.
+
+#### Missing or incompatible resources
+
+A missing expected embedded resource is a product-build or executable-integrity
+error. Concoct fails clearly with:
+
+- the missing logical identifier;
+- the operation that required it;
+- the executable version; and
+- an actionable indication that the executable is incomplete or incompatible.
+
+Concoct must not silently fall back to repository copies, filesystem-relative
+paths, or a different prompt or persona.
+
+#### Existing repositories during active development
+
+CON-030 does not implement legacy-default detection, migration, or compatibility
+behaviour.
+
+After upgrading to a CON-030 executable:
+
+- runtime rendering ignores previously installed copies of product defaults;
+- project-owned state and guidance remain authoritative;
+- existing files are not automatically deleted or rewritten; and
+- obsolete installed defaults may be removed manually after identification.
+
+Documentation must briefly explain this development-stage change. The product
+does not need to distinguish old installed defaults from intentional
+customization. Supported customization begins with the explicit overlay model
+introduced by CON-014.
+
+Until CON-014 is delivered, repository files cannot override built-in resources
+merely by matching their former installed paths.
+
 ### Requirements
 
-- Retain built-in workflow content as readable Markdown in the Concoct source tree.
-- Render built-in prompts and personas from version-matched executable resources rather than requiring installed repository copies.
-- Stop materializing product-owned defaults during initialization unless a file serves a deliberate repository-owned purpose.
-- Keep project state, project guidance, roadmap, capabilities, configuration, adapters, and task history repository-resident according to their defined ownership.
-- Give embedded resources stable logical identifiers that do not expose source-tree paths to configuration or overlays.
+- Retain built-in workflow content as readable Markdown in the Concoct source
+  tree.
+- Render built-in prompts, personas, and general workflow guidance from
+  version-matched executable resources rather than installed repository copies.
+- Stop materializing product-owned defaults during initialization.
+- Keep project truth, guidance, configuration, adapters, generated state, and
+  task history repository-resident according to the ownership decisions above.
+- Inventory and classify every file currently materialized by `concoct init`.
+- Split any file that mixes product-owned behaviour with project-owned truth.
+- Give embedded resources stable logical identifiers independent of source-tree
+  paths and suitable for future targeting by CON-014 overlays.
 - Preserve deterministic rendering and existing prompt golden-test guarantees.
-- Provide a supported way to inspect embedded content and its provenance.
+- Preserve existing role-specific inspection of fully rendered prompts.
+- Add `concoct defaults list` and `concoct defaults show <logical-id>` for
+  inspection of executable-owned resources and provenance.
 - Fail clearly when an expected embedded resource is missing or incompatible.
-- Provide deterministic migration guidance for legacy installed defaults without silently discarding local modifications.
-
-### Product decisions before planning
-
-- Classify each currently installed file as product-owned runtime content, project-owned content, generated state, adapter, or optional example.
-- Determine whether current persona files are pure built-ins or mix product and project guidance.
-- Decide whether inspection uses existing prompt commands, a defaults command family, or both.
-- Define how legacy installed defaults are distinguished from intentional customization.
+- Document the development-stage treatment of repositories containing previously
+  installed product defaults.
+- Do not implement overlays, legacy detection, migration automation, or a
+  compatibility framework in this item.
 
 ### Acceptance criteria
 
-- A newly built binary renders every standard role prompt without reading built-in prompt or persona files from the target repository.
-- A newly initialized project contains no unnecessary copies of product-owned defaults.
-- Built-in content and provenance remain directly inspectable.
-- Upgrading the executable updates built-in behavior without rewriting project-owned files.
-- Existing repositories receive deterministic migration guidance for legacy installed files.
-- Prompt output remains deterministic for the same executable version and project state.
+- A newly built binary renders every standard role prompt without reading
+  built-in prompt, persona, or general workflow files from the target repository.
+- A newly initialized project contains no copies of product-owned runtime
+  defaults.
+- Every file formerly materialized by `concoct init` has an explicit ownership
+  classification, with mixed concerns separated.
+- Built-in resources use stable logical identifiers that do not expose their
+  source-tree paths as product API.
+- `concoct defaults list` enumerates built-in resources with their identifiers,
+  kinds, and executable provenance.
+- `concoct defaults show <logical-id>` prints the exact embedded source content.
+- Existing prompt commands continue to inspect fully rendered, project-aware
+  prompts.
+- Upgrading the executable updates built-in behaviour without rewriting
+  project-owned files.
+- Existing repositories operate without using previously installed product
+  defaults, and the development-stage removal guidance is documented.
+- A missing required resource produces a clear integrity error and never falls
+  back silently to repository content.
+- Prompt output remains deterministic for the same executable version and
+  project state.
+- Existing prompt golden tests pass, with new coverage for resource lookup,
+  inspection, provenance, and failure behaviour.
+- No project overlay behaviour, legacy migration machinery, or compatibility
+  framework is introduced by this item.
 
 ---
 

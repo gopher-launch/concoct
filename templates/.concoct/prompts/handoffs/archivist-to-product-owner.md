@@ -5,7 +5,7 @@ Act as the Product Owner after task archival.
 
 Read:
 - `AGENTS.md`
-- `.concoct/personas/product-owner.md`
+- the selected executable-owned Product Owner persona rendered in this prompt
 - `.concoct/capabilities.md`
 - `.concoct/roadmap.md`
 - the newest archive summary

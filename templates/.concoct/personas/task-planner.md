@@ -49,7 +49,7 @@ The initial notes file should preserve durable planning context, assumptions, de
 Before planning, read:
 
 - `AGENTS.md`
-- `.concoct/personas/task-planner.md`
+- the selected Task Planner persona rendered by the executable
 - `.concoct/capabilities.md`
 - `.concoct/roadmap.md`
 - the selected roadmap item

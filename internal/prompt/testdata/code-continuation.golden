@@ -6,7 +6,7 @@
 
 ## Effective instruction sources
 
-- Layer `protocol`; source `.concoct/protocol.md`
+- Layer `protocol`; source `built-in:protocol`
 - Layer `policy`; source `.concoct/policy.md`
 - Layer `project-guidance`; source `AGENTS.md`
 - Layer `task-context`; sources selected below for the active command
@@ -16,9 +16,7 @@
 - `.concoct/capabilities.md`
 - `.concoct/current/notes.md`
 - `.concoct/current/task-plan.md`
-- `.concoct/personas/developer.md`
 - `.concoct/policy.md`
-- `.concoct/protocol.md`
 - `AGENTS.md`
 
 ## Authorized updates
@@ -43,4 +41,45 @@ Validate repository assumptions before writing, stay within the selected persona
 
 ## Canonical handoff instructions
 
-# Developer handoff
+# Task Planner to Developer
+
+```text
+Act as the Developer for this repository.
+
+Read:
+- `AGENTS.md`
+- `.concoct/personas/developer.md`
+- `.concoct/capabilities.md`
+- `.concoct/current/task-plan.md`
+- `.concoct/current/notes.md`
+- relevant code, tests, documentation, and referenced archives
+
+Before editing:
+1. Confirm the task is implementation-ready.
+2. Inspect the repository and validate plan assumptions.
+3. Identify affected code, tests, and documentation.
+4. Escalate product ambiguity instead of inventing direction.
+
+Implement the task in focused steps.
+
+During implementation:
+- respect constraints and non-goals;
+- update plan phase statuses honestly;
+- record durable findings, decisions, and meaningful failures in `notes.md`;
+- run required checks;
+- avoid unrelated cleanup;
+- do not update roadmap, capabilities, or review files.
+
+Before finishing:
+- inspect the final diff;
+- run verification;
+- update `task-plan.md` and `notes.md`;
+- add `## Handoff to reviewer` covering implementation, decisions, files changed, checks, risks, skipped work, capability impact, and suggested review focus.
+
+Recommend:
+`concoct code --complete`, then `concoct review` after validation succeeds
+
+For a Git-backed task, commit the complete implementation transition on the
+recorded task branch before review. Role entry requires an empty
+`git status --short`; retries reuse the validated commit.
+```

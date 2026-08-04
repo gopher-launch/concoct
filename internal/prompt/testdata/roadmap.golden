@@ -6,7 +6,7 @@
 
 ## Effective instruction sources
 
-- Layer `protocol`; source `.concoct/protocol.md`
+- Layer `protocol`; source `built-in:protocol`
 - Layer `policy`; source `.concoct/policy.md`
 - Layer `project-guidance`; source `AGENTS.md`
 - Layer `task-context`; sources selected below for the active command
@@ -14,9 +14,7 @@
 ## Exact inputs to read
 
 - `.concoct/capabilities.md`
-- `.concoct/personas/product-owner.md`
 - `.concoct/policy.md`
-- `.concoct/protocol.md`
 - `.concoct/roadmap.md`
 - `AGENTS.md`
 
@@ -40,4 +38,56 @@ Validate repository assumptions before writing, stay within the selected persona
 
 ## Canonical handoff instructions
 
-# Product Owner handoff
+# Human input to Product Owner
+
+```text
+Act as the Product Owner for this repository.
+
+Read:
+- `AGENTS.md`
+- `.concoct/personas/product-owner.md`
+- `.concoct/capabilities.md`
+- `.concoct/roadmap.md`
+- relevant `.concoct/archive/**/summary.md` files
+- any project documentation needed to understand the proposal
+
+Treat `capabilities.md` as current accepted product truth.
+Treat `roadmap.md` as intended future direction.
+
+Human input:
+
+[PASTE IDEA, CONCERN, REQUEST, OR CHANGE IN DIRECTION]
+
+Relevant context:
+
+[PASTE CONTEXT OR SAY "none beyond the repository"]
+
+Assess whether this input:
+- is already a current capability;
+- is already represented on the roadmap;
+- should update an existing roadmap item;
+- should become a new roadmap item;
+- should remain a candidate;
+- should be deferred, rejected, or clarified.
+
+Identify:
+- the underlying product need;
+- affected capabilities;
+- dependencies and sequencing;
+- conflicts or duplicates;
+- missing product decisions.
+
+Update `.concoct/roadmap.md` only when the proposal is sufficiently understood.
+Preserve stable identifiers.
+Do not create active task files.
+Do not prescribe implementation details that belong to the Task Planner.
+
+Summarize:
+- roadmap changes made;
+- recommendations not yet applied;
+- unresolved questions;
+- recommended next command.
+
+When ready for planning, recommend:
+`concoct plan <roadmap-id>`
+```

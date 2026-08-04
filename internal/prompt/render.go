@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gopher-launch/concoct/internal/defaults"
 	"github.com/gopher-launch/concoct/internal/instruction"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
@@ -20,8 +21,8 @@ type Request struct {
 }
 
 type roleSpec struct {
-	persona, source, mode, outcome, next string
-	reads, writes                        []string
+	persona, source, resource, mode, outcome, next string
+	reads, writes                                  []string
 }
 
 func Render(root string, request Request) ([]byte, error) {
@@ -68,9 +69,14 @@ func Render(root string, request Request) ([]byte, error) {
 	spec.reads = append(spec.reads, archives...)
 	spec.reads = uniqueSorted(spec.reads)
 	spec.writes = uniqueSorted(spec.writes)
-	source, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(spec.source)))
+	source, err := defaults.Read(spec.resource, "prompt rendering")
 	if err != nil {
 		return nil, fmt.Errorf("read prompt asset %s: %w", spec.source, err)
+	}
+	personaResource := "persona-" + spec.persona
+	persona, err := defaults.Read(personaResource, "prompt rendering")
+	if err != nil {
+		return nil, fmt.Errorf("read selected persona %s: %w", spec.persona, err)
 	}
 
 	var b bytes.Buffer
@@ -132,10 +138,14 @@ func Render(root string, request Request) ([]byte, error) {
 		}
 		fmt.Fprintln(&b, "\n\nOrdering is deterministic presentation only. The CLI has not selected work; priority and semantic limitation compatibility remain Product Owner judgment.")
 	}
+	fmt.Fprintf(&b, "\n## Selected built-in persona\n\nSource: `built-in:%s` (executable-owned; repository-local persona files are not inputs).\n\n", personaResource)
+	b.Write(bytes.TrimSpace(persona))
+	b.WriteByte('\n')
 	fmt.Fprintln(&b, "\n## Effective instruction sources")
 	for _, source := range effective.Sources {
 		fmt.Fprintf(&b, "\n- Layer `%s`; source `%s`", source.Layer, source.Path)
 	}
+	fmt.Fprintf(&b, "\n- Layer `persona`; source `built-in:%s`", personaResource)
 	fmt.Fprintln(&b, "\n- Layer `task-context`; sources selected below for the active command")
 	fmt.Fprintln(&b, "\n## Exact inputs to read")
 	for _, path := range spec.reads {
@@ -158,18 +168,18 @@ func Render(root string, request Request) ([]byte, error) {
 }
 
 func selectRole(root string, request Request, c workflow.PromptContext) (roleSpec, error) {
-	base := []string{instruction.ProtocolPath, instruction.PolicyPath, instruction.GuidancePath, ".concoct/capabilities.md"}
+	base := []string{instruction.PolicyPath, instruction.GuidancePath, ".concoct/capabilities.md"}
 	switch request.Command {
 	case "next":
 		if c.Report.State != workflow.Ready {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "ready")
 		}
-		return roleSpec{"product-owner", ".concoct/prompts/roadmap/next-action-recommendation.md", "next-action-recommendation", "Recommend exactly one supported next action from authoritative evidence without selecting work or mutating workflow artifacts.", "one exact follow-up command when applicable: `concoct plan <roadmap-id>` or `concoct roadmap`; otherwise name the blocker or report no actionable recorded work", append(base, ".concoct/personas/product-owner.md", ".concoct/roadmap.md"), []string{"none (read-only recommendation)"}}, nil
+		return roleSpec{"product-owner", "built-in:prompt-next-action-recommendation", "prompt-next-action-recommendation", "next-action-recommendation", "Recommend exactly one supported next action from authoritative evidence without selecting work or mutating workflow artifacts.", "one exact follow-up command when applicable: `concoct plan <roadmap-id>` or `concoct roadmap`; otherwise name the blocker or report no actionable recorded work", append(base, ".concoct/roadmap.md"), []string{"none (read-only recommendation)"}}, nil
 	case "roadmap":
 		if c.Report.State != workflow.Ready {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "ready")
 		}
-		return roleSpec{"product-owner", ".concoct/prompts/roadmap/human-roadmap-input.md", "roadmap-intake", "Evaluate product input and update only the roadmap when sufficiently understood; do not create an active task.", "`concoct plan <roadmap-id>` when ready, otherwise `concoct roadmap`", append(base, ".concoct/personas/product-owner.md", ".concoct/roadmap.md"), []string{".concoct/roadmap.md"}}, nil
+		return roleSpec{"product-owner", "built-in:prompt-human-roadmap-input", "prompt-human-roadmap-input", "roadmap-intake", "Evaluate product input and update only the roadmap when sufficiently understood; do not create an active task.", "`concoct plan <roadmap-id>` when ready, otherwise `concoct roadmap`", append(base, ".concoct/roadmap.md"), []string{".concoct/roadmap.md"}}, nil
 	case "plan":
 		if c.Report.State != workflow.Ready {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "ready")
@@ -177,24 +187,24 @@ func selectRole(root string, request Request, c workflow.PromptContext) (roleSpe
 		if err := workflow.ValidatePlanItem(root, request.RoadmapID); err != nil {
 			return roleSpec{}, err
 		}
-		return roleSpec{"task-planner", ".concoct/prompts/handoffs/product-owner-to-task-planner.md", "task-planning", "Create an implementation-ready task plan and durable notes for the selected eligible roadmap item, without implementing code.", "`concoct code`", append(base, ".concoct/personas/task-planner.md", ".concoct/roadmap.md"), []string{".concoct/current/task-plan.md", ".concoct/current/notes.md", ".concoct/roadmap.md (selected item status only after both active artifacts validate)"}}, nil
+		return roleSpec{"task-planner", "built-in:handoff-product-owner-to-task-planner", "handoff-product-owner-to-task-planner", "task-planning", "Create an implementation-ready task plan and durable notes for the selected eligible roadmap item, without implementing code.", "`concoct code`", append(base, ".concoct/roadmap.md"), []string{".concoct/current/task-plan.md", ".concoct/current/notes.md", ".concoct/roadmap.md (selected item status only after both active artifacts validate)"}}, nil
 	case "code":
-		mode, source := "implementation", ".concoct/prompts/handoffs/task-planner-to-developer.md"
+		mode, source, resource := "implementation", "built-in:handoff-task-planner-to-developer", "handoff-task-planner-to-developer"
 		if c.Report.State == workflow.ChangesRequested {
-			mode, source = "review-remediation", ".concoct/prompts/handoffs/reviewer-to-developer.md"
+			mode, source, resource = "review-remediation", "built-in:handoff-reviewer-to-developer", "handoff-reviewer-to-developer"
 		} else if c.Report.State == workflow.InProgress {
 			mode = "implementation-continuation"
 			if c.ResolutionRoute == "code" {
 				mode = "blocked-review-recovery-to-code"
 			} else if c.RemediatesReview != "" {
-				mode, source = "review-remediation", ".concoct/prompts/handoffs/reviewer-to-developer.md"
+				mode, source, resource = "review-remediation", "built-in:handoff-reviewer-to-developer", "handoff-reviewer-to-developer"
 			}
 		} else if c.Report.State != workflow.Planned {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "planned, implementation-in-progress, or review-changes-requested")
 		}
-		reads := append(base, ".concoct/personas/developer.md", ".concoct/current/task-plan.md", ".concoct/current/notes.md")
+		reads := append(base, ".concoct/current/task-plan.md", ".concoct/current/notes.md")
 		reads = append(reads, c.ReviewFiles...)
-		return roleSpec{"developer", source, mode, "Implement or remediate the active task, record verification and decisions, set honest task status, and leave a fresh reviewer handoff. Completed reviews are append-only.", "`concoct review` after completion, or `concoct code` while work remains in progress", reads, []string{"task-scoped source, tests, and documentation", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}}, nil
+		return roleSpec{"developer", source, resource, mode, "Implement or remediate the active task, record verification and decisions, set honest task status, and leave a fresh reviewer handoff. Completed reviews are append-only.", "`concoct review` after completion, or `concoct code` while work remains in progress", reads, []string{"task-scoped source, tests, and documentation", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}}, nil
 	case "review":
 		if c.Report.State != workflow.Complete {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "implementation-complete")
@@ -205,16 +215,16 @@ func selectRole(root string, request Request, c workflow.PromptContext) (roleSpe
 		} else if len(c.ReviewFiles) > 0 {
 			mode = "post-remediation-review"
 		}
-		reads := append(base, ".concoct/personas/reviewer.md", ".concoct/current/task-plan.md", ".concoct/current/notes.md", "complete Git diff and relevant source, tests, and documentation")
+		reads := append(base, ".concoct/current/task-plan.md", ".concoct/current/notes.md", "complete Git diff and relevant source, tests, and documentation")
 		reads = append(reads, c.ReviewFiles...)
-		return roleSpec{"reviewer", ".concoct/prompts/handoffs/developer-to-reviewer.md", mode, "Independently assess the implementation and create exactly the named next sequential review with one outcome: approved, changes-requested, or blocked. Do not implement fixes.", "approved → `concoct archive`; changes requested → `concoct code`; blocked → responsible role or human", reads, []string{c.NextReview}}, nil
+		return roleSpec{"reviewer", "built-in:handoff-developer-to-reviewer", "handoff-developer-to-reviewer", mode, "Independently assess the implementation and create exactly the named next sequential review with one outcome: approved, changes-requested, or blocked. Do not implement fixes.", "approved → `concoct archive`; changes requested → `concoct code`; blocked → responsible role or human", reads, []string{c.NextReview}}, nil
 	case "archive":
 		if c.Report.State != workflow.Approved {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "review-approved")
 		}
-		reads := append(base, ".concoct/personas/archivist.md", ".concoct/roadmap.md", ".concoct/current/task-plan.md", ".concoct/current/notes.md", "complete implementation and Git evidence")
+		reads := append(base, ".concoct/roadmap.md", ".concoct/current/task-plan.md", ".concoct/current/notes.md", "complete implementation and Git evidence")
 		reads = append(reads, c.ReviewFiles...)
-		return roleSpec{"archivist", ".concoct/prompts/handoffs/reviewer-to-archivist.md", "archival", "Archive approved evidence and reconcile capability and pending roadmap evidence. For a Git-backed task, commit the archive on the task branch, record git.archive-commit and git.status archived, and do not clear current state or mark delivery.", "Git-backed task → `concoct integrate`; non-Git task → `concoct next`", reads, []string{".concoct/archive/<dated-task>/", ".concoct/capabilities.md", ".concoct/roadmap.md (pending delivery evidence only)", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}}, nil
+		return roleSpec{"archivist", "built-in:handoff-reviewer-to-archivist", "handoff-reviewer-to-archivist", "archival", "Archive approved evidence and reconcile capability and pending roadmap evidence. For a Git-backed task, commit the archive on the task branch, record git.archive-commit and git.status archived, and do not clear current state or mark delivery.", "Git-backed task → `concoct integrate`; non-Git task → `concoct next`", reads, []string{".concoct/archive/<dated-task>/", ".concoct/capabilities.md", ".concoct/roadmap.md (pending delivery evidence only)", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}}, nil
 	default:
 		return roleSpec{}, fmt.Errorf("unsupported prompt command %q", request.Command)
 	}

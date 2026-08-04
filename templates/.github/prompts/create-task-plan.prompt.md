@@ -3,11 +3,10 @@
 Read and follow:
 
 - `AGENTS.md`
-- `.concoct/protocol.md`
 - `.concoct/policy.md`
-- `.concoct/personas/task-planner.md`
 
-Adopt the Task Planner persona in `.concoct/personas/task-planner.md` for this task.
+Use `concoct plan <roadmap-id>` to render the built-in protocol and Task Planner
+persona with the project context, then adopt that rendered persona for this task.
 
 Inspect the repository and turn the requested idea into implementation-ready contents for:
 

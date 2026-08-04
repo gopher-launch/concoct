@@ -36,7 +36,7 @@ Different agents may use different instruction mechanisms.
 Recommended adapters:
 
 ```text
-.concoct/protocol.md              # protected workflow controls
+.concoct/protocol.md              # executable-supplied built-in controls (not installed)
 .concoct/policy.md                # selected lifecycle policy
 AGENTS.md                         # repository-owned shared guidance
 CLAUDE.md                         # Claude Code adapter
@@ -54,11 +54,13 @@ Do not maintain separate copies of the same rules in every adapter.
 
 Multiple agents should be coordinated by role.
 
-The prompt for each role should explicitly select its persona from `.concoct/personas/`. Personas define how to perform a role; `AGENTS.md` and the planning artifacts continue to define project rules and task scope.
+The prompt for each role should explicitly select and render its
+executable-owned persona. Personas define how to perform a role; `AGENTS.md`
+and the planning artifacts continue to define project rules and task scope.
 
 ### Planner
 
-Persona: `.concoct/personas/task-planner.md`
+Persona: executable-rendered Task Planner persona (`persona-task-planner`).
 
 Owns:
 
@@ -75,7 +77,7 @@ Responsibilities:
 
 ### Implementer
 
-Persona: `.concoct/personas/developer.md`
+Persona: executable-rendered Developer persona (`persona-developer`).
 
 Owns:
 
@@ -98,7 +100,7 @@ Responsibilities:
 
 ### Reviewer
 
-Persona: `.concoct/personas/reviewer.md`
+Persona: executable-rendered Reviewer persona (`persona-reviewer`).
 
 Owns:
 
@@ -137,11 +139,11 @@ candidate evidence, the Archivist runs `concoct archive --complete`.
 
 ### Technical writer
 
-Select the persona by audience:
+Select the executable-rendered persona by audience:
 
-- `.concoct/personas/doc-technical-writer-user.md` for end users
-- `.concoct/personas/doc-technical-writer-api.md` for API consumers
-- `.concoct/personas/doc-technical-writer-code.md` for developers working with the codebase
+- `persona-user-writer` for end users
+- `persona-api-writer` for API consumers
+- `persona-code-writer` for developers working with the codebase
 
 If documentation is a distinct phase, switch explicitly from the prior role's persona to the selected writer persona.
 

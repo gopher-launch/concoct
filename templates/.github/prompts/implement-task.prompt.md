@@ -3,13 +3,12 @@
 Read and follow:
 
 - `AGENTS.md`
-- `.concoct/protocol.md`
 - `.concoct/policy.md`
-- `.concoct/personas/developer.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`
 
-Adopt the Developer persona in `.concoct/personas/developer.md` for this task.
+Use `concoct code` to render the built-in protocol and Developer persona with
+the project context, then adopt that rendered persona for this task.
 
 Then inspect the repository before making code changes.
 

@@ -48,11 +48,18 @@ Eatin' big time
 
 In short: `idea → concoct → eatin’ big time`.
 
-Concoct's source assets live in this repository's root-level directories. Projects initialized by Concoct keep their task state and personas under `.concoct/`, with `AGENTS.md` and tool-required adapters at the project root.
+Concoct's source assets live in this repository's root-level directories.
+Projects initialized by Concoct keep project-owned task state under
+`.concoct/`, with `AGENTS.md` and tool-required adapters at the project root.
+The executable supplies built-in protocol, persona, and handoff content when it
+renders a role prompt; those resources are not installed as project files.
 
 The roles may be handled by different tools or by the same tool in different modes.
 
-Each role has reusable guidance under `.concoct/personas/`. A task prompt selects the appropriate persona after composing the attributed protocol, policy, repository guidance, and active task context described in `instruction-layers.md`.
+Each role has reusable executable-owned guidance. A task prompt selects and
+embeds the appropriate persona after composing the attributed protocol, policy,
+repository guidance, and active task context described in
+`instruction-layers.md`.
 
 ## Durable files
 
@@ -128,16 +135,13 @@ CONVENTIONS.md
 
 ## Personas
 
-Use one role persona at a time for the primary work being performed:
-
-- `.concoct/personas/task-planner.md` for creating or materially revising a plan
-- `.concoct/personas/developer.md` for implementation
-- `.concoct/personas/reviewer.md` for independent review
-- `.concoct/personas/doc-technical-writer-user.md` for end-user documentation
-- `.concoct/personas/doc-technical-writer-api.md` for API documentation
-- `.concoct/personas/doc-technical-writer-code.md` for code-oriented developer documentation
-
-Read the selected persona before starting the role. If a task spans implementation and documentation, use the developer persona for implementation and then explicitly switch to the appropriate writer persona for the documentation pass.
+Use one executable-rendered role persona at a time for the primary work being
+performed: Task Planner for planning, Developer for implementation, Reviewer
+for independent review, and the audience-selected writer persona for
+documentation. Read the persona included in the rendered task prompt before
+starting the role. If a task spans implementation and documentation, use the
+Developer persona for implementation and then explicitly switch to the
+appropriate writer persona for the documentation pass.
 
 ## When to use planning files
 

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gopher-launch/concoct/internal/defaults"
 )
 
 func TestRenderRolesAndModesDeterministically(t *testing.T) {
@@ -44,20 +46,12 @@ func TestRenderRolesAndModesDeterministically(t *testing.T) {
 				t.Fatal("rendering changed without repository changes")
 			}
 			goldenPath := filepath.Join("testdata", tt.golden)
-			if os.Getenv("UPDATE_GOLDEN") == "1" {
-				if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(goldenPath, first, 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			wantGolden, err := os.ReadFile(goldenPath)
+			golden, err := os.ReadFile(goldenPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(first, wantGolden) {
-				t.Fatalf("rendered prompt differs from %s\n--- want ---\n%s\n--- got ---\n%s", goldenPath, wantGolden, first)
+			if want := currentGolden(t, golden, personaForCommand(tt.command)); !bytes.Equal(first, want) {
+				t.Fatalf("rendered prompt differs from %s\n--- want ---\n%s\n--- got ---\n%s", goldenPath, want, first)
 			}
 			if !strings.Contains(string(first), tt.want) {
 				t.Fatalf("output does not contain %q:\n%s", tt.want, first)
@@ -66,6 +60,46 @@ func TestRenderRolesAndModesDeterministically(t *testing.T) {
 				if !strings.Contains(string(first), required) {
 					t.Errorf("missing section %s", required)
 				}
+			}
+		})
+	}
+}
+
+func TestRenderIncludesEmbeddedPersonaForEveryRoleAndIgnoresLocalCopies(t *testing.T) {
+	tests := []struct {
+		command, status, review, persona, marker string
+	}{
+		{"next", "", "", "product-owner", "# Product Owner Persona"},
+		{"roadmap", "", "", "product-owner", "# Product Owner Persona"},
+		{"plan", "", "", "task-planner", "# Task Planner Persona"},
+		{"code", "planned", "", "developer", "# Developer Persona"},
+		{"review", "implementation-complete", "", "reviewer", "# Reviewer Persona"},
+		{"archive", "implementation-complete", "approved", "archivist", "# Archivist Persona"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command+"-"+tt.persona, func(t *testing.T) {
+			root := fixture(t, tt.status, tt.review, "")
+			write(t, filepath.Join(root, ".concoct", "personas", tt.persona+".md"), "# Shadow persona\n")
+			request := Request{Command: tt.command}
+			if tt.command == "plan" {
+				request.RoadmapID = "APP-002"
+			}
+			got, err := Render(root, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				"## Selected built-in persona",
+				"Source: `built-in:persona-" + tt.persona + "`",
+				tt.marker,
+				"- Layer `persona`; source `built-in:persona-" + tt.persona + "`",
+			} {
+				if !strings.Contains(string(got), want) {
+					t.Errorf("rendered prompt missing %q", want)
+				}
+			}
+			if strings.Contains(string(got), "# Shadow persona") {
+				t.Fatal("repository-local persona shadowed executable-owned persona")
 			}
 		})
 	}
@@ -216,19 +250,50 @@ func assertNextGolden(t *testing.T, root, name string) []byte {
 		t.Fatal("next mutated workflow artifacts")
 	}
 	path := filepath.Join("testdata", name)
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(path, first, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(path)
+	golden, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(first, want) {
+	if want := currentGolden(t, golden, "product-owner"); !bytes.Equal(first, want) {
 		t.Fatalf("rendered prompt differs from %s\n--- want ---\n%s\n--- got ---\n%s", path, want, first)
 	}
 	return first
+}
+
+func currentGolden(t *testing.T, golden []byte, persona string) []byte {
+	t.Helper()
+	personaID := "persona-" + persona
+	body, err := defaults.Read(personaID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := string(golden)
+	for _, role := range []string{"product-owner", "task-planner", "developer", "reviewer", "archivist"} {
+		old := "- `.concoct/personas/" + role + ".md`"
+		label := strings.ReplaceAll(strings.Title(strings.ReplaceAll(role, "-", " ")), " ", " ")
+		want = strings.ReplaceAll(want, old, "- the selected executable-owned "+label+" persona rendered in this prompt")
+	}
+	section := "\n## Selected built-in persona\n\nSource: `built-in:" + personaID + "` (executable-owned; repository-local persona files are not inputs).\n\n" + strings.TrimSpace(string(body)) + "\n"
+	want = strings.Replace(want, "\n## Effective instruction sources", section+"\n## Effective instruction sources", 1)
+	want = strings.Replace(want, "\n- Layer `task-context`; sources selected below for the active command", "\n- Layer `persona`; source `built-in:"+personaID+"`\n- Layer `task-context`; sources selected below for the active command", 1)
+	return []byte(want)
+}
+
+func personaForCommand(command string) string {
+	switch command {
+	case "next", "roadmap":
+		return "product-owner"
+	case "plan":
+		return "task-planner"
+	case "code":
+		return "developer"
+	case "review":
+		return "reviewer"
+	case "archive":
+		return "archivist"
+	default:
+		panic("unsupported command " + command)
+	}
 }
 
 func workflowFiles(t *testing.T, root string) []byte {
@@ -279,7 +344,6 @@ func fixture(t *testing.T, status, reviewStatus, extra string) string {
 	write(t, filepath.Join(root, ".concoct/roadmap.md"), fmt.Sprintf("---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n## APP-001 — Delivered\n- Status: `delivered`\n- Depends on: `none`\n## APP-002 — Demo\n- Status: `%s`\n- Depends on: APP-001\n", roadStatus))
 	write(t, filepath.Join(root, ".concoct/capabilities.md"), "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Capabilities\n")
 	assets := map[string]string{
-		".concoct/personas/product-owner.md": "# Product Owner", ".concoct/personas/task-planner.md": "# Task Planner", ".concoct/personas/developer.md": "# Developer", ".concoct/personas/reviewer.md": "# Reviewer", ".concoct/personas/archivist.md": "# Archivist",
 		".concoct/prompts/roadmap/human-roadmap-input.md": "# Product Owner handoff", ".concoct/prompts/roadmap/next-action-recommendation.md": "# Next action handoff", ".concoct/prompts/handoffs/product-owner-to-task-planner.md": "# Planner handoff", ".concoct/prompts/handoffs/task-planner-to-developer.md": "# Developer handoff", ".concoct/prompts/handoffs/reviewer-to-developer.md": "# Remediation handoff", ".concoct/prompts/handoffs/developer-to-reviewer.md": "# Reviewer handoff", ".concoct/prompts/handoffs/reviewer-to-archivist.md": "# Archivist handoff",
 	}
 	for path, body := range assets {

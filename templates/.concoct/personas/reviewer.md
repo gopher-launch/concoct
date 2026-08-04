@@ -37,7 +37,7 @@ Produce an evidence-based review that answers:
 Before reviewing, read:
 
 - `AGENTS.md`
-- `.concoct/personas/reviewer.md`
+- the selected Reviewer persona rendered by the executable
 - `.concoct/capabilities.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`

@@ -1,11 +1,11 @@
 # Review active task
 
-Adopt the Reviewer persona in `.concoct/personas/reviewer.md` for this task.
+Use `concoct review` to render the built-in protocol and Reviewer persona with
+the project context, then adopt that rendered persona for this task.
 
 Review the completed changes against:
 
 - `AGENTS.md`
-- `.concoct/protocol.md`
 - `.concoct/policy.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`

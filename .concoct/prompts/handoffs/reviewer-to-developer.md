@@ -5,7 +5,7 @@ Act as the Developer in review-remediation mode.
 
 Read first:
 - `AGENTS.md`
-- `.concoct/personas/developer.md`
+- the selected executable-owned Developer persona rendered in this prompt
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`
 - the latest `.concoct/current/review-NN.md`

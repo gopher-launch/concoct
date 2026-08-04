@@ -2,7 +2,7 @@
 
 Concoct composes four attributed sources for role prompts:
 
-1. `.concoct/protocol.md` is Concoct-owned protocol.
+1. The executable's `built-in:protocol` is Concoct-owned protocol.
 2. `.concoct/policy.md` is project-selected workflow policy.
 3. `AGENTS.md` is repository-owned project guidance and the conventional entry point.
 4. The selected persona and active artifacts are task context.
@@ -39,7 +39,11 @@ human reconciliation.
 
 ## Ownership and compatibility
 
-Initialization installs an internally consistent protocol and default policy.
+Initialization installs project-owned policy and guidance. The executable supplies
+protocol, personas, and handoffs from embedded resources; obsolete copies at their
+former paths are ignored rather than migrated or removed. Use `concoct defaults
+list` to inspect resource IDs and `concoct defaults show <logical-id>` to print
+their exact bytes.
 `AGENTS.md` stays human-editable and project-owned. Composition reads it
 byte-for-byte and never rewrites it, allowing future upgrades to replace
 Concoct-owned sources without taking ownership of repository guidance.

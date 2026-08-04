@@ -43,7 +43,7 @@ Implement the active task so that:
 Before making changes, read:
 
 - `AGENTS.md`
-- `.concoct/personas/developer.md`
+- the selected Developer persona rendered by the executable
 - `.concoct/capabilities.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`

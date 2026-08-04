@@ -19,5 +19,5 @@ independent Reviewer, and Archivist roles. Approval precedes archival.
 Git-backed tasks use a clean recorded task branch, committed role transitions,
 archival before integration, and squash integration onto the recorded trunk.
 
-Role details live in `.concoct/personas/`; task context lives in
-`.concoct/current/`. This is the supported default policy.
+Role details are executable-owned and rendered into role prompts; task context
+lives in `.concoct/current/`. This is the supported default policy.

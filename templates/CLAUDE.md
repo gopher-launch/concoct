@@ -1,11 +1,14 @@
 # CLAUDE.md
 
-Read `.concoct/protocol.md`, `.concoct/policy.md`, and `AGENTS.md` in that order.
+Read the Concoct executable's built-in protocol, `.concoct/policy.md`, and
+`AGENTS.md` in that order.
 
 `AGENTS.md` is the repository-owned conventional entry point; the protocol's
 protected controls cannot be weakened by policy or project guidance.
 
-Task prompts may select a role from `.concoct/personas/`. Read and adopt the selected persona for the current task. The persona supplements `AGENTS.md`; it does not override it.
+Task prompts render the selected executable-owned persona. Read and adopt that
+rendered persona for the current task; it supplements `AGENTS.md` and does not
+override it.
 
 For substantial implementation tasks, use:
 

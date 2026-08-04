@@ -110,6 +110,9 @@ func copyTemplates(target, projectName string) error {
 		if err != nil {
 			return err
 		}
+		if !projectOutput(filepath.ToSlash(rel)) {
+			return nil
+		}
 		dst := filepath.Join(target, rel)
 		if entry.IsDir() {
 			return os.MkdirAll(dst, 0o755)
@@ -121,6 +124,13 @@ func copyTemplates(target, projectName string) error {
 		data = []byte(strings.ReplaceAll(string(data), "<project-name>", projectName))
 		return os.WriteFile(dst, data, 0o644)
 	})
+}
+
+func projectOutput(rel string) bool {
+	if rel == ".concoct/protocol.md" || rel == ".concoct/personas" || rel == ".concoct/prompts" || strings.HasPrefix(rel, ".concoct/personas/") || strings.HasPrefix(rel, ".concoct/prompts/") {
+		return false
+	}
+	return true
 }
 
 func writeBootstrap(target string) error {

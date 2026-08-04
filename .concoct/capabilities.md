@@ -114,13 +114,14 @@ Each prompt instructs an agent which persona and artifacts to read, which artifa
 - Audience: `project maintainers`
 - Added by: `baseline inventory`
 - Archive: `.concoct/archive/2026-07-29-legacy-hitl-restructuring/` — baseline evidence; no approving review
+- Archive: `.concoct/archive/2026-08-04-CON-030-make-built-in-workflow-content-executable-owned/summary.md`
 - Updated by: `.concoct/archive/2026-07-29-CON-005-go-cli-foundation/`
 - Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
 - Documentation: `README.md`, `templates/AGENTS.md`
 
 ### Capability
 
-Concoct supplies a reusable filesystem template for equipping another repository with a layered instruction contract, Concoct workflow state, roadmap and capability schemas, role personas, transition prompts, and coding-agent adapters. Concoct-owned protocol and default policy remain distinct from repository-owned `AGENTS.md` guidance.
+Concoct supplies a reusable filesystem template for equipping another repository with project-owned guidance, workflow state, truth, configuration, and coding-agent adapters. Immutable protocol, personas, and transition guidance are supplied by the version-matched executable rather than installed as mutable runtime copies.
 
 ### User value
 
@@ -158,11 +159,12 @@ The template defines conventional root files and tool adapters alongside Concoct
 - Added by: `baseline inventory`
 - Archive: `.concoct/archive/2026-07-29-legacy-hitl-restructuring/` — baseline evidence; no approving review
 - Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
+- Updated by: `.concoct/archive/2026-08-04-CON-030-make-built-in-workflow-content-executable-owned/summary.md`
 - Documentation: `doc/multi-agent-workflow.md`
 
 ### Capability
 
-Concoct provides thin adapters that direct Codex, Claude Code, GitHub Copilot, Aider, and tools that read a generic conventions file through the same attributed protocol, policy, repository guidance, personas, and active task context.
+Concoct provides thin adapters that direct Codex, Claude Code, GitHub Copilot, Aider, and tools that read a generic conventions file through the same executable-rendered protocol and personas, project policy and guidance, and active task context.
 
 ### User value
 
@@ -248,6 +250,7 @@ Project maintainers can bootstrap the workflow reliably from an installed binary
 - Updated by: `.concoct/archive/2026-07-30-CON-015-isolate-integrate-git-tasks/`
 - Updated by: `.concoct/archive/2026-07-31-CON-008-implement-code-and-review-transitions/`
 - Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
+- Updated by: `.concoct/archive/2026-08-04-CON-030-make-built-in-workflow-content-executable-owned/summary.md`
 - Documentation: `README.md`, `doc/command-reference.md`, `doc/state-machine.md`
 
 ### Capability
@@ -260,6 +263,9 @@ unsupported, conflicting, or invariant-weakening structural declarations without
 partial output, and preserves project-guidance bytes. It then selects the applicable persona and
 workflow mode, including implementation continuation, changes-requested
 remediation, blocked-review recovery routes, and Git-aware archival guidance.
+Built-in protocol, personas, and handoffs come from an inspectable executable
+resource registry with truthful provenance; `defaults list` and `defaults show`
+expose those resources, and local former copies cannot shadow them.
 
 ### User value
 

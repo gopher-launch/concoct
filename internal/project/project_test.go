@@ -19,25 +19,15 @@ func TestInitializeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Join(parent, "demo")
-	for _, path := range []string{"AGENTS.md", ".aider.conf.yml", ".codex/skills/concoct/SKILL.md", ".concoct/protocol.md", ".concoct/policy.md", ".concoct/personas/developer.md", ".concoct/prompts/handoffs/task-planner-to-developer.md", ".concoct/current/bootstrap-prompt.md"} {
+	for _, path := range []string{"AGENTS.md", ".aider.conf.yml", ".codex/skills/concoct/SKILL.md", ".concoct/policy.md", ".concoct/capabilities.md", ".concoct/roadmap.md", ".concoct/current/bootstrap-prompt.md"} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Errorf("missing %s: %v", path, err)
 		}
 	}
-	if err := filepath.Walk(filepath.Join("..", "..", "templates"), func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
+	for _, path := range []string{".concoct/protocol.md", ".concoct/personas/developer.md", ".concoct/prompts/handoffs/task-planner-to-developer.md"} {
+		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
+			t.Errorf("built-in %s was installed", path)
 		}
-		rel, err := filepath.Rel(filepath.Join("..", "..", "templates"), path)
-		if err != nil {
-			return err
-		}
-		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
-			t.Errorf("template path not copied: %s", rel)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
 	}
 	if got := workflow.Detect(root); got.State != workflow.Ready {
 		t.Fatalf("state %s: %v", got.State, got.Diagnostics)

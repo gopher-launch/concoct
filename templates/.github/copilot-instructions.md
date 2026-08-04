@@ -1,9 +1,9 @@
 # GitHub Copilot Instructions
 
-Read `.concoct/protocol.md`, `.concoct/policy.md`, and the repository-owned
-`AGENTS.md` entry point, in that precedence order.
+Read the Concoct executable's built-in protocol, `.concoct/policy.md`, and the
+repository-owned `AGENTS.md` entry point, in that precedence order.
 
-Task prompts select a role from `.concoct/personas/`. Read and adopt the selected
+Task prompts render the selected executable-owned persona. Read and adopt that
 persona after the layered sources. Do not weaken protected protocol controls.
 
 For substantial implementation tasks, use the active planning files:

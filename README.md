@@ -38,7 +38,7 @@ concoct init hello-world
 cd hello-world
 ```
 
-`init` creates a Git repository, installs and stages the complete workflow, and
+`init` creates a Git repository, installs and stages the project-owned workflow, and
 writes `.concoct/current/bootstrap-prompt.md`. It does not create the initial
 commit. Review the staged files, customize the project guidance, then commit
 the bootstrap before continuing.
@@ -180,11 +180,11 @@ Generated projects use a stable, agent-neutral contract:
 
 ```text
 AGENTS.md                          # repository-owned instruction entry point
-.concoct/protocol.md               # Concoct-owned protected controls
+.concoct/protocol.md               # supplied by the executable (not installed)
 .concoct/policy.md                 # project-selected workflow policy
 .concoct/capabilities.md          # accepted product behavior
 .concoct/roadmap.md               # intended future outcomes
-.concoct/personas/                # role-specific guidance
+.concoct/personas/                # supplied by the executable (not installed)
 .concoct/current/task-plan.md     # active implementation contract
 .concoct/current/notes.md         # durable decisions and handoffs
 .concoct/archive/                 # accepted task history

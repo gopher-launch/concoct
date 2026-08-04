@@ -57,7 +57,7 @@ The archive process should answer:
 Before archiving, read:
 
 - `AGENTS.md`
-- `.concoct/personas/archivist.md`
+- the selected Archivist persona rendered by the executable
 - `.concoct/capabilities.md`
 - `.concoct/roadmap.md`
 - `.concoct/current/task-plan.md`

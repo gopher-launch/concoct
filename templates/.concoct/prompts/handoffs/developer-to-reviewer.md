@@ -5,7 +5,7 @@ Act as the Reviewer for this repository.
 
 Read:
 - `AGENTS.md`
-- `.concoct/personas/reviewer.md`
+- the selected executable-owned Reviewer persona rendered in this prompt
 - `.concoct/capabilities.md`
 - `.concoct/current/task-plan.md`
 - `.concoct/current/notes.md`

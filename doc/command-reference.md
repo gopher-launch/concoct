@@ -78,11 +78,16 @@ None. Initialization is a bootstrap operation, not a workflow role.
 
 ### Files created or updated
 
-- The new project directory and the complete distributed template.
+- The new project directory and the project-owned outputs from the distributed
+  template.
 - `AGENTS.md` and conventional tool adapters at the project root.
-- `.concoct/capabilities.md`, `.concoct/roadmap.md`, personas, prompts, an archive directory, and a ready current-directory convention.
+- `.concoct/policy.md`, `.concoct/capabilities.md`, `.concoct/roadmap.md`,
+  current and archive lifecycle directories, and the ready-state convention.
 - A Git repository without an automatically created commit.
 - Bootstrap guidance when the distribution defines it.
+
+The executable supplies immutable built-in protocol, personas, and handoffs at
+runtime; initialization does not install mutable copies of those resources.
 
 Whether generated files are staged is an implementation decision reserved for the CLI-foundation task; this contract requires the choice to be deliberate and reported, not a particular choice.
 
@@ -217,7 +222,7 @@ No positional arguments. Human product input may be supplied alongside the rende
 ### Files read
 
 - `AGENTS.md`.
-- `.concoct/personas/product-owner.md`.
+- The Product Owner persona rendered from the executable.
 - `.concoct/capabilities.md`.
 - `.concoct/roadmap.md`.
 - Relevant `.concoct/archive/**/summary.md` files and project documentation selected deterministically from the input context.
@@ -271,7 +276,7 @@ Render the Task Planner handoff that turns one eligible roadmap item into an imp
 ### Files read
 
 - `AGENTS.md`.
-- `.concoct/personas/task-planner.md`.
+- The Task Planner persona rendered from the executable.
 - `.concoct/capabilities.md`.
 - `.concoct/roadmap.md` and the selected item.
 - Relevant archive summaries and artifacts.
@@ -347,7 +352,7 @@ No positional arguments. A valid active task, notes, and all context required by
 ### Files read
 
 - `AGENTS.md`.
-- `.concoct/personas/developer.md`.
+- The Developer persona rendered from the executable.
 - `.concoct/capabilities.md`.
 - `.concoct/current/task-plan.md` and `notes.md`.
 - The latest review in remediation mode and prior reviews as needed for finding history.
@@ -406,7 +411,7 @@ No positional arguments. The active task must be implementation-complete with a 
 ### Files read
 
 - `AGENTS.md`.
-- `.concoct/personas/reviewer.md`.
+- The Reviewer persona rendered from the executable.
 - `.concoct/capabilities.md`.
 - `.concoct/current/task-plan.md` and `notes.md`.
 - All prior `.concoct/current/review-NN.md` files.
@@ -481,7 +486,7 @@ requires both `--override-authority <authority>` and `--override-reason
 ### Files read
 
 - `AGENTS.md`.
-- `.concoct/personas/archivist.md`.
+- The Archivist persona rendered from the executable.
 - `.concoct/capabilities.md` and `.concoct/roadmap.md`.
 - `.concoct/current/task-plan.md`, `notes.md`, and all review files.
 - Latest approved review.
