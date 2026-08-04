@@ -365,7 +365,7 @@ materially drifted.
 
 ## CON-018 — Configure workflow policy
 
-- Status: `candidate`
+- Status: `planned`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-007
