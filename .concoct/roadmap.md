@@ -679,7 +679,7 @@ explicit bug provenance.
 
 ## CON-033 — Orchestrate the task lifecycle with configurable gates
 
-- Status: `candidate`
+- Status: `planned`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-009, CAP-013
@@ -696,6 +696,19 @@ The conceptual command is:
 ```text
 concoct run
 ```
+
+The experience that we are looking to achieve is:
+
+```text
+concoct plan CON-033
+concoct run
+# inspect and accept the plan
+concoct run --approve plan
+# watch planning → coding ⇄ review → archival happen
+concoct run --approve integration
+```
+
+Three intentional commands around two meaningful human judgments—not eight mechanical commands shuttling work between roles. That’s a genuinely enormous UX improvement.
 
 ### Rationale
 
@@ -716,13 +729,75 @@ intervention behavior.
 - Keep mutation, integration, and remote push conservative; require effective authorization before protected actions and separate integration from push authority.
 - Make current and forthcoming actions visible and report exactly why the run stopped and how it can continue.
 
-### Product decisions before planning
+### Product decisions
 
-- Define the default gate policy and which gates are mandatory project policy versus invocation-selectable restrictions.
-- Decide whether approval protects an action or transition and how plan acceptance is represented.
-- Define separate authorization for integration and remote push.
-- Set action, cycle, and retry bounds.
-- Define how approval is supplied when continuing and whether an initial release requires an already selected roadmap item or active task.
+- Use `concoct run` to repeatedly re-evaluate and execute authorized actions for
+  one already selected task. The initial release does not autonomously select a
+  roadmap item in ready state. When no task is selected, `run` stops without
+  mutation and explains how to select or begin one.
+
+- Determine effective orchestration policy from invariant intervention rules,
+  project-required gates, and invocation-specific restrictions. Invariant stops
+  and project-required gates cannot be weakened by invocation flags. Invocation
+  policy may add gates, lower execution bounds, or stop earlier, but may never
+  make execution more permissive than project policy.
+
+- Default project policy requires explicit acceptance of the generated plan and
+  explicit authorization before local integration. Planning, development,
+  independent review, productive code/review revision cycles, and archival may
+  otherwise proceed automatically. Blockers, decisions, unsafe or ambiguous
+  states, invalid results, terminal failures, cancellation, and exhausted bounds
+  always stop orchestration.
+
+- Define gates as protection for specific forthcoming actions. Approval is
+  scoped to the current task, action, attempt, and relevant evidence state; it
+  becomes stale when that evidence changes and is consumed when the protected
+  action begins. A successful approved action may produce a workflow transition
+  only after its postconditions and transition legality are validated.
+
+- Represent plan acceptance as durable evidence bound to the exact selected task
+  and plan content. Planning completion does not imply acceptance. Continue from
+  the plan gate with `concoct run --approve plan`. Material modification of the
+  accepted plan invalidates acceptance and restores the gate.
+
+- Authorize local integration and remote push separately. Integration approval
+  is bound to the reviewed task revision, task branch, target branch, and
+  relevant repository state and may be supplied with
+  `concoct run --approve integration`. A successful run may terminate at local
+  integration. It does not push remotely. Remote push requires separate
+  authorization identifying the remote and destination ref and is never implied
+  by plan or integration approval.
+
+- Do not provide a general force, no-gates, or approve-all option. Approval
+  supplied to `run` is valid only for the gate currently awaiting intervention,
+  cannot pre-authorize later gates, and cannot bypass project policy, necessary
+  human judgment, adapter safety controls, or agent permission requests.
+
+- Bound each run independently by total actions, productive code/review cycles,
+  and recoverable execution retries. Initially allow at most 20 actions and
+  three code/review cycles per run. Classify review-requested revisions as normal
+  workflow cycles rather than failed-action retries. Do not automatically retry
+  recoverable execution failures in the initial release; stop with a safe
+  continuation recommendation and allow a later policy to opt into bounded
+  automatic retry.
+
+- Detect progress using workflow state, authorized action, material artifact
+  identities, repository state, review findings, and intervention state.
+  Repeated action kinds are valid when relevant evidence advances. Stop
+  deterministically when the same action and relevant-state fingerprint recur,
+  when claimed completion produces no validated progress, or when an action,
+  cycle, or retry bound is exhausted.
+
+- Re-resolve the acting role, adapter, execution profile, authority, and current
+  recommendation before every action. Enforce reviewer-independence requirements
+  from effective project policy before invoking review. Never reuse an earlier
+  authorized action merely because the same action kind is recommended again.
+
+- Treat reaching a configured gate as a normal paused run rather than an
+  execution failure. At every stop, report the actions and outcomes observed,
+  current workflow and repository state, gate or intervention reason, consumed
+  bounds, newly recommended action, and exact continuation command when
+  continuation is safe.
 
 ### Acceptance criteria
 
