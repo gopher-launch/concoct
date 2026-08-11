@@ -1,0 +1,19 @@
+version: 2
+project_name: concoct
+before:
+  hooks:
+    - go test -count=1 ./...
+builds:
+  - main: ./cmd/concoct
+    ldflags:
+      - -s -w -X github.com/gopher-launch/concoct/internal/buildinfo.Version={{ .Version }} -X github.com/gopher-launch/concoct/internal/buildinfo.Revision={{ .FullCommit }} -X github.com/gopher-launch/concoct/internal/buildinfo.Dirty=false -X github.com/gopher-launch/concoct/internal/buildinfo.Release=true
+archives:
+  - formats: [tar.gz]
+checksum:
+  name_template: checksums.txt
+sboms:
+  - artifacts: archive
+release:
+  github:
+    owner: gopher-launch
+    name: concoct

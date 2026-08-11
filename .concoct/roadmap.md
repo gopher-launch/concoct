@@ -731,11 +731,12 @@ explicit bug provenance.
 
 ## CON-031 — Establish release and compatibility versioning
 
-- Status: `planned`
+- Status: `active`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-003, CAP-005
 - Capability impact: establishes version identity and compatibility contracts for the executable, embedded workflow content, project schema, and future upgrades
+- Archive: `.concoct/archive/2026-08-11-CON-031-establish-release-and-compatibility-versioning`
 
 ### Outcome
 

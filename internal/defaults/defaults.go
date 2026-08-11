@@ -7,9 +7,10 @@ import (
 	"sort"
 
 	concoct "github.com/gopher-launch/concoct"
+	"github.com/gopher-launch/concoct/internal/buildinfo"
 )
 
-const Provenance = "development build (embedded Concoct defaults)"
+func Provenance() string { return buildinfo.Current().Provenance() }
 
 type Resource struct{ ID, Kind, Path string }
 
@@ -29,7 +30,7 @@ func Read(id, operation string) ([]byte, error) {
 		if r.ID == id {
 			b, err := fs.ReadFile(concoct.Templates, "templates/"+r.Path)
 			if err != nil {
-				return nil, fmt.Errorf("required built-in resource %q for %s is unavailable in %s: %w; reinstall or rebuild Concoct", id, operation, Provenance, err)
+				return nil, fmt.Errorf("required built-in resource %q for %s is unavailable in %s: %w; reinstall or rebuild Concoct", id, operation, Provenance(), err)
 			}
 			return b, nil
 		}

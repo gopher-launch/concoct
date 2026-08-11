@@ -29,6 +29,21 @@ Workflow state names and transition validity are defined in [state-machine.md](s
 
 Every command first locates the project or target, parses the artifacts it needs, validates the detected state, and fails without workflow mutation when evidence is malformed, contradictory, or outside the command's valid starting states.
 
+Project-aware workflow commands first validate `.concoct/project.yaml` before
+creating output files, task branches, reviews, archives, commits, or integration
+state. Missing records are legacy/unversioned and unsupported records are
+read-only. `status` and `why` provide reduced compatibility diagnostics without
+parsing workflow evidence in those cases. `version` and `defaults` are always
+project-independent.
+
+## `concoct version`
+
+Reports the executable product version, source revision, modified state, and
+classification. An official release requires a complete valid leading-`v`
+SemVer tag, an exact revision, clean source, and release build metadata;
+otherwise the binary is labeled `development`. This command has no project
+inputs and makes no changes.
+
 Role commands render deterministic, inspectable handoff content. Rendering does not launch an agent and does not prove that role work completed. The `Resulting state` entries below mean the state after the selected role successfully performs the rendered handoff and persists its authorized outputs. Unless an explicit output option is later defined, prompts are written to standard output and are not committed artifacts.
 
 Every role prompt includes the selected persona, exact required context, allowed writes, current state, expected outcome, verification requirements, outgoing handoff, and recommended next transition. Each role command therefore carries both incoming context and outgoing handoff; no separate `handoff` command is part of the happy path.

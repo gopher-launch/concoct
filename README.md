@@ -45,6 +45,28 @@ concoct init hello-world
 cd hello-world
 ```
 
+## Versions and project compatibility
+
+`concoct version` is project-independent. Official binaries report their exact
+SemVer tag and source revision; every source, partial, malformed, or dirty
+build is explicitly reported as a development build. `concoct defaults list`
+uses that same executable identity for embedded-content provenance.
+
+Each initialized repository has an executable-owned `.concoct/project.yaml`.
+It records the project `contract-version` and immutable `created-with` identity;
+`last-upgraded-with` changes only through a future explicit contract upgrade.
+Version `1` is currently both readable and mutation-compatible. Repositories
+without that record are legacy/unversioned: `status` and `why` explain the
+condition without interpreting workflow state, while all workflow commands
+refuse before writing files or changing Git.
+
+Concoct uses leading-`v` SemVer tags. During `v0`, any minor release may change
+behavior or contracts; patch releases are compatible fixes, and prereleases
+are not stable commitments. Product version, embedded-content identity,
+project-contract version, and Markdown artifact `version: 1` fields are
+separate concepts. Official releases are built from tags by GoReleaser in
+GitHub Actions and publish archives, checksums, an SBOM, and GitHub provenance.
+
 `init` creates a Git repository, installs and stages the project-owned workflow, and
 writes `.concoct/current/bootstrap-prompt.md`. It does not create the initial
 commit. Review the staged files, customize the project guidance, then commit

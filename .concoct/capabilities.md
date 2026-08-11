@@ -137,6 +137,7 @@ repository context.
 - Archive: `.concoct/archive/2026-08-04-CON-030-make-built-in-workflow-content-executable-owned/summary.md`
 - Updated by: `.concoct/archive/2026-07-29-CON-005-go-cli-foundation/`
 - Updated by: `.concoct/archive/2026-07-31-CON-017-separate-protocol-policy-and-project-guidance/summary.md`
+- Updated by: `.concoct/archive/2026-08-11-CON-031-establish-release-and-compatibility-versioning/summary.md`
 - Documentation: `README.md`, `templates/AGENTS.md`
 
 ### Capability
@@ -231,6 +232,7 @@ executable-rendered protocol and role guidance where supported.
 
 ## CAP-005 — Executable CLI initialization and workflow status
 
+- Archive: `.concoct/archive/2026-08-11-CON-031-establish-release-and-compatibility-versioning/summary.md`
 - Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
@@ -240,10 +242,11 @@ executable-rendered protocol and role guidance where supported.
 
 ### Capability
 
-Concoct provides a Go CLI with `init` and read-only `status` commands. It can
+Concoct provides a versioned Go CLI with `init`, `version`, and read-only `status` commands. It can
 create a Concoct-enabled Git repository from the selectively installed,
-project-owned portion of its embedded distribution and derive deterministic
-workflow state from canonical repository artifacts.
+project-owned portion of its embedded distribution, recording a project
+contract and provenance that the CLI validates before project mutations. It
+derives deterministic workflow state from canonical repository artifacts.
 
 ### User value
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	concoct "github.com/gopher-launch/concoct"
+	"github.com/gopher-launch/concoct/internal/contract"
 	"github.com/gopher-launch/concoct/internal/instruction"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
@@ -70,6 +71,9 @@ func Initialize(base, target string, out io.Writer) (err error) {
 	created = true
 	if err = copyTemplates(target, filepath.Base(target)); err != nil {
 		return fmt.Errorf("copy templates: %w", err)
+	}
+	if err = contract.Write(filepath.Join(target, ".concoct", "project.yaml")); err != nil {
+		return fmt.Errorf("write project contract: %w", err)
 	}
 	if err = os.MkdirAll(filepath.Join(target, ".concoct", "archive"), 0o755); err != nil {
 		return fmt.Errorf("create archive directory: %w", err)

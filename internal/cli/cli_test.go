@@ -60,6 +60,62 @@ func TestPromptArgumentValidation(t *testing.T) {
 	}
 }
 
+func TestLegacyProjectRejectsWorkflowCommandBeforeOutput(t *testing.T) {
+	parent := t.TempDir()
+	if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "demo")
+	if err := os.Remove(filepath.Join(root, ".concoct", "project.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONCOCT_CALLER_DIR", root)
+	output := filepath.Join(root, "should-not-exist.md")
+	err := Run([]string{"next", "--output", output}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "legacy/unversioned") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("workflow command wrote output: %v", err)
+	}
+}
+
+func TestMalformedProjectRecordsUseReducedStatusAndRejectWorkflowOutput(t *testing.T) {
+	for name, record := range map[string]string{
+		"incomplete":     "contract-version: 1\n",
+		"empty":          "",
+		"invalid":        "contract-version: [\n",
+		"multi-document": "contract-version: 1\ncreated-with: {version: development, revision: unknown}\nlast-upgraded-with: {version: development, revision: unknown}\n---\ncontract-version: 1\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			root := filepath.Join(parent, "demo")
+			if err := os.WriteFile(filepath.Join(root, ".concoct", "project.yaml"), []byte(record), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("CONCOCT_CALLER_DIR", root)
+			var status bytes.Buffer
+			if err := Run([]string{"status"}, &status, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(status.String(), "Project contract: incompatible") {
+				t.Fatalf("status = %q", status.String())
+			}
+			output := filepath.Join(root, "should-not-exist.md")
+			err := Run([]string{"next", "--output", output}, &bytes.Buffer{}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), "malformed project contract") {
+				t.Fatalf("next error = %v", err)
+			}
+			if _, err := os.Stat(output); !os.IsNotExist(err) {
+				t.Fatalf("workflow command wrote output: %v", err)
+			}
+		})
+	}
+}
+
 func TestPlanCreatesDeterministicTaskBranchAndRefusesCollision(t *testing.T) {
 	parent := t.TempDir()
 	if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {

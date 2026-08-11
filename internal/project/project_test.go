@@ -19,7 +19,7 @@ func TestInitializeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Join(parent, "demo")
-	for _, path := range []string{"AGENTS.md", ".aider.conf.yml", ".codex/skills/concoct/SKILL.md", ".concoct/policy.md", ".concoct/capabilities.md", ".concoct/roadmap.md", ".concoct/current/bootstrap-prompt.md"} {
+	for _, path := range []string{"AGENTS.md", ".aider.conf.yml", ".codex/skills/concoct/SKILL.md", ".concoct/policy.md", ".concoct/project.yaml", ".concoct/capabilities.md", ".concoct/roadmap.md", ".concoct/current/bootstrap-prompt.md"} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Errorf("missing %s: %v", path, err)
 		}

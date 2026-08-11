@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gopher-launch/concoct/internal/buildinfo"
+	"github.com/gopher-launch/concoct/internal/contract"
 	"github.com/gopher-launch/concoct/internal/defaults"
 	"github.com/gopher-launch/concoct/internal/gitrepo"
 	"github.com/gopher-launch/concoct/internal/integration"
@@ -17,6 +19,7 @@ import (
 
 const usage = `Usage:
   concoct init <project>
+  concoct version
   concoct defaults list
   concoct defaults show <logical-id>
   concoct status
@@ -41,10 +44,16 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	switch args[0] {
+	case "version":
+		if len(args) != 1 {
+			return fmt.Errorf("version accepts no arguments")
+		}
+		fmt.Fprint(stdout, buildinfo.Current().String())
+		return nil
 	case "defaults":
 		if len(args) == 2 && args[1] == "list" {
 			for _, r := range defaults.List() {
-				fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.ID, r.Kind, defaults.Provenance)
+				fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.ID, r.Kind, defaults.Provenance())
 			}
 			return nil
 		}
@@ -81,11 +90,26 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if _, err := contract.CheckRead(root); err != nil {
+			fmt.Fprint(stdout, contract.Describe(root))
+			return nil
+		}
 		report := workflow.Detect(root)
 		fmt.Fprint(stdout, report.String())
 		if report.OperationalError != nil {
 			return report.OperationalError
 		}
+		return nil
+	case "why":
+		base, err := callerDir()
+		if err != nil {
+			return err
+		}
+		root, err := project.Discover(base)
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(stdout, contract.Describe(root))
 		return nil
 	case "next", "roadmap", "plan", "code", "review", "archive":
 		if args[0] == "archive" && len(args) >= 2 && args[1] == "--complete" {
@@ -112,6 +136,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		root, err := project.Discover(base)
 		if err != nil {
+			return err
+		}
+		if err := contract.CheckMutate(root); err != nil {
 			return err
 		}
 		if err := integration.Run(root, mode, os.Stdin, stdout); err != nil {
@@ -154,6 +181,9 @@ func runArchiveTransition(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := contract.CheckMutate(root); err != nil {
+		return err
+	}
 	result, err := workflow.CompleteArchive(root, override)
 	if err != nil {
 		return err
@@ -173,6 +203,9 @@ func runRoleTransition(command, action string, stdout io.Writer) error {
 	}
 	root, err := project.Discover(base)
 	if err != nil {
+		return err
+	}
+	if err := contract.CheckMutate(root); err != nil {
 		return err
 	}
 	var result workflow.TransitionResult
@@ -218,6 +251,11 @@ func runPrompt(args []string, stdout, stderr io.Writer) error {
 	}
 	root, err := project.Discover(base)
 	if err != nil {
+		return err
+	}
+	// Rendering fully interprets project workflow evidence. Check mutation
+	// compatibility too because plan can create a branch and --output can write.
+	if err := contract.CheckMutate(root); err != nil {
 		return err
 	}
 	request := prompt.Request{Command: command, RoadmapID: roadmapID}
