@@ -217,7 +217,8 @@ executable-rendered protocol and role guidance where supported.
 
 ### Limitations
 
-- Adapters provide instructions only; they do not launch agents or enforce workflow transitions.
+- These adapters provide agent-neutral instructions; one-shot launching and
+  transition enforcement are provided separately by CAP-013.
 
 ### Verification evidence
 
@@ -355,9 +356,9 @@ rules.
 ### Limitations
 
 - Prompt commands provide guidance only; CAP-010 provides separate validated
-  Developer and Reviewer completion boundaries, and CAP-011 provides the
-  separate validated archival completion boundary. Direct agent execution
-  remains future work.
+  Developer and Reviewer completion boundaries, CAP-011 provides the separate
+  validated archival completion boundary, and CAP-013 provides one-shot agent
+  execution without replacing those explicit role transitions.
 - Output files are create-only and existing destinations are never overwritten.
 - Archive-summary relevance is selected conservatively from identifiers in
   validated task and command context because no archive index exists.
@@ -862,9 +863,9 @@ as proof that a workflow transition occurred.
 
 ### Limitations
 
-- This is a validation boundary, not an agent launcher or a persisted execution
-  history. CON-010 owns direct adapter execution and CON-033/CON-034 own
-  lifecycle repetition and durable run recovery.
+- This is a validation boundary, not a persisted execution history. CAP-013
+  owns one-shot adapter execution; CON-033/CON-034 own lifecycle repetition and
+  durable run recovery.
 - Existing manual prompts and explicit completion commands remain the supported
   workflow path; a structured outcome alone does not bypass their authority or
   policy/Git safeguards.
@@ -892,5 +893,5 @@ as proof that a workflow transition occurred.
 - Role commands and the action/outcome contract do not directly execute persona
   work or treat rendered guidance, process success, or a claimed outcome alone
   as role completion.
-- Direct agent execution, workflow diagnostics, recovery, history reporting,
+- Repeated agent execution, workflow diagnostics, recovery, history reporting,
   upgrades, and overlays remain roadmap intent rather than current capabilities.
