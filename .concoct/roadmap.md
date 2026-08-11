@@ -731,10 +731,37 @@ intervention behavior.
 
 ### Product decisions
 
-- Use `concoct run` to repeatedly re-evaluate and execute authorized actions for
-  one already selected task. The initial release does not autonomously select a
-  roadmap item in ready state. When no task is selected, `run` stops without
-  mutation and explains how to select or begin one.
+- Permit `concoct run` to begin in ready state without an already selected roadmap
+  item. In that state, invoke the authorized Product Owner action through the
+  configured adapter and require it to return a structured proposed roadmap
+  selection or an explicit blocker or decision requirement. Validate the proposed
+  item against current roadmap, capability, policy, and repository evidence; do not
+  derive a selection from summaries or human-readable output.
+
+- Treat a Product Owner recommendation as a proposal rather than an authoritative
+  task selection. Persist the bounded proposal and its evidence fingerprint, then
+  stop at the `next` approval gate. Report the proposed roadmap item, rationale,
+  current gate, and `concoct run --approve next` as the continuation command.
+
+- `concoct run --approve next` accepts only the currently pending, still-valid
+  proposed selection. Bind approval to the exact roadmap item and relevant evidence,
+  durably establish the selected task, recompute the next authorized action, and
+  continue directly into planning. If planning succeeds, stop at the plan-acceptance
+  gate during the same invocation.
+
+- Invalidate a proposed selection when relevant roadmap, capability, workflow,
+  policy, or repository evidence changes. A stale, missing, ambiguous, or invalid
+  proposal cannot be approved and requires a newly authorized Product Owner action.
+
+- Keep `next`, `plan`, and prompt-rendering commands available as manual workflow and
+  diagnostic paths. Orchestrated execution composes their underlying decision,
+  authorization, rendering, and validation capabilities without requiring users to
+  shuttle prompts between Concoct and an agent.
+
+- Treat a successfully completed Product Owner invocation that leaves Concoct with
+  the same actionable recommendation and relevant-state fingerprint as a
+  non-progressing result. Do not repeatedly invoke it. Either establish a validated
+  proposed-selection gate or stop with a protocol or postcondition failure.
 
 - Determine effective orchestration policy from invariant intervention rules,
   project-required gates, and invocation-specific restrictions. Invariant stops
