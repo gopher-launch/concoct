@@ -731,7 +731,7 @@ explicit bug provenance.
 
 ## CON-032 — Define structured orchestration actions and outcomes
 
-- Status: `active`
+- Status: `delivered`
 - Archive: `.concoct/archive/2026-08-11-CON-032-define-structured-orchestration-actions-and-outcomes/`
 - Priority: `high`
 - Depends on: None
