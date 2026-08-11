@@ -43,6 +43,18 @@ point. Project guidance may strengthen protocol controls but may not weaken
 them. Rendered prompts attribute all layers and remain guidance rather than
 completed role evidence.
 
+## Optional one-shot execution
+
+From an ordinary workflow boundary, `concoct exec --dry-run` resolves the one
+authorized action, exact manual prompt, adapter profile, timeout, and safety
+posture without writing runtime evidence. `concoct exec` runs at most that one
+action and stops; `concoct exec inspect [<invocation-id>]` reads its private
+ignored record. Manual role commands remain the portable fallback.
+
+When this skill is already operating inside an executable-rendered role prompt,
+perform that role and use its explicit completion boundary. Do not invoke
+`concoct exec` recursively from the adapter-run role.
+
 ## Canonical artifacts
 
 Use these files in the project root:

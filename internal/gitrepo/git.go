@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,10 @@ import (
 )
 
 // Repository is the deliberately small Git boundary used by workflow code.
-type Repository struct{ Root string }
+type Repository struct {
+	Root string
+	ctx  context.Context
+}
 
 type TaskStart struct{ Trunk, Branch, Base string }
 
@@ -20,7 +24,15 @@ type StatusEntry struct {
 }
 
 func Open(root string) (*Repository, bool, error) {
-	c := exec.Command("git", "rev-parse", "--show-toplevel")
+	return OpenContext(context.Background(), root)
+}
+
+// OpenContext returns a repository whose Git operations observe ctx.
+func OpenContext(ctx context.Context, root string) (*Repository, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	c.Dir = root
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -34,11 +46,11 @@ func Open(root string) (*Repository, bool, error) {
 	if top != want {
 		return nil, false, fmt.Errorf("Concoct project root %s is nested inside Git repository %s", want, top)
 	}
-	return &Repository{Root: top}, true, nil
+	return &Repository{Root: top, ctx: ctx}, true, nil
 }
 
 func (r *Repository) run(args ...string) (string, error) {
-	c := exec.Command("git", args...)
+	c := r.command(args...)
 	c.Dir = r.Root
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -47,10 +59,18 @@ func (r *Repository) run(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func (r *Repository) command(args ...string) *exec.Cmd {
+	ctx := r.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return exec.CommandContext(ctx, "git", args...)
+}
+
 func (r *Repository) Head() (string, error)              { return r.run("rev-parse", "HEAD") }
 func (r *Repository) LastCommitSubject() (string, error) { return r.run("log", "-1", "--format=%s") }
 func (r *Repository) FileAt(ref, path string) ([]byte, error) {
-	c := exec.Command("git", "show", ref+":"+path)
+	c := r.command("show", ref+":"+path)
 	c.Dir = r.Root
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -63,7 +83,7 @@ func (r *Repository) Branch() (string, error) {
 }
 func (r *Repository) Status() (string, error) { return r.run("status", "--short") }
 func (r *Repository) StatusEntries() ([]StatusEntry, error) {
-	c := exec.Command("git", "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	c := r.command("status", "--porcelain=v1", "-z", "--untracked-files=all")
 	c.Dir = r.Root
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -99,7 +119,7 @@ func (r *Repository) Clean() error {
 }
 func (r *Repository) Ref(name string) (string, error) { return r.run("rev-parse", "--verify", name) }
 func (r *Repository) BranchExists(name string) (bool, error) {
-	c := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+name)
+	c := r.command("show-ref", "--verify", "--quiet", "refs/heads/"+name)
 	c.Dir = r.Root
 	err := c.Run()
 	if err == nil {
@@ -111,7 +131,7 @@ func (r *Repository) BranchExists(name string) (bool, error) {
 	return false, err
 }
 func (r *Repository) Upstream() (string, bool, error) {
-	c := exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	c := r.command("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
 	c.Dir = r.Root
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -124,7 +144,7 @@ func (r *Repository) Upstream() (string, bool, error) {
 }
 func (r *Repository) Push() error { _, err := r.run("push"); return err }
 func (r *Repository) IsAncestor(older, newer string) (bool, error) {
-	c := exec.Command("git", "merge-base", "--is-ancestor", older, newer)
+	c := r.command("merge-base", "--is-ancestor", older, newer)
 	c.Dir = r.Root
 	err := c.Run()
 	if err == nil {
@@ -140,7 +160,7 @@ func (r *Repository) IsAncestor(older, newer string) (bool, error) {
 // This is the set of paths a squash integration of head is allowed to place in
 // the index or worktree.
 func (r *Repository) ChangedPaths(base, head string) (map[string]struct{}, error) {
-	c := exec.Command("git", "diff", "--name-only", "--no-renames", "-z", base+"..."+head)
+	c := r.command("diff", "--name-only", "--no-renames", "-z", base+"..."+head)
 	c.Dir = r.Root
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -158,7 +178,7 @@ func (r *Repository) ChangedPaths(base, head string) (map[string]struct{}, error
 // DiffPaths returns the paths changed by the exact old..new transition. Unlike
 // ChangedPaths, it does not widen the comparison through a merge base.
 func (r *Repository) DiffPaths(old, new string) (map[string]struct{}, error) {
-	c := exec.Command("git", "diff", "--name-only", "--no-renames", "-z", old, new)
+	c := r.command("diff", "--name-only", "--no-renames", "-z", old, new)
 	c.Dir = r.Root
 	out, err := c.CombinedOutput()
 	if err != nil {
@@ -225,7 +245,7 @@ func (r *Repository) HasUnmerged() (bool, error) {
 	return s != "", err
 }
 func (r *Repository) Staged() (bool, error) {
-	c := exec.Command("git", "diff", "--cached", "--quiet")
+	c := r.command("diff", "--cached", "--quiet")
 	c.Dir = r.Root
 	err := c.Run()
 	if err == nil {

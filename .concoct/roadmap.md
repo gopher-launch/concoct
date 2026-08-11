@@ -77,7 +77,8 @@ concoct plan <roadmap-id>
 
 ## CON-010 — Execute one recommended action through an agent adapter
 
-- Status: `planned`
+- Status: `active`
+- Archive: `.concoct/archive/2026-08-11-CON-010-execute-one-recommended-action-through-an-agent-adapter`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-005, CAP-006, CAP-007, CAP-008, CAP-009, CAP-010, CAP-011, CAP-012

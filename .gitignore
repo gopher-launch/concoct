@@ -13,6 +13,7 @@ cover.html
 
 # Working dir
 .concoct/work/
+.concoct/runtime/invocations/
 
 # Local environment files
 .env

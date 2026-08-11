@@ -44,6 +44,43 @@ type Report struct {
 // policy activity. It never treats a missing artifact as a skip.
 type PolicyActivity struct{ Activity, Requirement, Disposition, Reason, Source string }
 
+// ActionResolution is the typed recommendation authority shared by status and
+// one-shot orchestration. Command is presentation; ActionKind is selection.
+type ActionResolution struct {
+	ActionKind, Role, PromptCommand, Command, Refusal string
+	Executable                                        bool
+}
+
+func ResolveAction(report Report) ActionResolution {
+	switch report.State {
+	case Ready:
+		return ActionResolution{"product-owner-next", "product-owner", "next", "concoct next", "", true}
+	case Planned, InProgress, ChangesRequested:
+		return ActionResolution{"development", "developer", "code", "concoct code", "", true}
+	case Complete:
+		for _, activity := range report.PolicyActivities {
+			if activity.Activity == string(instruction.IndependentReview) && (activity.Disposition == "not-required" || activity.Disposition == "externally-satisfied") {
+				return ActionResolution{"archival", "archivist", "archive", "concoct archive", "", true}
+			}
+		}
+		return ActionResolution{"independent-review", "reviewer", "review", "concoct review", "", true}
+	case Approved:
+		return ActionResolution{"archival", "archivist", "archive", "concoct archive", "", true}
+	case Archived:
+		return ActionResolution{"integration", "integrator", "", "concoct integrate", "", true}
+	case Blocked:
+		return ActionResolution{Command: "route the blocker to the responsible role or human", Refusal: "review is blocked and requires the responsible role or a human decision"}
+	case Integrating:
+		return ActionResolution{Command: "resolve and stage conflicts, then run concoct integrate --continue, or run concoct integrate --abort", Refusal: "integration recovery requires an explicit human choice of --continue or --abort"}
+	case Integrated:
+		return ActionResolution{Command: "concoct integrate --continue", Refusal: "integration recovery requires an explicit human continuation"}
+	case Invalid:
+		return ActionResolution{Command: "repair the reported artifacts, then run concoct status", Refusal: "invalid workflow state"}
+	default:
+		return ActionResolution{Refusal: fmt.Sprintf("workflow state %s has no executable action", report.State)}
+	}
+}
+
 // EffectivePolicy exposes the one composed policy authority to transition and
 // rendering consumers without duplicating policy parsing.
 func EffectivePolicy(root string) (instruction.Policy, error) {
@@ -457,6 +494,10 @@ func Detect(root string) (r Report) {
 			resolvedTask = nil
 		}
 		r.PolicyActivities = resolvePolicy(effective.Policy, r, resolvedTask)
+		resolved := ResolveAction(r)
+		if resolved.Command != "" {
+			r.Next = resolved.Command
+		}
 	}()
 	roadData, err := os.ReadFile(filepath.Join(root, ".concoct", "roadmap.md"))
 	if err != nil {

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gopher-launch/concoct/internal/config"
 	"github.com/gopher-launch/concoct/internal/gitrepo"
 	"github.com/gopher-launch/concoct/internal/instruction"
 	"github.com/gopher-launch/concoct/internal/workflow"
@@ -29,7 +31,17 @@ type recovery struct {
 // Run performs an integration transaction. Input is used only for the default
 // push confirmation when the recorded trunk has a matching upstream.
 func Run(root, mode string, input io.Reader, output io.Writer) error {
-	g, ok, err := gitrepo.Open(root)
+	return RunContext(context.Background(), root, mode, input, output)
+}
+
+// RunContext performs an integration transaction whose Git operations and
+// interactive push confirmation observe ctx. Recovery evidence remains the
+// authority for any transaction interrupted after mutation begins.
+func RunContext(ctx context.Context, root, mode string, input io.Reader, output io.Writer) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	g, ok, err := gitrepo.OpenContext(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -44,7 +56,7 @@ func Run(root, mode string, input io.Reader, output io.Writer) error {
 		if mode == "abort" {
 			return abort(g, r, path)
 		}
-		return resume(g, r, path, input, output)
+		return resume(ctx, g, r, path, input, output)
 	}
 	if mode != "" {
 		return fmt.Errorf("unknown integration mode %q", mode)
@@ -64,10 +76,13 @@ func Run(root, mode string, input io.Reader, output io.Writer) error {
 		return fmt.Errorf("integration requires enabled git metadata with status archived and archive-commit")
 	}
 	path := filepath.Join(root, ".git", "concoct", "integrations", c.ID+".yaml")
-	return start(g, c, path, input, output)
+	return start(ctx, g, c, path, input, output)
 }
 
-func start(g *gitrepo.Repository, c workflow.GitContext, path string, input io.Reader, output io.Writer) error {
+func start(ctx context.Context, g *gitrepo.Repository, c workflow.GitContext, path string, input io.Reader, output io.Writer) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("integration recovery already exists; use --continue or --abort")
 	}
@@ -100,6 +115,9 @@ func start(g *gitrepo.Repository, c workflow.GitContext, path string, input io.R
 	if err := writeRecovery(path, r, true); err != nil {
 		return err
 	}
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 	if err := g.Checkout(c.Trunk); err != nil {
 		return err
 	}
@@ -110,10 +128,13 @@ func start(g *gitrepo.Repository, c workflow.GitContext, path string, input io.R
 	if err := writeRecovery(path, r, false); err != nil {
 		return err
 	}
-	return finish(g, &r, path, input, output)
+	return finish(ctx, g, &r, path, input, output)
 }
 
-func resume(g *gitrepo.Repository, r recovery, path string, input io.Reader, output io.Writer) error {
+func resume(ctx context.Context, g *gitrepo.Repository, r recovery, path string, input io.Reader, output io.Writer) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 	branch, err := g.Branch()
 	if err != nil {
 		return fmt.Errorf("detached HEAD is unsafe: %w", err)
@@ -172,10 +193,13 @@ func resume(g *gitrepo.Repository, r recovery, path string, input io.Reader, out
 			return err
 		}
 	}
-	return finish(g, &r, path, input, output)
+	return finish(ctx, g, &r, path, input, output)
 }
 
-func finish(g *gitrepo.Repository, r *recovery, path string, input io.Reader, output io.Writer) error {
+func finish(ctx context.Context, g *gitrepo.Repository, r *recovery, path string, input io.Reader, output io.Writer) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 	if err := validateTrunkHead(g, *r); err != nil {
 		return err
 	}
@@ -190,35 +214,48 @@ func finish(g *gitrepo.Repository, r *recovery, path string, input io.Reader, ou
 		if !staged {
 			return fmt.Errorf("integration result is not staged; use --abort or restore the staged squash result")
 		}
-		if err := g.Commit("concoct: integrate " + r.TaskID); err != nil {
+		commitErr := g.Commit("concoct: integrate " + r.TaskID)
+		if err := captureIntegrationCommit(g.Root, r, path, commitErr); err != nil {
 			return err
 		}
-		r.IntegrationCommit, err = g.Head()
-		if err != nil {
-			return err
+		if commitErr != nil {
+			return commitErr
 		}
-		r.Phase = "integrated"
-		if err := writeRecovery(path, *r, false); err != nil {
+		if err := contextError(ctx); err != nil {
 			return err
 		}
 	}
 	if r.DeliveryCommit == "" {
+		if err := contextError(ctx); err != nil {
+			return err
+		}
 		if err := reconcile(g.Root, r.TaskID); err != nil {
 			return fmt.Errorf("integration commit created but final bookkeeping failed; recovery preserved: %w", err)
 		}
-		if err := g.AddAll(); err != nil {
+		// Once bookkeeping begins, finish its local commit with an uncancelled
+		// repository and then honor cancellation from the durable delivered
+		// recovery phase. Returning mid-bookkeeping would leave no safe resume
+		// boundary for the partially cleared current state.
+		stable, ok, err := gitrepo.Open(g.Root)
+		if err != nil {
 			return err
 		}
-		staged, err := g.Staged()
+		if !ok {
+			return fmt.Errorf("integration recovery lost its Git repository")
+		}
+		if err := stable.AddAll(); err != nil {
+			return err
+		}
+		staged, err := stable.Staged()
 		if err != nil {
 			return err
 		}
 		if staged {
-			if err := g.Commit("concoct: deliver " + r.TaskID); err != nil {
+			if err := stable.Commit("concoct: deliver " + r.TaskID); err != nil {
 				return fmt.Errorf("commit final bookkeeping: %w", err)
 			}
 		}
-		r.DeliveryCommit, err = g.Head()
+		r.DeliveryCommit, err = stable.Head()
 		if err != nil {
 			return err
 		}
@@ -226,8 +263,14 @@ func finish(g *gitrepo.Repository, r *recovery, path string, input io.Reader, ou
 		if err := writeRecovery(path, *r, false); err != nil {
 			return err
 		}
+		if err := contextError(ctx); err != nil {
+			return err
+		}
 	}
-	if err := maybePush(g, r.Trunk, input, output); err != nil {
+	if err := maybePush(ctx, g, r.Trunk, input, output); err != nil {
+		return err
+	}
+	if err := contextError(ctx); err != nil {
 		return err
 	}
 	exists, err := g.BranchExists(r.TaskBranch)
@@ -243,6 +286,36 @@ func finish(g *gitrepo.Repository, r *recovery, path string, input io.Reader, ou
 		return fmt.Errorf("delivery cleanup did not leave a clean trunk: %w", err)
 	}
 	return os.Remove(path)
+}
+
+func captureIntegrationCommit(root string, r *recovery, path string, commitErr error) error {
+	stable, ok, err := gitrepo.Open(root)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("integration recovery lost its Git repository")
+	}
+	head, err := stable.Head()
+	if err != nil {
+		return err
+	}
+	if head == r.PreIntegrationHead {
+		if commitErr != nil {
+			return commitErr
+		}
+		return fmt.Errorf("integration commit did not advance the recorded trunk")
+	}
+	subject, err := stable.LastCommitSubject()
+	if err != nil {
+		return err
+	}
+	if subject != "concoct: integrate "+r.TaskID {
+		return fmt.Errorf("recorded trunk advanced to an unexpected commit while integration was interrupted")
+	}
+	r.IntegrationCommit = head
+	r.Phase = "integrated"
+	return writeRecovery(path, *r, false)
 }
 
 func abort(g *gitrepo.Repository, r recovery, path string) error {
@@ -378,7 +451,10 @@ func isUnmergedStatus(status string) bool {
 	}
 }
 
-func maybePush(g *gitrepo.Repository, trunk string, input io.Reader, output io.Writer) error {
+func maybePush(ctx context.Context, g *gitrepo.Repository, trunk string, input io.Reader, output io.Writer) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 	upstream, ok, err := g.Upstream()
 	if err != nil || !ok {
 		return err
@@ -392,7 +468,10 @@ func maybePush(g *gitrepo.Repository, trunk string, input io.Reader, output io.W
 	}
 	if !auto {
 		fmt.Fprintf(output, "Push integrated trunk %s to %s? [y/N] ", trunk, upstream)
-		line, _ := bufio.NewReader(input).ReadString('\n')
+		line, err := readLineContext(ctx, input)
+		if err != nil {
+			return err
+		}
 		if strings.ToLower(strings.TrimSpace(line)) != "y" && strings.ToLower(strings.TrimSpace(line)) != "yes" {
 			return nil
 		}
@@ -400,23 +479,38 @@ func maybePush(g *gitrepo.Repository, trunk string, input io.Reader, output io.W
 	return g.Push()
 }
 
+func readLineContext(ctx context.Context, input io.Reader) (string, error) {
+	type result struct {
+		line string
+		err  error
+	}
+	read := make(chan result, 1)
+	go func() {
+		line, err := bufio.NewReader(input).ReadString('\n')
+		read <- result{line, err}
+	}()
+	select {
+	case value := <-read:
+		if value.err != nil && value.err != io.EOF {
+			return "", value.err
+		}
+		return value.line, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func contextError(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
 func autoPush(root string) (bool, error) {
-	b, err := os.ReadFile(filepath.Join(root, ".concoct", "config.yaml"))
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	var c struct {
-		Git struct {
-			AutoPush bool `yaml:"auto-push"`
-		} `yaml:"git"`
-	}
-	if err := yaml.Unmarshal(b, &c); err != nil {
-		return false, fmt.Errorf("parse .concoct/config.yaml: %w", err)
-	}
-	return c.Git.AutoPush, nil
+	return config.AutoPush(root)
 }
 
 func findRecovery(root string) (string, recovery, error) {

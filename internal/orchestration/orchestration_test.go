@@ -82,6 +82,121 @@ func TestValidateOutcomeAcceptsOnlyObservedRegisteredPostcondition(t *testing.T)
 	}
 }
 
+func TestValidateProductOwnerDecisionWithoutArtifactMutation(t *testing.T) {
+	root := fixture(t, workflow.Ready)
+	action, err := Authorize(root, "product-owner-next", "attempt-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := Outcome{ProtocolVersion: ProtocolVersion, Correlation: action.Correlation, Class: Completed, Summary: "no actionable work", Recommendation: Recommendation{Kind: "no-action", Reason: "no eligible roadmap work is recorded"}}
+	if _, err := ValidateOutcome(root, action, outcome); err != nil {
+		t.Fatalf("valid decision rejected: %v", err)
+	}
+	outcome.Recommendation = Recommendation{Kind: "plan", Command: "concoct plan APP-999"}
+	if _, err := ValidateOutcome(root, action, outcome); err == nil {
+		t.Fatal("ineligible plan recommendation accepted")
+	}
+}
+
+func TestResolveUsesTypedWorkflowAuthority(t *testing.T) {
+	tests := []struct {
+		state workflow.State
+		kind  string
+	}{
+		{workflow.Ready, "product-owner-next"},
+		{workflow.Planned, "development"},
+		{workflow.Complete, "independent-review"},
+	}
+	for _, test := range tests {
+		t.Run(string(test.state), func(t *testing.T) {
+			resolution, err := Resolve(fixture(t, test.state))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !resolution.Executable || resolution.Kind != test.kind || resolution.Role == "" {
+				t.Fatalf("resolution = %#v", resolution)
+			}
+		})
+	}
+}
+
+func TestArchivalAuthorizationFollowsIndependentReviewDisposition(t *testing.T) {
+	t.Run("required review refuses archival authorization", func(t *testing.T) {
+		root := fixture(t, workflow.Complete)
+		resolution, err := Resolve(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolution.Kind != "independent-review" {
+			t.Fatalf("resolution = %#v", resolution)
+		}
+		if _, err := Authorize(root, "archival", "attempt-1"); err == nil {
+			t.Fatal("ordinary unapproved implementation authorized archival")
+		}
+	})
+
+	for _, disposition := range []string{"not-required", "externally-satisfied"} {
+		t.Run(disposition, func(t *testing.T) {
+			root := fixture(t, workflow.Complete)
+			if disposition == "not-required" {
+				path := filepath.Join(root, ".concoct/policy.md")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data = []byte(strings.Replace(strings.Replace(string(data), "  - independent-review\n  - archival\n  - integration\n", "  - archival\n  - integration\nnot-required-reasons:\n  - independent-review: repository accepts developer verification\n", 1), "  - reviewer-approval-before-archive\n", "", 1))
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.WriteFile(filepath.Join(root, "audit.md"), []byte("accepted external review\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(root, ".concoct/current/task-plan.md")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				evidence := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - audit.md\n"
+				data = []byte(strings.Replace(string(data), "capability-impact:\n", evidence+"capability-impact:\n", 1))
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resolution, err := Resolve(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolution.Kind != "archival" || !resolution.Executable {
+				t.Fatalf("resolution = %#v", resolution)
+			}
+			if _, err := Authorize(root, "archival", "attempt-1"); err != nil {
+				t.Fatalf("policy-satisfied archival was not authorized: %v", err)
+			}
+		})
+	}
+}
+
+func TestSnapshotCoversPolicyAndCurrentReviews(t *testing.T) {
+	root := fixture(t, workflow.Planned)
+	before, _, err := Snapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := filepath.Join(root, ".concoct/policy.md")
+	data, _ := os.ReadFile(policy)
+	if err := os.WriteFile(policy, append(data, []byte("\npolicy note\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, _, err := Snapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Digest == after.Digest {
+		t.Fatal("policy change did not affect evidence digest")
+	}
+}
+
 func TestAtomicResultIsSingleAndBounded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "result.json")
 	outcome := Outcome{ProtocolVersion: ProtocolVersion, Class: Blocked, Summary: "needs a decision"}

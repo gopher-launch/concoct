@@ -28,4 +28,8 @@ End with exactly one applicable command:
 - `concoct roadmap` for supported product input or roadmap reconciliation;
 - `concoct status` after external blocker repair when status must be rechecked;
 - no command when no actionable work is recorded.
+
+When an adapter supplies a structured result schema, express the same single
+outcome through it: `plan`, `roadmap`, `blocker`, or `no-action`. The schema is
+transport only; do not start the recommended follow-up or mutate evidence.
 ```

@@ -1,5 +1,5 @@
 // Package orchestration defines the executable-owned protocol boundary between
-// Concoct and a future agent adapter. It deliberately does not start processes
+// Concoct and agent adapters. It deliberately does not start processes
 // or mutate workflow artifacts.
 package orchestration
 
@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -76,13 +77,23 @@ type Diagnostic struct {
 // Outcome is an adapter's claim. It is not transition authority: callers must
 // validate it against the action and current repository evidence.
 type Outcome struct {
-	ProtocolVersion string       `json:"protocol_version"`
-	Correlation     Correlation  `json:"correlation"`
-	Class           OutcomeClass `json:"class"`
-	Summary         string       `json:"summary"`
-	Artifacts       []string     `json:"artifacts,omitempty"`
-	Intervention    Intervention `json:"intervention,omitempty"`
-	Diagnostics     []Diagnostic `json:"diagnostics,omitempty"`
+	ProtocolVersion string         `json:"protocol_version"`
+	Correlation     Correlation    `json:"correlation"`
+	Class           OutcomeClass   `json:"class"`
+	Summary         string         `json:"summary"`
+	Artifacts       []string       `json:"artifacts,omitempty"`
+	Intervention    Intervention   `json:"intervention,omitempty"`
+	Diagnostics     []Diagnostic   `json:"diagnostics,omitempty"`
+	Recommendation  Recommendation `json:"recommendation,omitempty"`
+}
+
+// Recommendation is the bounded result of a decision action. It is separate
+// from lifecycle completion: Product Owner judgment may recommend one manual
+// follow-up without mutating workflow artifacts or starting that follow-up.
+type Recommendation struct {
+	Kind    string `json:"kind,omitempty"`
+	Command string `json:"command,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // DurableFacts is the only representation suitable for durable task history.
@@ -145,8 +156,41 @@ var registry = []Spec{
 	spec("task-planning", "task-planner", "planning", "Create the active task plan and notes for an eligible item.", []workflow.State{workflow.Ready}, []workflow.State{workflow.Planned}, []string{".concoct/current/task-plan.md", ".concoct/current/notes.md", "selected roadmap status"}, InterventionPolicy{nonCompletionIntervention, "planner-or-product-owner", "Task Planner resolves planning evidence or escalates product scope"}),
 	spec("development", "developer", "implementation", "Implement or remediate the active task without changing review, roadmap, or capability ownership.", []workflow.State{workflow.Planned, workflow.InProgress, workflow.ChangesRequested}, []workflow.State{workflow.Complete}, []string{"task source, tests, documentation", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}, InterventionPolicy{nonCompletionIntervention, "developer-remediation", "Developer resolves implementation evidence or escalates scope"}),
 	spec("independent-review", "reviewer", "review", "Independently review the implementation and record one reserved review outcome.", []workflow.State{workflow.Complete}, []workflow.State{workflow.Approved, workflow.ChangesRequested, workflow.Blocked}, []string{"one new .concoct/current/review-NN.md"}, InterventionPolicy{nonCompletionIntervention, "review-routing", "Reviewer routes findings or blocker to the responsible role"}),
-	spec("archival", "archivist", "archive", "Archive accepted work and reconcile accepted capability evidence.", []workflow.State{workflow.Approved}, []workflow.State{workflow.Archived, workflow.Ready}, []string{"archive candidate", "capabilities", "roadmap delivery evidence"}, InterventionPolicy{nonCompletionIntervention, "archive-routing", "Archivist routes missing approval or archival evidence"}),
+	spec("archival", "archivist", "archive", "Archive accepted work and reconcile accepted capability evidence.", []workflow.State{workflow.Complete, workflow.Approved}, []workflow.State{workflow.Archived, workflow.Ready}, []string{"archive candidate", "capabilities", "roadmap delivery evidence"}, InterventionPolicy{nonCompletionIntervention, "archive-routing", "Archivist routes missing approval or archival evidence"}),
 	spec("integration", "integrator", "integration", "Squash the archived Git task branch onto its recorded trunk.", []workflow.State{workflow.Archived}, []workflow.State{workflow.Integrated, workflow.Ready}, []string{"recorded Git integration only"}, InterventionPolicy{nonCompletionIntervention, "integration-routing", "Integrator resolves delivery or Git evidence"}),
+}
+
+// Resolution is the typed, state-derived recommendation consumed by status,
+// dry-run, and execution. Command is retained only for display and manual
+// parity; action selection never parses it.
+type Resolution struct {
+	Kind, Role, PromptCommand, Command, Refusal string
+	Executable                                  bool
+}
+
+// Resolve selects at most one action from validated workflow and policy
+// evidence. Recovery-choice and human-routed states deliberately refuse.
+func Resolve(root string) (Resolution, error) {
+	report := workflow.Detect(root)
+	if report.OperationalError != nil {
+		return Resolution{}, report.OperationalError
+	}
+	if report.State == workflow.Invalid {
+		return Resolution{Refusal: "invalid workflow state: " + strings.Join(report.Diagnostics, "; ")}, nil
+	}
+	authority := workflow.ResolveAction(report)
+	resolved := Resolution{Kind: authority.ActionKind, Role: authority.Role, PromptCommand: authority.PromptCommand, Command: authority.Command, Refusal: authority.Refusal, Executable: authority.Executable}
+	if !resolved.Executable {
+		return resolved, nil
+	}
+	spec, ok := Find(resolved.Kind)
+	if !ok || !containsState(spec.AllowedStates, report.State) {
+		return Resolution{}, fmt.Errorf("resolved action %s has no matching executable contract for state %s", resolved.Kind, report.State)
+	}
+	if resolved.Role != spec.Role {
+		return Resolution{}, fmt.Errorf("resolved action %s role %s disagrees with executable contract role %s", resolved.Kind, resolved.Role, spec.Role)
+	}
+	return resolved, nil
 }
 
 func Registry() []Spec { return append([]Spec(nil), registry...) }
@@ -175,6 +219,10 @@ func Authorize(root, kind, attemptID string) (Action, error) {
 	if !containsState(spec.AllowedStates, report.State) {
 		return Action{}, fmt.Errorf("action %s is not authorized in workflow state %s", kind, report.State)
 	}
+	authority := workflow.ResolveAction(report)
+	if !authority.Executable || authority.ActionKind != kind {
+		return Action{}, fmt.Errorf("action %s is not the policy-authorized recommendation in workflow state %s", kind, report.State)
+	}
 	if len(spec.Preconditions) == 0 || spec.Authority == "" {
 		return Action{}, fmt.Errorf("action %s has an incomplete executable contract", kind)
 	}
@@ -199,7 +247,7 @@ func Snapshot(root string) (Evidence, workflow.Report, error) {
 	if report.OperationalError != nil {
 		return Evidence{}, report, report.OperationalError
 	}
-	paths := []string{".concoct/roadmap.md", ".concoct/capabilities.md", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}
+	paths := []string{"AGENTS.md", ".concoct/policy.md", ".concoct/project.yaml", ".concoct/config.yaml", ".concoct/roadmap.md", ".concoct/capabilities.md"}
 	var parts []string
 	for _, rel := range paths {
 		data, err := os.ReadFile(filepath.Join(root, rel))
@@ -208,6 +256,32 @@ func Snapshot(root string) (Evidence, workflow.Report, error) {
 		} else if !os.IsNotExist(err) {
 			return Evidence{}, report, err
 		}
+	}
+	for _, pattern := range []string{".concoct/current/*", ".concoct/archive/*/summary.md"} {
+		matches, globErr := filepath.Glob(filepath.Join(root, filepath.FromSlash(pattern)))
+		if globErr != nil {
+			return Evidence{}, report, globErr
+		}
+		for _, path := range matches {
+			info, statErr := os.Lstat(path)
+			if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return Evidence{}, report, readErr
+			}
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				return Evidence{}, report, relErr
+			}
+			parts = append(parts, filepath.ToSlash(rel)+":"+hash(data))
+		}
+	}
+	if gitEvidence, gitErr := repositoryEvidence(root); gitErr != nil {
+		return Evidence{}, report, gitErr
+	} else if gitEvidence != "" {
+		parts = append(parts, gitEvidence)
 	}
 	parts = append(parts, "state:"+string(report.State), "task:"+report.RoadmapItem, "review:"+report.LatestReview)
 	sort.Strings(parts)
@@ -241,10 +315,17 @@ func ValidateOutcome(root string, action Action, outcome Outcome) (DurableFacts,
 	if outcome.Class != Completed && current.Digest != action.Evidence.Digest {
 		return DurableFacts{}, errors.New("outcome is stale: repository evidence changed after authorization")
 	}
-	if current.Digest == action.Evidence.Digest && outcome.Class == Completed {
-		return DurableFacts{}, errors.New("completed outcome has no observed workflow or artifact change")
-	}
 	if outcome.Class == Completed {
+		if action.Kind == "product-owner-next" {
+			if current.Digest != action.Evidence.Digest {
+				return DurableFacts{}, errors.New("Product Owner recommendation changed workflow or repository evidence")
+			}
+			if err := validateRecommendation(root, outcome.Recommendation); err != nil {
+				return DurableFacts{}, err
+			}
+		} else if current.Digest == action.Evidence.Digest {
+			return DurableFacts{}, errors.New("completed outcome has no observed workflow or artifact change")
+		}
 		if spec.CompletionValidator == nil {
 			return DurableFacts{}, fmt.Errorf("action %s has no completion validator", action.Kind)
 		}
@@ -337,6 +418,7 @@ func containsOutcome(haystack []OutcomeClass, needle OutcomeClass) bool {
 	return false
 }
 func hash(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
+func NewID() (string, error)  { return randomID() }
 func randomID() (string, error) {
 	b := make([]byte, 18)
 	if _, err := rand.Read(b); err != nil {
@@ -364,7 +446,96 @@ func bounded(o Outcome) error {
 			return errors.New("outcome diagnostic exceeds bounds")
 		}
 	}
+	for _, value := range []string{o.Recommendation.Kind, o.Recommendation.Command, o.Recommendation.Reason} {
+		if len(value) > 512 || strings.Contains(value, "\x00") {
+			return errors.New("outcome recommendation exceeds bounds")
+		}
+	}
 	return nil
+}
+
+func validateRecommendation(root string, recommendation Recommendation) error {
+	switch recommendation.Kind {
+	case "plan":
+		parts := strings.Fields(recommendation.Command)
+		if len(parts) != 3 || parts[0] != "concoct" || parts[1] != "plan" {
+			return errors.New("plan recommendation must use `concoct plan <roadmap-id>`")
+		}
+		if err := workflow.ValidatePlanItem(root, parts[2]); err != nil {
+			return fmt.Errorf("plan recommendation is not currently eligible: %w", err)
+		}
+	case "roadmap":
+		if recommendation.Command != "concoct roadmap" {
+			return errors.New("roadmap recommendation must use `concoct roadmap`")
+		}
+	case "blocker", "no-action":
+		if recommendation.Command != "" || strings.TrimSpace(recommendation.Reason) == "" {
+			return fmt.Errorf("%s recommendation requires a reason and no command", recommendation.Kind)
+		}
+	default:
+		return fmt.Errorf("unsupported Product Owner recommendation kind %q", recommendation.Kind)
+	}
+	return nil
+}
+
+func repositoryEvidence(root string) (string, error) {
+	gitDir := filepath.Join(root, ".git")
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	read := func(args ...string) (string, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		}
+		return string(out), nil
+	}
+	head, err := read("rev-parse", "--verify", "HEAD")
+	if err != nil {
+		head = "unborn\n"
+	}
+	branch, err := read("symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	status, err := read("status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return "", err
+	}
+	worktreeDiff, err := read("diff", "--binary", "--no-ext-diff")
+	if err != nil {
+		return "", err
+	}
+	indexDiff, err := read("diff", "--cached", "--binary", "--no-ext-diff")
+	if err != nil {
+		return "", err
+	}
+	untracked, err := read("ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return "", err
+	}
+	var untrackedParts []string
+	for _, rel := range strings.Split(untracked, "\x00") {
+		if rel == "" {
+			continue
+		}
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return "", readErr
+		}
+		untrackedParts = append(untrackedParts, rel+":"+hash(data))
+	}
+	sort.Strings(untrackedParts)
+	return "git:" + hash([]byte(head+"\x00"+branch+"\x00"+status+"\x00"+worktreeDiff+"\x00"+indexDiff+"\x00"+strings.Join(untrackedParts, "\n"))), nil
 }
 
 // Now is a seam for future adapters that need timestamps without adding them to

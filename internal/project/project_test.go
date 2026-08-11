@@ -19,10 +19,17 @@ func TestInitializeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Join(parent, "demo")
-	for _, path := range []string{"AGENTS.md", ".aider.conf.yml", ".codex/skills/concoct/SKILL.md", ".concoct/policy.md", ".concoct/project.yaml", ".concoct/capabilities.md", ".concoct/roadmap.md", ".concoct/current/bootstrap-prompt.md"} {
+	for _, path := range []string{"AGENTS.md", ".gitignore", ".aider.conf.yml", ".codex/skills/concoct/SKILL.md", ".concoct/policy.md", ".concoct/project.yaml", ".concoct/capabilities.md", ".concoct/roadmap.md", ".concoct/current/bootstrap-prompt.md"} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Errorf("missing %s: %v", path, err)
 		}
+	}
+	ignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil || !strings.Contains(string(ignore), ".concoct/runtime/invocations/") {
+		t.Fatalf("runtime invocation path is not ignored: %v: %s", err, ignore)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".concoct", "runtime")); !os.IsNotExist(err) {
+		t.Fatalf("init created runtime evidence: %v", err)
 	}
 	for _, path := range []string{".concoct/protocol.md", ".concoct/personas/developer.md", ".concoct/prompts/handoffs/task-planner-to-developer.md"} {
 		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {

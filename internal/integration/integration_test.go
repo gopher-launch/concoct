@@ -2,11 +2,14 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
@@ -164,6 +167,57 @@ func TestMatchingUpstreamPushPolicy(t *testing.T) {
 			}
 			if !strings.Contains(output.String(), "Push integrated trunk") {
 				t.Fatal("matching upstream did not prompt")
+			}
+		})
+	}
+}
+
+func TestIntegrationContextInterruptsPushConfirmationAndPreservesRecovery(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		context func() (context.Context, context.CancelFunc)
+		want    error
+	}{
+		{"cancelled", func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) }, context.Canceled},
+		{"timed out", func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), time.Second)
+		}, context.DeadlineExceeded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, _, _ := setupArchived(t, false)
+			remote := filepath.Join(t.TempDir(), "remote.git")
+			command(t, "", "git", "init", "--bare", "-q", remote)
+			git(t, root, "remote", "add", "origin", remote)
+			git(t, root, "checkout", "trunk")
+			git(t, root, "push", "-qu", "origin", "trunk")
+			git(t, root, "checkout", "concoct/app-001-demo")
+
+			ctx, cancel := test.context()
+			defer cancel()
+			output := &promptWriter{prompted: make(chan struct{})}
+			done := make(chan error, 1)
+			go func() { done <- RunContext(ctx, root, "", blockingReader{}, output) }()
+			select {
+			case <-output.prompted:
+				if test.want == context.Canceled {
+					cancel()
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("integration did not reach push confirmation")
+			}
+			select {
+			case err := <-done:
+				if err != test.want {
+					t.Fatalf("error = %v, want %v", err, test.want)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("interrupted integration did not return")
+			}
+			if _, err := os.Stat(filepath.Join(root, ".git/concoct/integrations/APP-001.yaml")); err != nil {
+				t.Fatalf("interrupted integration lost recovery evidence: %v", err)
+			}
+			if out := git(t, root, "branch", "--list", "concoct/app-001-demo"); out == "" {
+				t.Fatal("interrupted integration deleted the task branch")
 			}
 		})
 	}
@@ -419,4 +473,25 @@ func command(t *testing.T, dir, name string, args ...string) string {
 		t.Fatalf("%s %s: %v: %s", name, strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+type blockingReader struct{}
+
+func (blockingReader) Read([]byte) (int, error) { select {} }
+
+type promptWriter struct {
+	mu       sync.Mutex
+	buffer   bytes.Buffer
+	prompted chan struct{}
+	once     sync.Once
+}
+
+func (w *promptWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buffer.Write(p)
+	if strings.Contains(w.buffer.String(), "Push integrated trunk") {
+		w.once.Do(func() { close(w.prompted) })
+	}
+	return n, err
 }

@@ -60,6 +60,90 @@ func TestPromptArgumentValidation(t *testing.T) {
 	}
 }
 
+func TestExecDryRunIsInspectablyNonMutating(t *testing.T) {
+	parent := t.TempDir()
+	if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "demo")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CONCOCT_CALLER_DIR", root)
+	before := workflowSnapshot(t, root)
+	var out bytes.Buffer
+	if err := Run([]string{"exec", "--dry-run", "--reasoning", "high", "--timeout", "5m"}, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Action: product-owner-next", "Adapter: codex", "Reasoning: high (invocation override)", "workspace-write", "no process started"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("dry-run output lacks %q:\n%s", want, out.String())
+		}
+	}
+	if before != workflowSnapshot(t, root) {
+		t.Fatal("dry-run changed workflow evidence")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".concoct/runtime")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created runtime: %v", err)
+	}
+}
+
+func TestExecDryRunHonorsIndependentReviewPolicyRoutes(t *testing.T) {
+	for _, disposition := range []string{"required", "not-required", "externally-satisfied"} {
+		t.Run(disposition, func(t *testing.T) {
+			root := transitionProject(t, false)
+			writeTransitionTaskWithBase(t, root, "implementation-complete", "", false)
+			if disposition == "not-required" {
+				path := filepath.Join(root, ".concoct/policy.md")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data = []byte(strings.Replace(strings.Replace(string(data), "  - independent-review\n  - archival\n  - integration\n", "  - archival\n  - integration\nnot-required-reasons:\n  - independent-review: repository accepts developer verification\n", 1), "  - reviewer-approval-before-archive\n", "", 1))
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if disposition == "externally-satisfied" {
+				if err := os.WriteFile(filepath.Join(root, "audit.md"), []byte("accepted external review\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(root, ".concoct/current/task-plan.md")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				evidence := "policy-activity-evidence:\n  - activity: independent-review\n    disposition: externally-satisfied\n    reason: external audit accepted the change\n    recorded-by: developer\n    evidence:\n      - audit.md\n"
+				data = []byte(strings.Replace(string(data), "capability-impact:\n", evidence+"capability-impact:\n", 1))
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			t.Setenv("CONCOCT_CALLER_DIR", root)
+			var out bytes.Buffer
+			if err := Run([]string{"exec", "--dry-run"}, &out, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			want := "Action: archival"
+			if disposition == "required" {
+				want = "Action: independent-review"
+			}
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("dry-run output lacks %q:\n%s", want, out.String())
+			}
+		})
+	}
+}
+
 func TestLegacyProjectRejectsWorkflowCommandBeforeOutput(t *testing.T) {
 	parent := t.TempDir()
 	if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {

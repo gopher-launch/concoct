@@ -1,15 +1,18 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
 	"github.com/gopher-launch/concoct/internal/buildinfo"
 	"github.com/gopher-launch/concoct/internal/contract"
 	"github.com/gopher-launch/concoct/internal/defaults"
+	"github.com/gopher-launch/concoct/internal/execution"
 	"github.com/gopher-launch/concoct/internal/gitrepo"
 	"github.com/gopher-launch/concoct/internal/integration"
 	"github.com/gopher-launch/concoct/internal/project"
@@ -23,6 +26,8 @@ const usage = `Usage:
   concoct defaults list
   concoct defaults show <logical-id>
   concoct status
+  concoct exec [--dry-run] [--adapter <name>] [--model <model>] [--reasoning <level>] [--timeout <duration>]
+  concoct exec inspect [<invocation-id>]
   concoct next [--output <path>]
   concoct roadmap [--output <path>]
   concoct plan <roadmap-id> [--output <path>]
@@ -111,6 +116,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		fmt.Fprint(stdout, contract.Describe(root))
 		return nil
+	case "exec":
+		return runExec(args[1:], stdout, stderr)
 	case "next", "roadmap", "plan", "code", "review", "archive":
 		if args[0] == "archive" && len(args) >= 2 && args[1] == "--complete" {
 			return runArchiveTransition(args[2:], stdout, stderr)
@@ -150,6 +157,93 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprint(stderr, usage)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runExec(args []string, stdout, stderr io.Writer) error {
+	base, err := callerDir()
+	if err != nil {
+		return err
+	}
+	root, err := project.Discover(base)
+	if err != nil {
+		return err
+	}
+	if len(args) > 0 && args[0] == "inspect" {
+		if len(args) > 2 {
+			fmt.Fprint(stderr, usage)
+			return fmt.Errorf("exec inspect accepts at most one invocation id")
+		}
+		if _, err := contract.CheckRead(root); err != nil {
+			return err
+		}
+		id := ""
+		if len(args) == 2 {
+			id = args[1]
+		}
+		content, err := execution.Inspect(root, id)
+		if err != nil {
+			return err
+		}
+		_, err = io.WriteString(stdout, content)
+		return err
+	}
+	if err := contract.CheckMutate(root); err != nil {
+		return err
+	}
+	options := execution.Options{}
+	seen := map[string]bool{}
+	for len(args) > 0 {
+		switch args[0] {
+		case "--dry-run":
+			if options.DryRun {
+				return fmt.Errorf("--dry-run may be specified only once")
+			}
+			options.DryRun = true
+			args = args[1:]
+		case "--adapter", "--model", "--reasoning", "--timeout":
+			if len(args) < 2 || strings.TrimSpace(args[1]) == "" {
+				return fmt.Errorf("%s requires one non-empty value", args[0])
+			}
+			if seen[args[0]] {
+				return fmt.Errorf("%s may be specified only once", args[0])
+			}
+			seen[args[0]] = true
+			value := strings.TrimSpace(args[1])
+			switch args[0] {
+			case "--adapter":
+				options.Override.Adapter = value
+			case "--model":
+				options.Override.Model = value
+			case "--reasoning":
+				options.Override.Reasoning = value
+			case "--timeout":
+				options.Override.Timeout = value
+			}
+			args = args[2:]
+		default:
+			fmt.Fprint(stderr, usage)
+			return fmt.Errorf("unknown exec option %q", args[0])
+		}
+	}
+	if options.DryRun {
+		prepared, err := execution.Prepare(root, options)
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(stdout, execution.Describe(prepared))
+		fmt.Fprintln(stdout, "Dry run: no process started and no workflow, Git, or runtime evidence written.")
+		return nil
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	result, runErr := execution.Run(ctx, root, options, os.Stdin, stderr)
+	if result.RecordPath != "" {
+		fmt.Fprintf(stdout, "Invocation: %s\n", filepath.Base(result.RecordPath))
+	}
+	if result.Reconciliation.FinishedAt != "" {
+		fmt.Fprintf(stdout, "Adapter disposition: %s\nResult accepted: %t\nObserved phase: %s\nNext: %s\nRetry safe from original evidence: %t\n", result.Reconciliation.InvocationDisposition, result.Reconciliation.ResultAccepted, result.Reconciliation.ObservedState, result.Reconciliation.ObservedNext, result.Reconciliation.RetrySafe)
+	}
+	return runErr
 }
 
 func runArchiveTransition(args []string, stdout, stderr io.Writer) error {

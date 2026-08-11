@@ -30,11 +30,10 @@ that may span several sessions. For a typo or a one-shot answer, it is probably
 more workflow than you need.
 
 Concoct is agent-neutral: its shared repository contract can be followed by
-Codex, Claude Code, GitHub Copilot, Aider, and other capable tools. That does not
-mean every tool has identical native integration. Concoct renders validated
-guidance; it does not launch agents, make product decisions, perform role work,
-or establish that a human-authored result is semantically correct. Humans and
-agents still supply that judgment.
+Codex, Claude Code, GitHub Copilot, Aider, and other capable tools. Manual role
+prompts work with any capable agent. The optional one-shot `exec` command ships
+an initial Codex process adapter, while durable repository evidence—not the
+adapter's text or exit status—still determines whether role work completed.
 
 ## Quick start
 
@@ -82,6 +81,21 @@ You can run `status` from the project root or a nested directory. It validates
 the durable evidence, reports the current workflow state, and recommends the
 next command without changing anything.
 
+To inspect or execute exactly that one recommendation through the configured
+adapter:
+
+```bash
+concoct exec --dry-run
+concoct exec
+concoct exec inspect
+```
+
+Dry-run resolves the action, prompt, profile, command, timeout, provenance, and
+safety posture without starting a process or creating runtime evidence. A real
+invocation runs at most one action and returns control; it never starts the
+next role automatically. `inspect` reads the latest retained attempt (or a
+named invocation) from ignored private local state.
+
 ### 1. Decide what comes next
 
 ```bash
@@ -128,6 +142,34 @@ authored transition with `concoct code --complete`; Concoct validates role
 ownership and resulting workflow evidence, including a Reviewer or Archivist
 handoff changed from the committed version, then commits the complete
 Git-backed transition once.
+
+At any ordinary role boundary, `concoct exec` can perform the currently
+authorized prompt through Codex instead. The agent still has to use the same
+completion command and produce the same durable handoff. Manual prompt commands
+remain available whenever direct execution is unavailable or undesirable.
+
+Execution settings use invocation flags first, then project role settings,
+user role settings, adapter role defaults, and adapter defaults. Project
+settings live in `.concoct/config.yaml`; user settings live in the platform
+configuration directory under `concoct/config.yaml`:
+
+```yaml
+exec:
+  adapter: codex
+  roles:
+    developer:
+      # model: configured-model-name
+      reasoning: high
+      timeout: 30m
+  retention:
+    max-completed: 20
+    max-age: 336h
+    max-log-bytes: 262144
+    max-total-bytes: 20971520
+```
+
+One-run overrides are `--adapter`, `--model`, `--reasoning`, and `--timeout`.
+Unknown settings and unsupported values fail before launch.
 
 ### 4. Review independently when required
 

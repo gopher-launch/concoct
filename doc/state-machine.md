@@ -120,7 +120,13 @@ A role command has two moments:
 1. The command validates the starting state and deterministically renders an inspectable handoff for its selected persona. Rendering is state-preserving.
 2. The selected human or agent performs the authorized role work and persists the outgoing handoff. That completed work establishes the resulting state.
 
-Directly launching or supervising an agent is outside this initial contract. A generated prompt is not proof that its work completed.
+`concoct exec` may supervise exactly one action selected from this same state
+authority. Prompt-backed actions receive the same bytes as the manual role
+command and still complete through the existing role-owned transition boundary.
+An adapter claim, process exit, generated prompt, or retained runtime record is
+not proof that work completed; observed repository and workflow evidence wins.
+Blocked and integration-recovery states require explicit human routing and are
+not coerced into execution.
 
 | Starting state | Command | Selected persona or operation | State after successful role work |
 | --- | --- | --- | --- |
@@ -138,6 +144,7 @@ Directly launching or supervising an agent is outside this initial contract. A g
 | `archived` | `integrate` | CLI transaction | `ready` or `integrating` |
 | `integrating` | `integrate --continue` / `--abort` | Human + CLI transaction | `ready` / `archived` |
 | Any initialized valid state | `status` | Read-only reporting; no persona | Unchanged |
+| Any state with one executable recommendation | `exec` | State-selected role or direct integration | Observed action-specific result; then stop |
 
 `roadmap` may make an item eligible for planning, but because no active task exists, the detected state remains `ready`. `plan` may be invoked directly from `ready` when the named item is already eligible; a separate `roadmap` invocation is not required.
 
@@ -180,6 +187,9 @@ Resolving a blocker is an explicit handoff under the responsible role. Product O
 ## State-preserving operations
 
 - `status` never changes workflow artifacts.
+- `exec --dry-run` never starts a process or creates workflow, Git, or runtime
+  evidence. Real `exec` creates ignored local diagnostics, but those records do
+  not affect detected state.
 - Successful prompt rendering by `next`, `roadmap`, `plan`, `code`, `review`, or `archive` never changes workflow state by itself.
 - `code --complete` validates Developer-owned output as a coherent whole before
   committing it, including a Git-backed freshness comparison for the final

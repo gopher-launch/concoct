@@ -73,6 +73,22 @@ renders a role prompt; those resources are not installed as project files.
 
 The roles may be handled by different tools or by the same tool in different modes.
 
+## One-shot adapter execution
+
+Manual role prompts remain the portable workflow surface. When Codex is
+available, `concoct exec --dry-run` shows the one action currently authorized,
+its exact prompt and resolved profile, and the launch safety posture.
+`concoct exec` then runs at most that one action and returns control. It never
+loops into the next role.
+
+The executor binds the action to workflow, policy, Git, configuration, current
+task/review, and referenced archive evidence. The adapter receives the same
+prompt bytes as the manual command and a schema-bound correlation. Existing
+completion commands remain authoritative, and actual post-run state outranks
+the adapter's claim. Private bounded records under
+`.concoct/runtime/invocations/` support `concoct exec inspect`; they are ignored
+by Git and are not workflow artifacts.
+
 Each role has reusable executable-owned guidance. A task prompt selects and
 embeds the appropriate persona after composing the attributed protocol, policy,
 repository guidance, and active task context described in

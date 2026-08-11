@@ -1,0 +1,809 @@
+// Package execution resolves, records, supervises, and reconciles one workflow action.
+package execution
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gopher-launch/concoct/internal/adapter"
+	"github.com/gopher-launch/concoct/internal/config"
+	"github.com/gopher-launch/concoct/internal/integration"
+	"github.com/gopher-launch/concoct/internal/orchestration"
+	"github.com/gopher-launch/concoct/internal/prompt"
+	"github.com/gopher-launch/concoct/internal/workflow"
+)
+
+const terminationGrace = 2 * time.Second
+
+type Options struct {
+	DryRun   bool
+	Override config.Overrides
+	// beforeLaunch is a test seam for changing covered evidence after the
+	// invocation record is created but before the final authorization check.
+	beforeLaunch func(string, Prepared) error
+}
+
+type Prepared struct {
+	Resolution   orchestration.Resolution
+	Action       orchestration.Action
+	Prompt       []byte
+	Settings     config.Resolved
+	Invocation   adapter.Invocation
+	Schema       []byte
+	ConfigDigest string
+	Override     config.Overrides
+	Direct       bool
+}
+
+type Metadata struct {
+	InvocationID    string `json:"invocation_id"`
+	Action          string `json:"action"`
+	Role            string `json:"role"`
+	Adapter         string `json:"adapter"`
+	Model           string `json:"model,omitempty"`
+	ModelSource     string `json:"model_source"`
+	Reasoning       string `json:"reasoning"`
+	ReasoningSource string `json:"reasoning_source"`
+	Timeout         string `json:"timeout"`
+	TimeoutSource   string `json:"timeout_source"`
+	Safety          string `json:"safety"`
+	Command         string `json:"command"`
+	PromptFile      string `json:"prompt_file,omitempty"`
+	StartedAt       string `json:"started_at"`
+	ConfigDigest    string `json:"config_digest"`
+}
+
+type Reconciliation struct {
+	InvocationDisposition string         `json:"invocation_disposition"`
+	ResultAccepted        bool           `json:"result_accepted"`
+	OutcomeClass          string         `json:"outcome_class,omitempty"`
+	ResultError           string         `json:"result_error,omitempty"`
+	ObservedState         workflow.State `json:"observed_state"`
+	ObservedNext          string         `json:"observed_next"`
+	RetrySafe             bool           `json:"retry_safe"`
+	FinishedAt            string         `json:"finished_at"`
+}
+
+type Result struct {
+	Prepared       Prepared
+	RecordPath     string
+	Reconciliation Reconciliation
+}
+
+type retentionRecord struct {
+	path   string
+	closed time.Time
+	size   int64
+}
+
+func Prepare(root string, options Options) (Prepared, error) {
+	resolution, err := orchestration.Resolve(root)
+	if err != nil {
+		return Prepared{}, err
+	}
+	if !resolution.Executable {
+		return Prepared{Resolution: resolution}, fmt.Errorf("execution refused: %s", resolution.Refusal)
+	}
+	attemptID, err := orchestration.NewID()
+	if err != nil {
+		return Prepared{}, err
+	}
+	action, err := orchestration.Authorize(root, resolution.Kind, attemptID)
+	if err != nil {
+		return Prepared{}, err
+	}
+
+	prepared := Prepared{Resolution: resolution, Action: action, Override: options.Override, Direct: resolution.Kind == "integration"}
+	if !prepared.Direct {
+		prepared.Prompt, err = prompt.Render(root, prompt.Request{Command: resolution.PromptCommand})
+		if err != nil {
+			return Prepared{}, err
+		}
+	}
+	spec, ok := adapter.Find(firstNonEmpty(options.Override.Adapter, "codex"))
+	if !ok && options.Override.Adapter != "" {
+		return Prepared{}, fmt.Errorf("unsupported adapter %q", options.Override.Adapter)
+	}
+	if !ok {
+		spec, _ = adapter.Find("codex")
+	}
+	prepared.Settings, err = config.Resolve(root, resolution.Role, options.Override, spec.Defaults)
+	if err != nil {
+		return Prepared{}, err
+	}
+	if selected, found := adapter.Find(prepared.Settings.Adapter.Value); found {
+		if selected.Name != spec.Name {
+			prepared.Settings, err = config.Resolve(root, resolution.Role, options.Override, selected.Defaults)
+			if err != nil {
+				return Prepared{}, err
+			}
+		}
+	} else {
+		return Prepared{}, fmt.Errorf("unsupported adapter %q", prepared.Settings.Adapter.Value)
+	}
+	prepared.ConfigDigest, err = resolvedConfigDigest(prepared.Settings)
+	if err != nil {
+		return Prepared{}, err
+	}
+	if prepared.Direct {
+		return prepared, nil
+	}
+
+	base := filepath.Join(root, ".concoct", "runtime", "invocations", action.Correlation.InvocationID)
+	prepared.Schema, err = adapter.Schema(action)
+	if err != nil {
+		return Prepared{}, err
+	}
+	reserved := int64(len(prepared.Prompt)+len(prepared.Schema)) + 2*prepared.Settings.Retention.MaxLogBytes + 128*1024
+	if reserved > prepared.Settings.Retention.MaxTotal {
+		return Prepared{}, fmt.Errorf("resolved prompt and bounded invocation record require %d bytes, exceeding max-total-bytes %d", reserved, prepared.Settings.Retention.MaxTotal)
+	}
+	prepared.Invocation, err = adapter.Resolve(root, action, prepared.Settings, filepath.Join(base, "outcome-schema.json"), filepath.Join(base, "adapter-result.json"))
+	if err != nil {
+		return Prepared{}, err
+	}
+	return prepared, nil
+}
+
+func Describe(prepared Prepared) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Action: %s\nRole: %s\nWorkflow command: %s\n", prepared.Resolution.Kind, prepared.Resolution.Role, prepared.Resolution.Command)
+	if prepared.Direct {
+		fmt.Fprintln(&b, "Adapter: none (direct executable authority)")
+		fmt.Fprintln(&b, "Safety posture: existing integration checks, recovery boundaries, and push policy")
+		fmt.Fprintln(&b, "Command: concoct integrate")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "Adapter: %s (%s)\n", prepared.Settings.Adapter.Value, prepared.Settings.Adapter.Source)
+	fmt.Fprintf(&b, "Model: %s (%s)\n", displayDefault(prepared.Settings.Model.Value), prepared.Settings.Model.Source)
+	fmt.Fprintf(&b, "Reasoning: %s (%s)\n", prepared.Settings.Reasoning.Value, prepared.Settings.Reasoning.Source)
+	fmt.Fprintf(&b, "Timeout: %s (%s)\n", prepared.Settings.Timeout, prepared.Settings.TimeoutSource)
+	fmt.Fprintf(&b, "Safety posture: %s\nCommand: %s\nPrompt: stdin (%d exact rendered bytes)\n", prepared.Invocation.Safety, adapter.DisplayCommand(prepared.Invocation), len(prepared.Prompt))
+	return b.String()
+}
+
+func Run(ctx context.Context, root string, options Options, input io.Reader, progress io.Writer) (Result, error) {
+	prepared, err := Prepare(root, options)
+	if err != nil {
+		return Result{}, err
+	}
+	if options.DryRun {
+		return Result{Prepared: prepared}, nil
+	}
+	record, err := createRecord(root, prepared)
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{Prepared: prepared, RecordPath: record}
+	disposition := "failed"
+	var runErr error
+	if options.beforeLaunch != nil {
+		runErr = options.beforeLaunch(root, prepared)
+	}
+	if runErr == nil {
+		runErr = authorizationStable(root, options.Override, prepared)
+	}
+	if runErr != nil {
+		disposition = "authorization-changed"
+	} else if prepared.Direct {
+		disposition, runErr = runDirect(ctx, root, record, prepared, input, progress)
+		if runErr == nil && disposition == "completed" {
+			outcome := orchestration.Outcome{ProtocolVersion: orchestration.ProtocolVersion, Correlation: prepared.Action.Correlation, Class: orchestration.Completed, Summary: "direct integration completed"}
+			runErr = orchestration.WriteAtomicResult(filepath.Join(record, "result.json"), outcome)
+		}
+	} else {
+		disposition, runErr = runAdapter(ctx, record, prepared, progress)
+	}
+	reconcileErr := reconcile(root, record, prepared, disposition, runErr, &result.Reconciliation)
+	if pruneErr := Prune(root, prepared.Settings.Retention, prepared.Action.Correlation.InvocationID); pruneErr != nil && reconcileErr == nil {
+		reconcileErr = pruneErr
+	}
+	if runErr != nil && reconcileErr != nil {
+		return result, fmt.Errorf("%v; reconciliation: %w", runErr, reconcileErr)
+	}
+	if runErr != nil {
+		return result, runErr
+	}
+	if reconcileErr != nil {
+		return result, reconcileErr
+	}
+	return result, nil
+}
+
+func runDirect(ctx context.Context, root, record string, prepared Prepared, input io.Reader, progress io.Writer) (string, error) {
+	stdoutFile, err := privateFile(filepath.Join(record, "stdout.log"))
+	if err != nil {
+		return "startup-failed", err
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := privateFile(filepath.Join(record, "stderr.log"))
+	if err != nil {
+		return "startup-failed", err
+	}
+	defer stderrFile.Close()
+	output := newBoundedRedactedWriter(stdoutFile, &lockedWriter{writer: progress}, prepared.Settings.Retention.MaxLogBytes)
+	timerCtx, cancel := context.WithTimeout(ctx, prepared.Settings.Timeout)
+	defer cancel()
+	err = integration.RunContext(timerCtx, root, "", input, output)
+	output.finish()
+	if err != nil {
+		if errors.Is(timerCtx.Err(), context.DeadlineExceeded) {
+			return "timed-out", fmt.Errorf("direct integration timed out: %w", err)
+		}
+		if errors.Is(timerCtx.Err(), context.Canceled) {
+			return "cancelled", fmt.Errorf("direct integration cancelled: %w", err)
+		}
+		return "failed", err
+	}
+	return "completed", nil
+}
+
+func runAdapter(ctx context.Context, record string, prepared Prepared, progress io.Writer) (string, error) {
+	stdoutFile, err := privateFile(filepath.Join(record, "stdout.log"))
+	if err != nil {
+		return "startup-failed", err
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := privateFile(filepath.Join(record, "stderr.log"))
+	if err != nil {
+		return "startup-failed", err
+	}
+	defer stderrFile.Close()
+	max := prepared.Settings.Retention.MaxLogBytes
+	safeProgress := &lockedWriter{writer: progress}
+	stdout := newBoundedRedactedWriter(stdoutFile, safeProgress, max)
+	stderr := newBoundedRedactedWriter(stderrFile, safeProgress, max)
+
+	cmd := exec.Command(prepared.Invocation.Executable, prepared.Invocation.Args...)
+	cmd.Dir, cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = prepared.Invocation.Root, prepared.Invocation.Environment, bytes.NewReader(prepared.Prompt), stdout, stderr
+	configureProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		return "startup-failed", fmt.Errorf("start %s adapter: %w", prepared.Invocation.Adapter, err)
+	}
+	wait := make(chan error, 1)
+	go func() { wait <- cmd.Wait() }()
+	timerCtx, cancel := context.WithTimeout(ctx, prepared.Settings.Timeout)
+	defer cancel()
+	select {
+	case err := <-wait:
+		stdout.finish()
+		stderr.finish()
+		if err != nil {
+			return "nonzero-exit", fmt.Errorf("%s adapter exited unsuccessfully: %w", prepared.Invocation.Adapter, err)
+		}
+	case <-timerCtx.Done():
+		disposition := "cancelled"
+		if errors.Is(timerCtx.Err(), context.DeadlineExceeded) {
+			disposition = "timed-out"
+		}
+		terminateProcess(cmd)
+		select {
+		case <-wait:
+		case <-time.After(terminationGrace):
+			killProcess(cmd)
+			<-wait
+		}
+		stdout.finish()
+		stderr.finish()
+		return disposition, fmt.Errorf("%s adapter %s", prepared.Invocation.Adapter, strings.ReplaceAll(disposition, "-", " "))
+	}
+	candidate := filepath.Join(record, "adapter-result.json")
+	info, statErr := os.Lstat(candidate)
+	if statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+		return "malformed-result", fmt.Errorf("adapter result must be a regular non-symlink file")
+	}
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return "malformed-result", statErr
+	}
+	if err := os.Chmod(candidate, 0o600); err != nil && !os.IsNotExist(err) {
+		return "malformed-result", fmt.Errorf("secure adapter result: %w", err)
+	}
+	outcome, err := readCandidate(candidate)
+	if err != nil {
+		return "missing-or-malformed-result", err
+	}
+	if err := orchestration.WriteAtomicResult(filepath.Join(record, "result.json"), outcome); err != nil {
+		return "duplicate-result", err
+	}
+	return "completed", nil
+}
+
+func readCandidate(path string) (orchestration.Outcome, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return orchestration.Outcome{}, fmt.Errorf("adapter exited without a structured result")
+	}
+	if err != nil {
+		return orchestration.Outcome{}, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var outcome orchestration.Outcome
+	if err := dec.Decode(&outcome); err != nil {
+		return outcome, fmt.Errorf("malformed adapter result: %w", err)
+	}
+	if dec.Decode(&struct{}{}) != io.EOF {
+		return outcome, fmt.Errorf("malformed adapter result: trailing JSON data")
+	}
+	return outcome, nil
+}
+
+func reconcile(root, record string, prepared Prepared, disposition string, runErr error, target *Reconciliation) error {
+	reconciliation := Reconciliation{InvocationDisposition: disposition, FinishedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	report := workflow.Detect(root)
+	reconciliation.ObservedState, reconciliation.ObservedNext = report.State, report.Next
+	var validationErr error
+	if err := configurationStable(root, prepared.Override, prepared); err != nil {
+		validationErr = err
+	}
+	if outcome, err := orchestration.ReadResult(filepath.Join(record, "result.json")); err == nil {
+		reconciliation.OutcomeClass = string(outcome.Class)
+		if validationErr == nil {
+			_, validationErr = orchestration.ValidateOutcome(root, prepared.Action, outcome)
+		}
+		if validationErr == nil {
+			reconciliation.ResultAccepted = true
+		}
+	} else if !os.IsNotExist(err) {
+		validationErr = err
+	}
+	if validationErr != nil {
+		reconciliation.ResultError = validationErr.Error()
+	}
+	if runErr != nil && reconciliation.ResultError == "" {
+		reconciliation.ResultError = runErr.Error()
+	}
+	current, _, snapshotErr := orchestration.Snapshot(root)
+	reconciliation.RetrySafe = snapshotErr == nil && current.Digest == prepared.Action.Evidence.Digest
+	if err := writeJSON(filepath.Join(record, "reconciliation.json"), reconciliation); err != nil {
+		return err
+	}
+	*target = reconciliation
+	if report.OperationalError != nil {
+		return report.OperationalError
+	}
+	if report.State == workflow.Invalid {
+		return fmt.Errorf("post-run workflow state is invalid: %s", strings.Join(report.Diagnostics, "; "))
+	}
+	if validationErr != nil {
+		return fmt.Errorf("structured result was not accepted: %w", validationErr)
+	}
+	if runErr == nil && !reconciliation.ResultAccepted {
+		return fmt.Errorf("execution produced no accepted structured result")
+	}
+	if reconciliation.ResultAccepted && reconciliation.OutcomeClass != string(orchestration.Completed) {
+		return fmt.Errorf("action returned accepted non-completion outcome %s", reconciliation.OutcomeClass)
+	}
+	return nil
+}
+
+func createRecord(root string, prepared Prepared) (string, error) {
+	base := filepath.Join(root, ".concoct", "runtime", "invocations")
+	for _, dir := range []string{filepath.Dir(base), base} {
+		if err := ensurePrivateDir(dir); err != nil {
+			return "", err
+		}
+	}
+	record := filepath.Join(base, prepared.Action.Correlation.InvocationID)
+	if err := os.Mkdir(record, 0o700); err != nil {
+		return "", err
+	}
+	if err := writeJSON(filepath.Join(record, "action.json"), prepared.Action); err != nil {
+		return "", err
+	}
+	if len(prepared.Prompt) > 0 {
+		if err := writePrivate(filepath.Join(record, "prompt.md"), prepared.Prompt); err != nil {
+			return "", err
+		}
+		if err := writePrivate(filepath.Join(record, "outcome-schema.json"), prepared.Schema); err != nil {
+			return "", err
+		}
+	}
+	metadata := Metadata{
+		InvocationID: prepared.Action.Correlation.InvocationID, Action: prepared.Action.Kind, Role: prepared.Resolution.Role,
+		Adapter: prepared.Settings.Adapter.Value, Model: prepared.Settings.Model.Value, ModelSource: prepared.Settings.Model.Source,
+		Reasoning: prepared.Settings.Reasoning.Value, ReasoningSource: prepared.Settings.Reasoning.Source,
+		Timeout: prepared.Settings.Timeout.String(), TimeoutSource: prepared.Settings.TimeoutSource,
+		StartedAt: time.Now().UTC().Format(time.RFC3339Nano), PromptFile: "prompt.md", ConfigDigest: prepared.ConfigDigest,
+	}
+	if prepared.Direct {
+		metadata.Adapter, metadata.Safety, metadata.Command, metadata.PromptFile = "direct", "existing executable integration authority", "concoct integrate", ""
+	} else {
+		metadata.Safety, metadata.Command = prepared.Invocation.Safety, adapter.DisplayCommand(prepared.Invocation)
+	}
+	if err := writeJSON(filepath.Join(record, "metadata.json"), metadata); err != nil {
+		return "", err
+	}
+	return record, nil
+}
+
+func Inspect(root, id string) (string, error) {
+	base := filepath.Join(root, ".concoct", "runtime", "invocations")
+	record, err := selectRecord(base, id)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Invocation: %s\n", filepath.Base(record))
+	for _, item := range []struct{ name, heading string }{{"metadata.json", "Metadata"}, {"action.json", "Action"}, {"prompt.md", "Prompt"}, {"result.json", "Result"}, {"stdout.log", "Stdout"}, {"stderr.log", "Stderr"}, {"reconciliation.json", "Reconciliation"}} {
+		fmt.Fprintf(&b, "\n## %s\n", item.heading)
+		path := filepath.Join(record, item.name)
+		info, statErr := os.Lstat(path)
+		if statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+			return "", fmt.Errorf("retained %s is not a regular non-symlink file", item.name)
+		}
+		data, readErr := os.ReadFile(path)
+		if os.IsNotExist(readErr) {
+			fmt.Fprintln(&b, "unavailable (partial or not produced)")
+			continue
+		}
+		if readErr != nil {
+			return "", readErr
+		}
+		b.Write(data)
+		if len(data) == 0 || data[len(data)-1] != '\n' {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String(), nil
+}
+
+func Prune(root string, retention config.Retention, currentID string) error {
+	base := filepath.Join(root, ".concoct", "runtime", "invocations")
+	entries, err := os.ReadDir(base)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var closed []retentionRecord
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(base, entry.Name())
+		info, statErr := os.Lstat(filepath.Join(path, "reconciliation.json"))
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		size, sizeErr := dirSize(path)
+		if sizeErr != nil {
+			continue
+		}
+		closed = append(closed, retentionRecord{path, info.ModTime(), size})
+	}
+	sort.Slice(closed, func(i, j int) bool {
+		if closed[i].closed.Equal(closed[j].closed) {
+			return closed[i].path < closed[j].path
+		}
+		return closed[i].closed.Before(closed[j].closed)
+	})
+	now := time.Now()
+	keep := closed[:0]
+	for _, item := range closed {
+		if now.Sub(item.closed) > retention.MaxAge && filepath.Base(item.path) != currentID {
+			if err := os.RemoveAll(item.path); err != nil {
+				return err
+			}
+			continue
+		}
+		keep = append(keep, item)
+	}
+	closed = keep
+	for len(closed) > retention.MaxCompleted {
+		index := oldestRemovable(closed, currentID)
+		if index < 0 {
+			break
+		}
+		if err := os.RemoveAll(closed[index].path); err != nil {
+			return err
+		}
+		closed = append(closed[:index], closed[index+1:]...)
+	}
+	var total int64
+	for _, item := range closed {
+		total += item.size
+	}
+	for total > retention.MaxTotal && len(closed) > 0 {
+		index := oldestRemovable(closed, currentID)
+		if index < 0 {
+			break
+		}
+		if err := os.RemoveAll(closed[index].path); err != nil {
+			return err
+		}
+		total -= closed[index].size
+		closed = append(closed[:index], closed[index+1:]...)
+	}
+	return nil
+}
+
+type boundedRedactedWriter struct {
+	mu            sync.Mutex
+	file, display io.Writer
+	max, written  int64
+	truncated     bool
+	pending       []byte
+}
+
+type lockedWriter struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.writer == nil {
+		return len(p), nil
+	}
+	return w.writer.Write(p)
+}
+
+func newBoundedRedactedWriter(file, display io.Writer, max int64) *boundedRedactedWriter {
+	return &boundedRedactedWriter{file: file, display: display, max: max}
+}
+func (w *boundedRedactedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.pending = append(w.pending, p...)
+	for {
+		index := bytes.IndexByte(w.pending, '\n')
+		if index < 0 {
+			break
+		}
+		if err := w.emit(w.pending[:index+1]); err != nil {
+			return 0, err
+		}
+		w.pending = w.pending[index+1:]
+	}
+	if int64(len(w.pending)) >= w.max {
+		if err := w.emit(w.pending); err != nil {
+			return 0, err
+		}
+		w.pending = nil
+	}
+	return len(p), nil
+}
+func (w *boundedRedactedWriter) emit(p []byte) error {
+	clean := redact(string(p))
+	remaining := w.max - w.written
+	if remaining <= 0 {
+		w.truncated = true
+		return nil
+	}
+	data := []byte(clean)
+	if int64(len(data)) > remaining {
+		data = data[:remaining]
+		w.truncated = true
+	}
+	if _, err := w.file.Write(data); err != nil {
+		return err
+	}
+	if w.display != nil {
+		_, _ = w.display.Write(data)
+	}
+	w.written += int64(len(data))
+	return nil
+}
+func (w *boundedRedactedWriter) finish() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.pending) > 0 {
+		_ = w.emit(w.pending)
+		w.pending = nil
+	}
+	if w.truncated {
+		marker := []byte("\n[concoct: log truncated]\n")
+		_, _ = w.file.Write(marker)
+		if w.display != nil {
+			_, _ = w.display.Write(marker)
+		}
+	}
+}
+
+var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(authorization\s*:\s*(?:bearer|basic)\s+)\S+`),
+	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}\b`),
+	regexp.MustCompile(`(?i)((?:api[_-]?key|access[_-]?token|password|secret)\s*[=:]\s*)[^\s,;]+`),
+	regexp.MustCompile(`(?i)("(?:token|api_key|password|secret)"\s*:\s*")[^"]+`),
+}
+
+func redact(value string) string {
+	for _, re := range secretPatterns {
+		value = re.ReplaceAllString(value, `${1}[REDACTED]`)
+	}
+	return value
+}
+
+func selectRecord(base, id string) (string, error) {
+	if id != "" {
+		if !regexp.MustCompile(`^[a-f0-9]{36}$`).MatchString(id) {
+			return "", fmt.Errorf("invalid invocation id %q", id)
+		}
+		path := filepath.Join(base, id)
+		if info, err := os.Lstat(path); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("unknown invocation %s", id)
+		}
+		return path, nil
+	}
+	entries, err := os.ReadDir(base)
+	if os.IsNotExist(err) {
+		return "", fmt.Errorf("no retained invocations")
+	}
+	if err != nil {
+		return "", err
+	}
+	type candidate struct {
+		path string
+		when time.Time
+	}
+	var candidates []candidate
+	for _, entry := range entries {
+		if entry.IsDir() {
+			path := filepath.Join(base, entry.Name())
+			when := time.Time{}
+			var metadata Metadata
+			metadataPath := filepath.Join(path, "metadata.json")
+			info, statErr := os.Lstat(metadataPath)
+			if statErr == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+				if data, readErr := os.ReadFile(metadataPath); readErr == nil && json.Unmarshal(data, &metadata) == nil {
+					when, _ = time.Parse(time.RFC3339Nano, metadata.StartedAt)
+				}
+			}
+			if when.IsZero() {
+				info, _ := entry.Info()
+				when = info.ModTime()
+			}
+			candidates = append(candidates, candidate{path, when})
+		}
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no retained invocations")
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].when.Equal(candidates[j].when) {
+			return candidates[i].path > candidates[j].path
+		}
+		return candidates[i].when.After(candidates[j].when)
+	})
+	return candidates[0].path, nil
+}
+
+func writeJSON(path string, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writePrivate(path, append(data, '\n'))
+}
+func writePrivate(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err = file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+func privateFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+}
+func dirSize(root string) (int64, error) {
+	var size int64
+	err := filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size, err
+}
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+func displayDefault(value string) string {
+	if value == "" {
+		return "adapter default"
+	}
+	return value
+}
+
+func resolvedConfigDigest(settings config.Resolved) (string, error) {
+	data, err := json.Marshal(struct {
+		Adapter, Model, Reasoning config.Value
+		Timeout                   string
+		TimeoutSource             string
+		Retention                 config.Retention
+		RetentionSource           map[string]string
+	}{settings.Adapter, settings.Model, settings.Reasoning, settings.Timeout.String(), settings.TimeoutSource, settings.Retention, settings.RetentionSource})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func configurationStable(root string, override config.Overrides, prepared Prepared) error {
+	spec, ok := adapter.Find(prepared.Settings.Adapter.Value)
+	if !ok {
+		return fmt.Errorf("configured adapter %q is no longer available", prepared.Settings.Adapter.Value)
+	}
+	current, err := config.Resolve(root, prepared.Resolution.Role, override, spec.Defaults)
+	if err != nil {
+		return fmt.Errorf("re-resolve execution configuration: %w", err)
+	}
+	digest, err := resolvedConfigDigest(current)
+	if err != nil {
+		return err
+	}
+	if digest != prepared.ConfigDigest {
+		return fmt.Errorf("execution configuration changed after authorization")
+	}
+	return nil
+}
+
+func authorizationStable(root string, override config.Overrides, prepared Prepared) error {
+	if err := configurationStable(root, override, prepared); err != nil {
+		return err
+	}
+	current, _, err := orchestration.Snapshot(root)
+	if err != nil {
+		return fmt.Errorf("re-snapshot authorized repository evidence: %w", err)
+	}
+	if current.Digest != prepared.Action.Evidence.Digest || current.State != prepared.Action.Evidence.State {
+		return fmt.Errorf("repository evidence changed after authorization; no action was launched")
+	}
+	return nil
+}
+
+func ensurePrivateDir(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("runtime path %s must be a non-symlink directory", path)
+	}
+	return os.Chmod(path, 0o700)
+}
+
+func oldestRemovable(records []retentionRecord, currentID string) int {
+	for i, item := range records {
+		if filepath.Base(item.path) != currentID {
+			return i
+		}
+	}
+	return -1
+}

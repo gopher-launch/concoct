@@ -20,8 +20,9 @@ upstreams remain local success.
 ## Contract status
 
 This reference defines the implemented command surface and its durable workflow
-contract. Role commands render guidance; explicit code/review completion,
-Git-backed `plan`, and `integrate` perform the documented mutations.
+contract. Role commands render guidance; `exec` may supervise one authorized
+action; explicit code/review completion, Git-backed `plan`, and `integrate`
+remain the documented mutation authorities.
 
 Workflow state names and transition validity are defined in [state-machine.md](state-machine.md). Project-relative paths in this reference are resolved from the Concoct-enabled project root.
 
@@ -31,10 +32,10 @@ Every command first locates the project or target, parses the artifacts it needs
 
 ## Structured orchestration contract
 
-Concoct has an executable-owned, transport-neutral JSON protocol (`v1`) for a
-future adapter to receive one authorized action and return one claimed outcome.
-It is a validation boundary, not an agent launcher: the current command surface
-continues to render manual prompts and use explicit completion commands.
+Concoct has an executable-owned, transport-neutral JSON protocol (`v1`) for one
+adapter to receive one authorized action and return one claimed outcome.
+`concoct exec` supervises one use of this boundary; manual prompts and explicit
+completion commands remain fully supported.
 
 An action carries an unpredictable invocation and action identity, task and
 attempt correlation, selected role, action kind, gate, human-readable
@@ -49,13 +50,10 @@ Adapters report exactly one `completed`, `blocked`, `decision-required`,
 `failed-recoverable`, or `failed-terminal` outcome. The result must echo all
 correlation fields and include a concise summary; optional artifact references,
 intervention guidance, and diagnostics are bounded and sanitized. For a
-process adapter, Concoct will provide an invocation-specific temporary result
-path; the adapter publishes the one JSON result with an atomic no-replace
-operation, so concurrent duplicate deliveries cannot overwrite the first
-result. Standard output,
-standard error, process exit status, prompts, logs, environment data, and raw
-result envelopes are diagnostics or ephemeral transport material, never proof
-of a workflow transition or durable task history.
+process adapter, Concoct provides an invocation-specific result boundary and
+normalizes at most one result with an atomic no-replace operation. Standard
+output, standard error, process exit status, prompts, logs, and runtime records
+are diagnostics, never workflow evidence or durable task history.
 
 Concoct validates a claimed result against the action registry, correlation,
 evidence freshness, current artifact state, workflow state, and repository
@@ -64,7 +62,8 @@ state. Executable authority and observed state win over an agent claim. A
 actually present; malformed, duplicate, stale, mismatched, unsupported, or
 contradicted results cannot advance the workflow. Ready-state evidence can
 authorize only a Product Owner decision: it never autonomously selects a
-roadmap item.
+roadmap item. A successful ready-state decision instead carries one bounded
+`plan`, `roadmap`, `blocker`, or `no-action` recommendation and stops.
 
 Project-aware workflow commands first validate `.concoct/project.yaml` before
 creating output files, task branches, reviews, archives, commits, or integration
@@ -89,13 +88,14 @@ Every role prompt includes the selected persona, exact required context, allowed
 
 | Command | Purpose | Inputs | Start states | Reads | Persona | Writes/effects | Prompt | Result | Failures | Next |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `init` | Bootstrap a project | Project target | `uninitialized` target | Template source and target parent | None | Creates project contract and Git repository | Bootstrap guidance | `ready` | Yes | `roadmap` |
+| `init` | Bootstrap a project | Project target | `uninitialized` target | Template source and target parent | None | Creates project contract and Git repository | Bootstrap guidance | `ready` | Yes | `next` |
 | `status` | Report state | Project root discovery | Any initialized valid or invalid state | State-bearing artifacts | None | None | None | Unchanged | Yes | State-dependent |
+| `exec` | Execute one recommendation | Optional one-run profile overrides | One unambiguous executable state recommendation | Complete action evidence and exact manual prompt | State-selected role, or direct integration | One adapter process at most; private ignored runtime record | Byte-identical manual role prompt | Claimed outcome reconciled with observed state | Yes | Reported and never auto-run |
 | `roadmap` | Prepare Product Owner work | Optional human input supplied outside the command contract | `ready` | Guidance, capabilities, roadmap, archive summaries | Product Owner | CLI: none; role: roadmap only | Product Owner handoff | `ready` | Yes | `plan <id>` or `roadmap` |
 | `plan` | Prepare one active task | Roadmap ID | `ready` | Guidance, capabilities, roadmap, history, repository evidence | Task Planner | Git CLI: safe task branch; role: task plan, notes, selected roadmap status | Planner handoff | `planned` | Yes | `code` |
 | `code` | Prepare implementation or remediation | Active task | `planned`, `implementation-in-progress`, `review-changes-requested` | Guidance, capabilities, task, notes, applicable reviews, repository | Developer | CLI: none; role: scoped implementation, tests/docs, plan, notes | Developer handoff | `implementation-complete` via in-progress | Yes | `review` |
 | `review` | Prepare independent review | Reviewable active task | `implementation-complete` when independent review resolves required | Guidance, capabilities, task, notes, all reviews, diff and relevant files | Reviewer | CLI: none; role: next review only | Reviewer handoff | Outcome-bearing review state | Yes | Outcome-dependent |
-| `archive` | Prepare accepted archival | Approved active task or policy-valid externally satisfied review | `review-approved`, or `implementation-complete` when review resolves satisfied | All canonical task, review, product, and implementation evidence | Archivist | Archive and capabilities; Git tasks preserve pending delivery/current evidence | Archivist handoff | Git: `archived`; non-Git: `ready` | Yes | Git: `integrate`; non-Git: `roadmap` or `plan <id>` |
+| `archive` | Prepare accepted archival | Approved active task or policy-valid externally satisfied review | `review-approved`, or `implementation-complete` when review resolves satisfied | All canonical task, review, product, and implementation evidence | Archivist | Archive and capabilities; Git tasks preserve pending delivery/current evidence | Archivist handoff | Git: `archived`; non-Git: `ready` | Yes | Git: `integrate`; non-Git: `next` |
 | `integrate` | Integrate accepted Git task | Archived Git task | `archived`, `integrating`, `integrated` | Recorded Git and recovery evidence | None | Squash integration, recovery, delivery bookkeeping, cleanup | None | `ready`, or recoverable `integrating`/`archived` | Yes | State-dependent |
 
 The detailed contracts below expand every matrix cell.
@@ -225,6 +225,75 @@ Invalid state is a successful diagnostic outcome only when the report can reliab
 - `review-approved`: `concoct archive`.
 - `review-blocked`: responsible-role or human handoff from the review.
 - `invalid`: the reported non-destructive recovery action, then `concoct status`.
+
+## `concoct exec`
+
+### Purpose and authorization
+
+`concoct exec` resolves the one typed action currently authorized by workflow
+state and policy. Ready state authorizes only the Product Owner `next` decision;
+implementation states authorize Developer work; implementation-complete
+authorizes Reviewer or Archivist work according to policy; approved authorizes
+Archivist work; archived authorizes the existing direct integration operation.
+Invalid, blocked, informational, recovery-choice, and human-gated states refuse
+with one evidence-backed reason. Flags cannot coerce a different action.
+
+`--dry-run` resolves the action, exact prompt, adapter, role, model, reasoning,
+timeout, value provenance, command, and safety posture. It verifies adapter
+availability but starts no process and creates no workflow, Git, or runtime
+evidence. Real execution launches at most one adapter process and returns after
+one outcome; it never retries or starts the reported next command.
+
+The built-in `codex` adapter runs non-interactively in the exact project root,
+receives the byte-identical manual role prompt on standard input, uses the
+`workspace-write` sandbox without bypass flags, ignores Codex user configuration
+while retaining project rules and authentication, and receives an invocation-
+specific output schema containing the authorized correlation. The adapter
+inherits only an allowlist of operational and authentication variables; the
+environment is never retained. Direct Git integration uses the existing
+integration authority instead of manufacturing an agent-only prompt.
+
+### Configuration
+
+The command accepts `--adapter`, `--model`, `--reasoning`, and `--timeout` for
+one invocation. Profile values resolve in this order: invocation override,
+project role configuration, user role configuration, adapter role default,
+then adapter default. Adapter selection uses the invocation override, project
+configuration, user configuration, then the built-in `codex` default.
+
+Project configuration is `.concoct/config.yaml`. User configuration is
+`concoct/config.yaml` below the platform user-configuration directory. Both use
+strict YAML; unknown fields, roles, adapters, reasoning values, unsafe model
+values, invalid durations, and invalid retention bounds fail before launch.
+The `exec.roles.<role>` mapping accepts `adapter`, `model`, `reasoning`, and
+`timeout`. `exec.retention` accepts `max-completed`, `max-age`,
+`max-log-bytes`, and `max-total-bytes`. Defaults are 20 completed attempts, 14
+days, 256 KiB per log, and 20 MiB total retained bytes. Existing
+`git.auto-push` behavior remains supported.
+
+### Runtime records, failure, and inspection
+
+Every launched attempt creates a mode-0700 directory below the Git-ignored
+`.concoct/runtime/invocations/`. Mode-0600 files retain the exact prompt,
+action, schema, sanitized resolved metadata, bounded redacted stdout/stderr,
+normalized result when present, and final reconciliation. Runtime records do
+not establish lifecycle completion.
+
+Cancellation and timeout terminate the adapter process group with bounded
+grace before force. They also interrupt direct integration Git work and push
+confirmation while preserving the existing recovery record at a safe local
+transaction boundary. Both paths close result acceptance and still reconcile
+actual state.
+Startup failure, nonzero exit, missing or malformed output, duplicate delivery,
+stale correlation, evidence drift, and postcondition mismatch all stop the
+one-shot invocation and report adapter disposition separately from observed
+state. A retry always authorizes a fresh envelope from current evidence.
+
+`concoct exec inspect [<invocation-id>]` reads only retained bytes. With no ID it
+selects the most recent attempt; an explicit ID selects only that record.
+Missing pieces are reported as partial rather than regenerated from current
+configuration or workflow state. The ordinary manual command reported by
+`status` remains the fallback.
 
 ## `concoct next`
 

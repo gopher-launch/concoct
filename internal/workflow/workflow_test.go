@@ -36,6 +36,33 @@ func TestDetectStates(t *testing.T) {
 	}
 }
 
+func TestResolveActionClassifiesExecutableAndHumanGatedStates(t *testing.T) {
+	tests := []struct {
+		state      State
+		activities []PolicyActivity
+		kind       string
+		executable bool
+	}{
+		{Ready, nil, "product-owner-next", true},
+		{Planned, nil, "development", true},
+		{InProgress, nil, "development", true},
+		{Complete, nil, "independent-review", true},
+		{Complete, []PolicyActivity{{Activity: "independent-review", Disposition: "not-required"}}, "archival", true},
+		{ChangesRequested, nil, "development", true},
+		{Approved, nil, "archival", true},
+		{Archived, nil, "integration", true},
+		{Blocked, nil, "", false},
+		{Integrating, nil, "", false},
+		{Invalid, nil, "", false},
+	}
+	for _, test := range tests {
+		resolved := ResolveAction(Report{State: test.state, PolicyActivities: test.activities})
+		if resolved.ActionKind != test.kind || resolved.Executable != test.executable || resolved.Command == "" {
+			t.Errorf("state %s resolved to %#v", test.state, resolved)
+		}
+	}
+}
+
 func TestDetectArchivedGitTask(t *testing.T) {
 	extra := "git:\n  enabled: true\n  trunk: trunk\n  task-branch: concoct/app-001-demo\n  base: abc123\n  archive-commit: def456\n  status: archived\n"
 	root := fixture(t, "implementation-complete", "approved", extra)

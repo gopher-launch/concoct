@@ -766,6 +766,56 @@ capability reconciliation, and lifecycle-appropriate roadmap and Git evidence.
 - `CAP-010` supplies validated implementation and review evidence consumed by
   archive completion.
 
+## CAP-013 — One-shot execution of an authorized workflow action
+
+- Status: `active`
+- Audience: `developers and coding agents`
+- Added by: `.concoct/archive/2026-08-11-CON-010-execute-one-recommended-action-through-an-agent-adapter/summary.md`
+- Documentation: `README.md`, `doc/command-reference.md`, `doc/workflow.md`
+
+### Capability
+
+Concoct executes one currently authorized workflow action through its configured
+adapter or direct integration authority, using the same effective instructions
+as the manual workflow and validating the correlated outcome against fresh
+repository and workflow evidence.
+
+### User value
+
+Users can launch a single recommendation without manually copying a prompt,
+while retaining policy gates, agent safety controls, interruption handling, and
+observed-state precedence.
+
+### Outputs and effects
+
+The action runs at most once and produces bounded private invocation evidence:
+prompt, sanitized command/profile metadata, structured result, diagnostics,
+reconciliation, and observed state. Dry-run launches nothing; failures,
+cancellation, timeout, stale authorization, malformed results, and postcondition
+mismatches do not advance workflow state. `concoct exec inspect` reads retained
+evidence without regenerating it.
+
+### Limitations
+
+- Execution is one-shot and has no looping, resumable sessions, shared locking,
+  or durable multi-invocation recovery.
+- Codex is the initial built-in adapter; manual prompts remain supported.
+
+### Verification evidence
+
+- Execution, adapter, CLI, integration, and orchestration tests cover the
+  authorization, supervision, inspection, and reconciliation boundaries.
+- Full tests, race tests, vet, native and Windows builds, fresh initialization,
+  shell validation, and diff checks passed as recorded in the approved review.
+- `.concoct/archive/2026-08-11-CON-010-execute-one-recommended-action-through-an-agent-adapter/review-02.md`
+  records independent approval after remediation.
+
+### Related capabilities
+
+- `CAP-006` supplies manual prompt rendering.
+- `CAP-012` supplies structured action/outcome validation.
+- `CAP-007` supplies direct Git integration authority.
+
 ## CAP-012 — Structured orchestration action and outcome validation
 
 - Status: `active`
