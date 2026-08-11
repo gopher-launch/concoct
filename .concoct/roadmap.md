@@ -63,7 +63,7 @@ are reconciled. Their identifiers remain reserved and must not be reused.
 
 Reserved historical identifiers: `CON-003`, `CON-004`, `CON-005`, `CON-006`,
 `CON-007`, `CON-008`, `CON-009`, `CON-015`, `CON-018`, `CON-028`, `CON-029`,
-`CON-030`, `CON-031`, `CON-035`.
+`CON-030`, `CON-031`, `CON-032`, `CON-035`.
 Accepted delivery evidence is preserved by the corresponding capability records
 and archives; CON-004 was cancelled as redundant and has no delivery archive.
 
@@ -77,10 +77,10 @@ concoct plan <roadmap-id>
 
 ## CON-010 — Execute one recommended action through an agent adapter
 
-- Status: `candidate`
+- Status: `planned`
 - Priority: `high`
-- Depends on: CON-032
-- Capability prerequisites: CAP-005, CAP-006, CAP-007, CAP-008, CAP-009, CAP-010, CAP-011
+- Depends on: None
+- Capability prerequisites: CAP-005, CAP-006, CAP-007, CAP-008, CAP-009, CAP-010, CAP-011, CAP-012
 - Capability impact: allows Concoct to invoke an agent for one recommended workflow action and validate its result
 
 ### Outcome
@@ -109,12 +109,71 @@ concoct exec
 - Do not silently grant permissions, integrate, push, or bypass agent safety controls or effective intervention policy.
 - Capture only the bounded invocation metadata required for attribution, diagnosis, and recovery.
 
-### Product decisions before planning
+### Product decisions
 
-- Confirm the public command name and how adapters are discovered and configured.
-- Decide whether initial execution requires confirmation and whether the first adapter uses interactive or non-interactive execution.
-- Define default timeout behavior and the location and retention policy for ephemeral invocation records.
-- Define how users inspect the exact prompt and command associated with a prior attempt.
+- Use `concoct exec` to execute at most one currently authorized action and then
+  return control to the user. Resolve the action through the same decision result
+  used by `concoct next`. Refuse execution when that result is informational,
+  ambiguous, blocked, awaiting human judgment, or otherwise non-executable.
+  Provide `concoct exec --dry-run` to display the fully resolved invocation without
+  launching the adapter.
+
+- Maintain an executable-owned adapter registry and ship `codex` as the initial
+  built-in adapter. Select the adapter through user or project configuration.
+  Defer automatic external-adapter discovery until another adapter establishes a
+  concrete requirement and executable trust model.
+
+- Allow adapters to define execution profiles and role-specific defaults. For the
+  Codex adapter, a profile may include an exact model identifier and reasoning
+  effort. Resolve profiles using command-line overrides, project role
+  configuration, user role configuration, adapter role defaults, and finally the
+  adapter general default, in that order. `--model` and `--reasoning` affect only
+  the current invocation and do not rewrite configuration. Validate unsupported
+  profile values before invocation.
+
+- Keep model semantics out of the workflow engine and common action protocol. The
+  workflow identifies the required role; the selected adapter resolves that role
+  into its own model and execution settings. Record the adapter and resolved
+  settings actually used with the invocation for attribution and diagnosis.
+
+- Run the initial Codex adapter non-interactively while permitting bounded progress
+  output to the terminal. Human intervention is represented by a structured
+  `decision-required` or `blocked` result, after which Concoct stops and returns
+  control. Interactive or resumable agent sessions are outside the initial scope.
+
+- Treat `concoct exec` as explicit authorization to launch the displayed action and
+  do not require routine confirmation. Show the action, role, adapter, and resolved
+  execution profile immediately before launch. Continue to enforce action gates,
+  intervention policy, agent safety controls, and explicit integration or push
+  authority. No flag may bypass a required human decision or silently grant agent
+  permissions.
+
+- Apply a configurable execution timeout, initially 30 minutes, with optional
+  role-specific and one-invocation overrides. On cancellation or timeout, request
+  graceful adapter termination, terminate after a bounded grace period, close the
+  invocation against late results, reconcile actual project and repository state,
+  and report a safely retryable disposition without advancing workflow state.
+
+- Store active and recent invocation records under ignored, Concoct-owned runtime
+  state at `.concoct/runtime/invocations/<invocation-id>/`. Retain the exact rendered
+  prompt, sanitized command metadata, structured result, and bounded execution logs
+  locally according to configurable age, count, and size limits. Initially retain
+  no more than 20 completed attempts or 14 days. Never store secrets, authorization
+  material, or unrestricted environment contents. Durable task history retains
+  only normalized attribution, outcome, and recovery information.
+
+- Provide `concoct exec inspect` for the most recent attempt and
+  `concoct exec inspect <invocation-id>` for a retained attempt. Inspection can show
+  the exact retained prompt, safely quoted and redacted command, structured result,
+  bounded logs, reconciliation decision, and resulting workflow state. Inspection
+  must use the retained invocation material rather than regenerating it from current
+  project state.
+
+- Retrying always creates a newly authorized invocation from current evidence.
+  Concoct does not replay a prior action envelope merely because its earlier attempt
+  failed. After every successful, failed, cancelled, or timed-out attempt, Concoct
+  reconciles observed state, records the normalized disposition, recomputes the
+  next recommendation, and explains whether another `concoct exec` is safe.
 
 ### Acceptance criteria
 
@@ -729,110 +788,6 @@ explicit bug provenance.
 
 ---
 
-## CON-032 — Define structured orchestration actions and outcomes
-
-- Status: `delivered`
-- Archive: `.concoct/archive/2026-08-11-CON-032-define-structured-orchestration-actions-and-outcomes/`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-001, CAP-004, CAP-005, CAP-006, CAP-007, CAP-009
-- Capability impact: establishes machine-readable action, completion, and intervention contracts between Concoct and acting agents
-
-### Outcome
-
-Define agent-neutral action and result contracts that let Concoct represent an
-authorized next operation and distinguish completed work, blockers, required
-human decisions, recoverable failures, and terminal failures while retaining
-useful human-readable reporting and mechanically validating resulting state.
-
-### Rationale
-
-Process exit status and conversational claims cannot establish a workflow
-transition. Safe execution requires a structured action with explicit authority
-and postconditions plus an invocation-correlated outcome reconciled with actual
-artifact, workflow, and repository state. In ready state, Product Owner judgment
-remains responsible for selecting or refining work; deterministic evidence
-ordering does not become automatic task selection.
-
-### Requirements
-
-- Define a stable action envelope containing action identity and kind, selected role, preconditions, expected postconditions, gate classification, human-readable explanation, and adapter executability.
-- Preserve CAP-009's distinction between deterministic evidence assembly and semantic Product Owner judgment; a ready-state recommendation becomes actionable only after the authorized Product Owner result identifies a supported next operation.
-- Define a stable structured envelope for `completed`, `blocked`, `decision-required`, `failed-recoverable`, and `failed-terminal` outcomes.
-- Identify the requested role and action, task and attempt, concise result, intervention details, relevant artifacts, recovery guidance, and safe bounded adapter diagnostics.
-- Preserve a clear human-readable result alongside the machine-readable contract.
-- Correlate every outcome with its invocation and reject missing, malformed, stale, or mismatched results.
-- Define precedence among the structured result, process status, authorized artifact changes, current workflow state, and repository state.
-- Validate action-specific postconditions before accepting completion and reject claimed unauthorized transitions or integrations.
-- Separate durable task history from ephemeral execution diagnostics.
-- Keep transport and semantics independent of a particular agent runtime.
-
-### Product decisions
-
-- Use a versioned JSON action-result protocol with transport-independent
-  semantics. For process-based adapters, Concoct creates an invocation-specific
-  temporary result path and requires the agent to write exactly one result
-  atomically. Standard output and standard error remain human-readable logs and
-  are not parsed for workflow outcomes. Adapter-native structured protocols may
-  carry the same envelope, but adapters normalize them into the common contract.
-
-- Correlate each result using an unpredictable invocation identifier together
-  with action, task, attempt, and role identities. Bind authorized actions to
-  the relevant evidence state. Missing, malformed, duplicate, stale, or
-  mismatched results are protocol failures and cannot advance workflow state.
-
-- Derive human-facing recommendations and adapter-facing actions from the same
-  executable-owned evidence snapshot, while keeping recommendations distinct
-  from executable authority. In ready state, deterministic evidence assembly
-  produces Product Owner input rather than an autonomous task selection. A
-  supported next operation becomes actionable only after a correlated,
-  authorized Product Owner result selects or refines it and Concoct validates
-  that selection.
-
-- Make the adapter contract authoritative for delivery of the result protocol.
-  Prompts explain outcome semantics, while the adapter supplies the negotiated
-  protocol version, correlation values, result transport, and exact schema.
-  Built-in prompts do not maintain a separate copy of the wire schema, and
-  Concoct performs authoritative validation independently of the agent runtime.
-
-- Maintain an executable-owned action registry defining each action kind's role,
-  authority, gate, preconditions, permitted effects, expected postconditions,
-  supported outcomes, intervention requirements, and completion validator.
-  Keep legal workflow transitions in the workflow model and provide reusable
-  validators for shared artifact, workflow, and repository invariants.
-
-- Treat executable authority and observed artifact, workflow, and repository
-  state as authoritative. A structured result reports the agent's claimed
-  outcome but advances state only when it is correlated, authorized, and
-  mechanically consistent with the action's postconditions. Process exit status
-  describes invocation health, and human-readable output is diagnostic only.
-  Neither can independently establish completion.
-
-- Preserve existing manual workflows without requiring synthetic agent results,
-  but require structured outcomes for automated orchestration. Adapters and
-  prompts declare supported protocol versions and action kinds. Unsupported
-  combinations stop with upgrade or explicit manual-mode guidance. Concoct
-  never infers successful completion from legacy prompts, conversational claims,
-  process success, or standard-output markers.
-
-- Allow only bounded, structured, sanitized diagnostics in action results.
-  Retain normalized action identity, outcome, attempt, concise summary,
-  intervention or recovery disposition, timestamps, and relevant artifact
-  references in durable task history. Keep raw result envelopes and execution
-  logs ephemeral by default, and exclude secrets, environment contents, full
-  prompts, transcripts, arbitrary file contents, and unbounded tool output.
-
-### Acceptance criteria
-
-- Every orchestratable action has explicit authority, preconditions, success postconditions, and intervention behavior.
-- Human-facing `next` output and adapter-facing action data derive from the same evidence and preserve the Product Owner selection boundary.
-- Concoct reliably distinguishes completion, blocker, decision, recoverable failure, and terminal failure.
-- Invalid, stale, mismatched, or mechanically contradicted outcomes cannot advance workflow state.
-- Outcome semantics do not depend on Codex-specific output conventions.
-- A user can inspect the outcome and understand why Concoct continued or stopped.
-
----
-
 ## CON-033 — Orchestrate the task lifecycle with configurable gates
 
 - Status: `candidate`
@@ -955,10 +910,10 @@ Scale:        CON-024
 
 Productization proceeds through CON-014 overlays, which build on the accepted
 executable-owned-content and release-compatibility capabilities. CON-013
-follows CON-014. Lifecycle execution follows `CON-032` for result semantics,
-then converges with the completed initial lifecycle, accepted policy,
-embedded-content capabilities, and release-compatibility capabilities at
-CON-010. Repeating and durable
+follows CON-014. Lifecycle execution uses the accepted structured
+action/outcome capability, then converges with the completed initial lifecycle,
+accepted policy, embedded-content capabilities, and release-compatibility
+capabilities at CON-010. Repeating and durable
 orchestration then proceed as `CON-010 → CON-033 → CON-034`. This keeps a
 single-action execution boundary independently useful and prevents automated
 coordination from inventing a universal gate policy or a second next-action

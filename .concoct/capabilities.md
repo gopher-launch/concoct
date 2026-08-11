@@ -695,13 +695,6 @@ handoffs, unsafe Git context, or manufactured role judgment.
 - `CAP-007` supplies the Git task identity and transition boundaries.
 - `CAP-008` supplies the validated active task from which implementation begins.
 
-## Known capability gaps
-
-- Role commands render prompts and validate explicit Developer and Reviewer
-  completion boundaries, but they do not directly execute persona work or
-  treat rendered guidance as role completion.
-- Direct agent execution, workflow diagnostics, recovery, history reporting,
-  upgrades, and overlays remain roadmap intent rather than current capabilities.
 ## CAP-011 — Validated archive and capability reconciliation
 
 - Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
@@ -772,3 +765,82 @@ capability reconciliation, and lifecycle-appropriate roadmap and Git evidence.
 - `CAP-007` owns Git-backed integration and final delivery after archival.
 - `CAP-010` supplies validated implementation and review evidence consumed by
   archive completion.
+
+## CAP-012 — Structured orchestration action and outcome validation
+
+- Status: `active`
+- Audience: `adapter authors, project maintainers, and coding agents`
+- Added by: `.concoct/archive/2026-08-11-CON-032-define-structured-orchestration-actions-and-outcomes/summary.md`
+- Documentation: `doc/command-reference.md`
+
+### Capability
+
+Concoct provides an executable-owned, transport-neutral versioned JSON protocol
+for one authorized workflow action and one correlated claimed outcome. Its
+action registry covers Product Owner decision and roadmap work, task planning,
+development, independent review, archival, and Git integration. Each entry
+states its role, authority, gate, preconditions, permitted effects, supported
+outcomes, intervention route, and observable completion validator.
+
+### User value
+
+Future adapters can exchange an inspectable, agent-neutral action/result
+contract without treating conversational claims, process status, or log output
+as proof that a workflow transition occurred.
+
+### Inputs
+
+- A validated repository state, registered action kind, and non-empty attempt
+  identity authorize a bounded action envelope with fresh invocation and action
+  identities plus an evidence digest.
+- An outcome must use protocol `v1`, echo the complete correlation, declare one
+  supported outcome class, and stay within the contract's bounded summary,
+  artifact, intervention, and diagnostic fields.
+
+### Outputs and effects
+
+- Validation distinguishes `completed`, `blocked`, `decision-required`,
+  `failed-recoverable`, and `failed-terminal` outcomes.
+- A completed claim is accepted only when the registered observable
+  postcondition and current repository/workflow evidence agree; stale,
+  malformed, duplicate, mismatched, unsupported, and contradicted results are
+  rejected.
+- Process-adapter results use atomic no-replace JSON delivery. Raw envelopes and
+  logs remain ephemeral; the returned durable facts are bounded and sanitized.
+- Ready-state authorization permits Product Owner decision work only and never
+  autonomously selects a roadmap item.
+
+### Limitations
+
+- This is a validation boundary, not an agent launcher or a persisted execution
+  history. CON-010 owns direct adapter execution and CON-033/CON-034 own
+  lifecycle repetition and durable run recovery.
+- Existing manual prompts and explicit completion commands remain the supported
+  workflow path; a structured outcome alone does not bypass their authority or
+  policy/Git safeguards.
+
+### Verification evidence
+
+- `internal/orchestration/orchestration.go` and its focused tests cover the
+  registry, correlations, evidence freshness, outcome precedence, bounded
+  fields, and race-safe duplicate-result rejection.
+- `doc/command-reference.md` documents the public protocol boundary and its
+  manual-mode limitation.
+- `.concoct/archive/2026-08-11-CON-032-define-structured-orchestration-actions-and-outcomes/review-02.md`
+  records independent approval after atomic-delivery and registry-completeness
+  remediation.
+
+### Related capabilities
+
+- `CAP-001`, `CAP-005`, and `CAP-007` supply the workflow, compatibility, and
+  Git evidence used for authorization and observed-state validation.
+- `CAP-004` and `CAP-006` preserve agent-neutral adapters and manual prompts.
+- `CAP-009` preserves Product Owner authority over ready-state selection.
+
+## Known capability gaps
+
+- Role commands and the action/outcome contract do not directly execute persona
+  work or treat rendered guidance, process success, or a claimed outcome alone
+  as role completion.
+- Direct agent execution, workflow diagnostics, recovery, history reporting,
+  upgrades, and overlays remain roadmap intent rather than current capabilities.
