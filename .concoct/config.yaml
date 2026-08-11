@@ -1,0 +1,42 @@
+git:
+  auto-push: true
+
+exec:
+  adapter: codex
+
+  roles:
+    product-owner:
+      model: gpt-5.6-terra
+      reasoning: medium
+      timeout: 30m
+
+    task-planner:
+      model: gpt-5.6-sol
+      reasoning: medium
+      timeout: 30m
+
+    developer:
+      model: gpt-5.6-terra
+      reasoning: medium
+      timeout: 1h
+
+    reviewer:
+      model: gpt-5.6-sol
+      reasoning: light
+      timeout: 30m
+
+    archivist:
+      model: gpt-5.6-luna
+      reasoning: low
+      timeout: 30m
+
+    integrator:
+      model: gpt-5.6-luna
+      reasoning: low
+      timeout: 30m
+
+  retention:
+    max-completed: 20
+    max-age: 336h
+    max-log-bytes: 262144
+    max-total-bytes: 20971520
