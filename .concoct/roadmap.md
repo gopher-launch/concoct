@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-08-04
+updated: 2026-08-11
 ---
 
 # Roadmap
@@ -63,7 +63,7 @@ are reconciled. Their identifiers remain reserved and must not be reused.
 
 Reserved historical identifiers: `CON-003`, `CON-004`, `CON-005`, `CON-006`,
 `CON-007`, `CON-008`, `CON-009`, `CON-015`, `CON-018`, `CON-028`, `CON-029`,
-`CON-030`, `CON-035`.
+`CON-030`, `CON-031`, `CON-035`.
 Accepted delivery evidence is preserved by the corresponding capability records
 and archives; CON-004 was cancelled as redundant and has no delivery archive.
 
@@ -79,7 +79,7 @@ concoct plan <roadmap-id>
 
 - Status: `candidate`
 - Priority: `high`
-- Depends on: CON-031, CON-032
+- Depends on: CON-032
 - Capability prerequisites: CAP-005, CAP-006, CAP-007, CAP-008, CAP-009, CAP-010, CAP-011
 - Capability impact: allows Concoct to invoke an agent for one recommended workflow action and validate its result
 
@@ -221,7 +221,7 @@ concoct capability <capability-id>
 
 - Status: `candidate`
 - Priority: `medium`
-- Depends on: CON-014, CON-031
+- Depends on: CON-014
 - Capability prerequisites: CAP-003, CAP-005
 - Capability impact: adds safe lifecycle upgrades for Concoct-enabled projects
 
@@ -729,58 +729,6 @@ explicit bug provenance.
 
 ---
 
-## CON-031 — Establish release and compatibility versioning
-
-- Status: `delivered`
-- Priority: `high`
-- Depends on: None
-- Capability prerequisites: CAP-003, CAP-005
-- Capability impact: establishes version identity and compatibility contracts for the executable, embedded workflow content, project schema, and future upgrades
-- Archive: `.concoct/archive/2026-08-11-CON-031-establish-release-and-compatibility-versioning`
-
-### Outcome
-
-Adopt Semantic Versioning for Concoct releases and define how the executable,
-embedded workflow content, and initialized project contract identify their
-versions and compatibility requirements before the first public release.
-
-### Rationale
-
-The CLI behavior, built-in workflow guidance, durable artifact schemas, installed
-adapters, and migration paths have related but distinct compatibility concerns.
-One product release identity should describe what users install, while a
-separate schema discriminator lets the executable assess repository compatibility.
-
-### Requirements
-
-- Adopt one Semantic Versioning identity for product releases, beginning with prerelease `v0` versions while the contract remains fluid.
-- Embed product version and source-revision metadata in release binaries and expose it through `concoct version`.
-- Make development builds distinguishable from official releases.
-- Define the distinction among product release version, durable artifact schema version, embedded-content identity, and installed project contract version.
-- Derive embedded-content identity from the product release unless independent versioning becomes demonstrably necessary.
-- Record enough project metadata to determine compatibility without pinning a repository permanently to one executable.
-- Define behavior when older or newer executables encounter a project contract, including pre-mutation rejection of unsupported schema versions.
-- Document which changes require major, minor, patch, or prerelease increments.
-- Establish a reproducible release mechanism, tag convention, and release provenance.
-- Avoid promising stable `v1` compatibility while artifact and workflow contracts are evolving.
-
-### Product decisions before planning
-
-- Choose the project installation record and its ownership boundary.
-- Define supported compatibility ranges and which read-only operations remain available when mutation is unsafe.
-- Decide the release tooling and provenance evidence required for an official build.
-
-### Acceptance criteria
-
-- Official binaries report an exact SemVer release and source revision.
-- Development binaries cannot be mistaken for official releases.
-- A project records sufficient contract metadata for compatibility checks and future migration planning.
-- Concoct detects unsupported schema versions before mutation.
-- Release-version changes follow a documented policy.
-- CON-013 can use the established identities to plan and execute upgrades safely.
-
----
-
 ## CON-032 — Define structured orchestration actions and outcomes
 
 - Status: `candidate`
@@ -958,13 +906,12 @@ Everyday use: CON-019 → CON-027 → CON-020 → CON-023 → CON-025 → CON-02
 Scale:        CON-024
 ```
 
-Productization proceeds from CON-031 compatibility identity to CON-014 overlays,
-which build on the accepted executable-owned content capabilities. CON-013
-follows CON-014 and CON-031. Lifecycle execution follows `CON-032` for result
-semantics, then converges with the completed initial lifecycle and accepted
-policy,
-the accepted embedded-content capabilities, and CON-031 compatibility identity
-at CON-010. Repeating and durable
+Productization proceeds through CON-014 overlays, which build on the accepted
+executable-owned-content and release-compatibility capabilities. CON-013
+follows CON-014. Lifecycle execution follows `CON-032` for result semantics,
+then converges with the completed initial lifecycle, accepted policy,
+embedded-content capabilities, and release-compatibility capabilities at
+CON-010. Repeating and durable
 orchestration then proceed as `CON-010 → CON-033 → CON-034`. This keeps a
 single-action execution boundary independently useful and prevents automated
 coordination from inventing a universal gate policy or a second next-action

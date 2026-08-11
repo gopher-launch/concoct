@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-08-04
+updated: 2026-08-11
 ---
 
 # Capabilities
@@ -156,7 +156,9 @@ The contents of `templates/` and project-specific edits to the installed placeho
 
 The initialized project contains conventional root files and tool adapters
 alongside project-owned Concoct material under `.concoct/`, including policy,
-configuration, `current/`, `archive/`, a roadmap, and a capability ledger.
+configuration, `current/`, `archive/`, a roadmap, and a capability ledger. It
+also includes the executable-owned `.concoct/project.yaml` record, which stores
+the project contract version and creation provenance for compatibility checks.
 Built-in protocol, personas, handoffs, and prompt documentation remain embedded
 in the executable and are not installed as mutable project files.
 
@@ -230,7 +232,7 @@ executable-rendered protocol and role guidance where supported.
 - `CAP-001` provides the canonical workflow and artifact rules referenced by the adapters.
 - `CAP-003` distributes the adapters with the project template.
 
-## CAP-005 — Executable CLI initialization and workflow status
+## CAP-005 — Executable initialization, compatibility, and workflow status
 
 - Archive: `.concoct/archive/2026-08-11-CON-031-establish-release-and-compatibility-versioning/summary.md`
 - Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
@@ -242,11 +244,13 @@ executable-rendered protocol and role guidance where supported.
 
 ### Capability
 
-Concoct provides a versioned Go CLI with `init`, `version`, and read-only `status` commands. It can
-create a Concoct-enabled Git repository from the selectively installed,
-project-owned portion of its embedded distribution, recording a project
-contract and provenance that the CLI validates before project mutations. It
-derives deterministic workflow state from canonical repository artifacts.
+Concoct provides a versioned Go CLI with `init`, project-independent `version`
+and `defaults` inspection, compatibility inspection through `why`, and
+read-only `status`. It creates a Concoct-enabled Git repository from the
+selectively installed, project-owned portion of its embedded distribution,
+recording a project contract and provenance that the CLI validates before
+workflow mutations. It derives deterministic workflow state from canonical
+repository artifacts.
 
 ### User value
 
@@ -261,9 +265,13 @@ Project maintainers can bootstrap the workflow reliably from an installed binary
 
 - `init` copies project-owned root files, dotfiles, adapters, policy, truth, and
   state; excludes built-in protocol, personas, handoffs, and prompt
-  documentation; writes bootstrap guidance; initializes Git; stages generated
-  files; and creates no commit.
+  documentation; writes a contract-version and creation-provenance record plus
+  bootstrap guidance; initializes Git; stages generated files; and creates no
+  commit.
 - `status` discovers the project, validates roadmap, capability, task, notes, review, remediation, and blocked-review evidence, then reports the applicable state and next action without modifying the repository.
+- `why` reports project-contract compatibility without requiring workflow-state
+  parsing; it and `status` provide reduced diagnostics for legacy, malformed,
+  or unsupported project contracts.
 - Malformed, incomplete, contradictory, or representative interrupted-archive evidence is reported as `invalid` with actionable diagnostics.
 
 ### Limitations
@@ -271,6 +279,9 @@ Project maintainers can bootstrap the workflow reliably from an installed binary
 - This capability's `status` command remains read-only. CAP-006 adds
   state-preserving prompt rendering, and CAP-007 adds the explicitly bounded
   Git planning and integration mutations.
+- Legacy, malformed, and unsupported project contracts are not migrated
+  automatically; workflow mutations refuse until an explicit supported upgrade
+  exists.
 - Remediation disposition validation is textual because the notes schema does not define structured review-finding identifiers.
 - Metadata parsing intentionally targets the checked-in Concoct schemas rather than arbitrary Markdown documents.
 
