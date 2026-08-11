@@ -731,7 +731,7 @@ explicit bug provenance.
 
 ## CON-032 — Define structured orchestration actions and outcomes
 
-- Status: `candidate`
+- Status: `planned`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-004, CAP-005, CAP-006, CAP-007, CAP-009
