@@ -731,7 +731,7 @@ explicit bug provenance.
 
 ## CON-031 — Establish release and compatibility versioning
 
-- Status: `candidate`
+- Status: `planned`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-003, CAP-005
