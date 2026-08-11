@@ -77,7 +77,7 @@ concoct plan <roadmap-id>
 
 ## CON-010 — Execute one recommended action through an agent adapter
 
-- Status: `active`
+- Status: `delivered`
 - Archive: `.concoct/archive/2026-08-11-CON-010-execute-one-recommended-action-through-an-agent-adapter`
 - Priority: `high`
 - Depends on: None
