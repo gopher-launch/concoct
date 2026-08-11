@@ -766,14 +766,60 @@ ordering does not become automatic task selection.
 - Separate durable task history from ephemeral execution diagnostics.
 - Keep transport and semantics independent of a particular agent runtime.
 
-### Product decisions before planning
+### Product decisions
 
-- Select the outcome transport: dedicated file, framed standard output, adapter protocol, or a defined combination.
-- Decide how the public `next` explanation and internal action representation share evidence without implying that the CLI autonomously selects work.
-- Decide whether prompts carry the result schema directly or receive it through the adapter contract.
-- Locate validation rules by workflow action, transition, or a shared action-result registry.
-- Define compatibility behavior for manual or older prompts without structured outcomes.
-- Define which diagnostic data may be retained without leaking sensitive or noisy execution logs.
+- Use a versioned JSON action-result protocol with transport-independent
+  semantics. For process-based adapters, Concoct creates an invocation-specific
+  temporary result path and requires the agent to write exactly one result
+  atomically. Standard output and standard error remain human-readable logs and
+  are not parsed for workflow outcomes. Adapter-native structured protocols may
+  carry the same envelope, but adapters normalize them into the common contract.
+
+- Correlate each result using an unpredictable invocation identifier together
+  with action, task, attempt, and role identities. Bind authorized actions to
+  the relevant evidence state. Missing, malformed, duplicate, stale, or
+  mismatched results are protocol failures and cannot advance workflow state.
+
+- Derive human-facing recommendations and adapter-facing actions from the same
+  executable-owned evidence snapshot, while keeping recommendations distinct
+  from executable authority. In ready state, deterministic evidence assembly
+  produces Product Owner input rather than an autonomous task selection. A
+  supported next operation becomes actionable only after a correlated,
+  authorized Product Owner result selects or refines it and Concoct validates
+  that selection.
+
+- Make the adapter contract authoritative for delivery of the result protocol.
+  Prompts explain outcome semantics, while the adapter supplies the negotiated
+  protocol version, correlation values, result transport, and exact schema.
+  Built-in prompts do not maintain a separate copy of the wire schema, and
+  Concoct performs authoritative validation independently of the agent runtime.
+
+- Maintain an executable-owned action registry defining each action kind's role,
+  authority, gate, preconditions, permitted effects, expected postconditions,
+  supported outcomes, intervention requirements, and completion validator.
+  Keep legal workflow transitions in the workflow model and provide reusable
+  validators for shared artifact, workflow, and repository invariants.
+
+- Treat executable authority and observed artifact, workflow, and repository
+  state as authoritative. A structured result reports the agent's claimed
+  outcome but advances state only when it is correlated, authorized, and
+  mechanically consistent with the action's postconditions. Process exit status
+  describes invocation health, and human-readable output is diagnostic only.
+  Neither can independently establish completion.
+
+- Preserve existing manual workflows without requiring synthetic agent results,
+  but require structured outcomes for automated orchestration. Adapters and
+  prompts declare supported protocol versions and action kinds. Unsupported
+  combinations stop with upgrade or explicit manual-mode guidance. Concoct
+  never infers successful completion from legacy prompts, conversational claims,
+  process success, or standard-output markers.
+
+- Allow only bounded, structured, sanitized diagnostics in action results.
+  Retain normalized action identity, outcome, attempt, concise summary,
+  intervention or recovery disposition, timestamps, and relevant artifact
+  references in durable task history. Keep raw result envelopes and execution
+  logs ephemeral by default, and exclude secrets, environment contents, full
+  prompts, transcripts, arbitrary file contents, and unbounded tool output.
 
 ### Acceptance criteria
 
