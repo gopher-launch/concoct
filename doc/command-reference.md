@@ -29,6 +29,43 @@ Workflow state names and transition validity are defined in [state-machine.md](s
 
 Every command first locates the project or target, parses the artifacts it needs, validates the detected state, and fails without workflow mutation when evidence is malformed, contradictory, or outside the command's valid starting states.
 
+## Structured orchestration contract
+
+Concoct has an executable-owned, transport-neutral JSON protocol (`v1`) for a
+future adapter to receive one authorized action and return one claimed outcome.
+It is a validation boundary, not an agent launcher: the current command surface
+continues to render manual prompts and use explicit completion commands.
+
+An action carries an unpredictable invocation and action identity, task and
+attempt correlation, selected role, action kind, gate, human-readable
+explanation, and a bounded digest of the workflow evidence from which it was
+authorized. The registry covers Product Owner next-action and roadmap work,
+Task Planner work, development, independent review, archival, and Git
+integration. Every entry declares its role, executable authority, explicit
+preconditions, permitted effects, supported outcome classes, bounded
+intervention route, and completion validator with observable completion states.
+
+Adapters report exactly one `completed`, `blocked`, `decision-required`,
+`failed-recoverable`, or `failed-terminal` outcome. The result must echo all
+correlation fields and include a concise summary; optional artifact references,
+intervention guidance, and diagnostics are bounded and sanitized. For a
+process adapter, Concoct will provide an invocation-specific temporary result
+path; the adapter publishes the one JSON result with an atomic no-replace
+operation, so concurrent duplicate deliveries cannot overwrite the first
+result. Standard output,
+standard error, process exit status, prompts, logs, environment data, and raw
+result envelopes are diagnostics or ephemeral transport material, never proof
+of a workflow transition or durable task history.
+
+Concoct validates a claimed result against the action registry, correlation,
+evidence freshness, current artifact state, workflow state, and repository
+state. Executable authority and observed state win over an agent claim. A
+`completed` result is rejected unless an allowed observable postcondition is
+actually present; malformed, duplicate, stale, mismatched, unsupported, or
+contradicted results cannot advance the workflow. Ready-state evidence can
+authorize only a Product Owner decision: it never autonomously selects a
+roadmap item.
+
 Project-aware workflow commands first validate `.concoct/project.yaml` before
 creating output files, task branches, reviews, archives, commits, or integration
 state. Missing records are legacy/unversioned and unsupported records are
