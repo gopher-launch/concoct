@@ -22,7 +22,7 @@ exec:
 
     reviewer:
       model: gpt-5.6-sol
-      reasoning: light
+      reasoning: low
       timeout: 30m
 
     archivist:
