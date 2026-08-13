@@ -918,7 +918,7 @@ delivery strategies.
 
 ## CON-035 — Make capability-ledger change detection record-aware
 
-- Status: `planned`
+- Status: `candidate`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-005
