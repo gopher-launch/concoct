@@ -725,100 +725,230 @@ requires intervention.
 
 ---
 
-## CON-036 — Make capability-ledger change detection record-aware
+## CON-037 — Measure and reduce agent invocation cost
 
-- Status: `delivered`
-- Archive: `.concoct/archive/2026-08-13-CON-036-make-capability-ledger-change-detection-record-aware/` — pending integration
+- Status: `planned`
 - Priority: `critical`
 - Depends on: None
-- Capability prerequisites: CAP-005
-- Capability impact: prevents false undeclared-record failures when capabilities are appended or separated by formatting whitespace
+- Capability prerequisites: CAP-005, CAP-006, CAP-010, CAP-013, CAP-014
+- Capability impact: makes agent execution cost observable and establishes evidence-backed reductions required for practical daily orchestration
 
 ### Outcome
 
-Validate changes to `capabilities.md` according to semantic capability-record
-boundaries so that adding, removing, or normalizing whitespace between records does
-not falsely appear to modify an adjacent capability.
+Measure the complete prompt composition and reported token usage of every supported
+agent invocation, establish reproducible per-role baselines, and deliver verified
+initial reductions without weakening workflow authority, role independence, safety,
+or structured-result validation.
 
 ### Rationale
 
-The archive step currently attributes separator whitespace between capability
-records to one of the adjacent records. Appending a new capability can therefore
-produce an error such as:
+The first real `concoct run` completed an end-to-end lifecycle but consumed an
+unsustainable amount of the user's ChatGPT Plus usage allocation. Four explicitly
+observed invocations alone reported 181,120 tokens, including a 76,142-token Developer
+remediation and a 45,838-token Archivist invocation. The complete lifecycle consumed
+materially more.
+
+At the current rate, more than half of the available usage allocation can be consumed
+in less than two days. This prevents Concoct from serving as the intended daily
+execution engine.
+
+Likely contributors include repeated executable-owned instructions, broad roadmap and
+capability context, duplicated instruction layers, repository rediscovery, large tool
+outputs, uniformly expensive execution profiles, and repeated agent invocations caused
+by failed mechanical transitions. These are hypotheses rather than measurements.
+Optimization must begin with reliable attribution, then make reductions against fixed
+baselines while preserving behaviour.
+
+The complete originating evidence is recorded in:
 
 ```text
-error: capability ledger changed undeclared record CAP-012
+.concoct/reports/con-033-first-run-findings.md
 ```
-
-even though the existing capability record is unchanged and only a new declared
-record was added:
-
-```diff
- ## CAP-012 — Structured orchestration action and outcome validation
- ...
-+
-+## CAP-013 — One-shot execution of an authorized workflow action
-```
-
-This blocks a routine archive operation and has required manual intervention for
-multiple tasks. The validation must distinguish meaningful changes within a
-capability record from non-semantic formatting between records.
 
 ### Requirements
 
-- Parse the capability ledger into explicit capability records before comparing
-  declared and observed changes.
-- Define record boundaries using capability headings rather than raw diff hunks or
-  incidental surrounding whitespace.
-- Treat blank lines and line-ending differences between capability records as
-  ledger formatting, not as content belonging to either adjacent record.
-- Do not report an existing capability as changed solely because whitespace was
-  added, removed, or normalized at its record boundary.
-- Continue to detect meaningful changes within an existing capability record,
-  including changes to its heading, status, metadata, or descriptive content.
-- Continue to reject meaningful changes to capability records that were not
-  declared by the archive action.
-- Correctly recognize a newly appended declared capability without attributing its
-  leading separator whitespace to the preceding capability.
-- Apply the same record-boundary semantics when capabilities are inserted between
-  existing records or removed under an authorized operation.
-- Preserve strict validation for malformed ledgers, duplicate capability
-  identifiers, content outside recognized ledger structure, and ambiguous record
-  boundaries.
-- Keep comparison deterministic and independent of Git diff-hunk construction or
-  surrounding context-line selection.
-- Add regression coverage for the observed append scenario and other whitespace
-  boundary cases.
+#### Capture authoritative invocation usage
+
+- Run the Codex adapter with machine-readable execution events and retain the final
+  structured result independently from progress and diagnostic output.
+- Capture the usage reported by Codex for every completed or failed turn, including
+  input tokens, cached input tokens, output tokens, reasoning-output tokens when
+  supplied, and any total reported by the installed adapter version.
+- Treat adapter-reported usage as attribution evidence rather than reconstructing an
+  incompatible total when fields are unavailable or change across versions.
+- Record the acting role, action, adapter, model, reasoning effort, start time,
+  duration, disposition, retry or predecessor relationship, and invocation identity
+  alongside usage.
+- Preserve partial usage and execution evidence when an invocation fails, times out,
+  or is cancelled and the adapter emitted it before termination.
+- Do not confuse cached input with free input. Report it separately so both gross
+  context size and effective cache reuse remain visible.
+
+#### Attribute prompt composition
+
+- Measure the exact rendered prompt byte count supplied to the adapter.
+- Attribute prompt bytes to stable semantic components, including executable protocol,
+  persona, handoff, supervision appendix, project guidance, policy, roadmap context,
+  capability context, task plan, notes, reviews, archive evidence, and other selected
+  task inputs.
+- Define component boundaries during prompt composition rather than attempting to
+  reverse-engineer them from the final concatenated prompt.
+- Record whether each component was included in full, selected, summarized, or absent.
+- Detect duplicated byte-identical or normalized-identical instruction material and
+  report its contribution without silently removing it.
+- Never retain secrets, unrestricted environment content, authentication material, or
+  otherwise prohibited data merely for cost attribution.
+
+#### Provide useful inspection and summaries
+
+- Extend retained invocation inspection to show usage totals, prompt size and
+  composition, execution profile, duration, outcome, and comparison with a prior or
+  baseline invocation when available.
+- Include a concise per-action usage line in `concoct exec` and `concoct run` summaries.
+- Include aggregate run totals by role and action while avoiding double-counting the
+  same adapter-reported usage event.
+- Distinguish agent cost from mechanical Concoct actions that invoke no model.
+- Make retained measurement data bounded by existing invocation retention policy and
+  keep it local and ignored by Git unless deliberately exported.
+- Provide an explicit diagnostic/export view suitable for comparing controlled
+  baselines without exposing full prompts or sensitive repository content by default.
+
+#### Establish reproducible baselines
+
+- Define controlled fixtures for Product Owner, Task Planner, initial Developer,
+  remediation Developer, Reviewer, and Archivist invocations.
+- Hold repository state, prompt inputs, adapter version, model, reasoning effort, and
+  expected result contract constant within each comparison.
+- Record prompt composition and adapter-reported usage for every baseline.
+- Permit baseline collection without mutating a real active project or consuming a
+  production workflow transition.
+- Clearly distinguish deterministic local measurements such as prompt bytes from
+  externally variable measurements such as model token use, cache hits, duration, and
+  reasoning output.
+- Produce a baseline report identifying the largest prompt components, roles, repeated
+  context, and avoidable re-invocation patterns.
+
+#### Deliver evidence-backed initial reductions
+
+- Use the baseline evidence to implement at least one material reduction in repeated
+  prompt or context cost during this item; do not stop after adding instrumentation.
+- Prefer removal of proven duplication, selection of task-relevant records, compact
+  machine requirements, and elimination of unnecessary agent invocations before
+  lowering model capability or reasoning effort.
+- Include only roadmap items, capability records, reviews, archive evidence, and other
+  context that the role contract actually requires, while retaining explicit
+  provenance for selected or summarized inputs.
+- Avoid asking an agent to rediscover deterministic workflow facts or perform
+  executable-owned mechanical transitions that Concoct can resolve safely itself.
+- Preserve byte-identical manual and automated semantic instructions for the same role
+  and state, subject to the same measured composition rules.
+- Record every removed, selected, summarized, or relocated instruction component and
+  demonstrate why the resulting role still receives sufficient authority, context,
+  constraints, and completion requirements.
+- Do not weaken Product Owner authority, plan acceptance, Reviewer independence,
+  capability-impact validation, archive validation, permission controls, or human
+  approval gates to reduce usage.
+
+#### Improve progress handling needed for measurement
+
+- Consume structured Codex execution events rather than treating raw combined output
+  as the primary progress protocol.
+- Retain structured events, final result, and stderr diagnostics as distinct bounded
+  artifacts.
+- Render a compact continuous progress view from selected semantic events so reaching
+  a display limit does not make an active invocation appear frozen.
+- Keep display truncation independent from diagnostic retention limits and continue
+  processing later events after earlier display content has been discarded.
+- Preserve enough raw structured evidence to diagnose usage and execution behaviour
+  without flooding the terminal.
+
+#### Protect compatibility and failure behaviour
+
+- Detect when an installed Codex version lacks required structured events or usage
+  fields and fail clearly or use an explicitly documented degraded mode.
+- Do not parse human-readable progress text as authoritative usage when structured
+  usage is available.
+- Treat malformed, duplicate, contradictory, or out-of-order terminal usage events as
+  diagnostic failures rather than silently producing misleading totals.
+- Preserve the accepted structured outcome and workflow state even when usage
+  attribution or progress rendering encounters a recoverable error.
+- Keep adapter-specific event and usage semantics outside the workflow engine.
 
 ### Product decisions
 
-- Blank lines separating capability headings are ledger-level formatting and do
-  not belong to either adjacent capability record.
-- Capability records are compared using their parsed semantic boundaries rather
-  than raw slices whose leading or trailing separator whitespace may vary.
-- Whitespace inside a capability record remains significant unless an existing
-  canonicalization rule explicitly defines it otherwise. The fix must not broadly
-  ignore whitespace changes that could conceal meaningful edits.
-- Line-ending normalization and the presence or absence of a final newline are
-  non-semantic for record-change attribution.
-- Malformed or ambiguous capability structure must fail safely rather than being
-  normalized into an apparently valid change set.
+- Treat cost observability as part of the adapter execution boundary. The workflow
+  engine knows roles and actions; the adapter translates its native event stream into
+  normalized optional usage and progress evidence.
+- Use adapter-reported token fields as the authoritative observed values and retain
+  their original meanings. Do not collapse input, cached input, output, and reasoning
+  output into an unexplained single number.
+- Record exact prompt bytes and semantic component sizes for deterministic local
+  attribution. Token estimates may supplement these measurements but must be labelled
+  as estimates unless reported by the adapter.
+- Keep detailed invocation measurements in ignored, bounded runtime state. Durable
+  project history records only material optimization decisions and benchmark results,
+  not full prompts, raw event streams, or per-turn repository content.
+- Baselines are execution-profile-specific. Comparisons must name adapter version,
+  model, reasoning effort, fixture identity, and relevant cache state rather than
+  presenting one universal token number.
+- Require this item to ship at least one measured reduction. Instrumentation alone is
+  insufficient because current usage is already a critical blocker.
+- Define a material initial reduction as at least a 30 percent decrease in exact
+  rendered prompt bytes for one or more dominant fixed-role baselines, or an equivalent
+  elimination of a redundant full agent invocation, with no regression in required
+  inputs, structured outcomes, workflow validation, or fixture acceptance behaviour.
+- Do not make automatic model downgrades part of the initial reduction. Model and
+  reasoning-profile experiments may be reported for later product decisions, but
+  correctness-preserving context and orchestration improvements come first.
+- Use structured events for both measurement and compact progress rendering, but keep
+  the retained event log, terminal presentation, and authoritative final result as
+  separate concerns.
+- The first-run findings report is source evidence for this investigation; CON-037
+  does not absorb unrelated orchestration-boundary defects merely because those
+  defects caused expensive retries. It measures their cost and may eliminate only
+  redundant invocations whose safe removal is within this item's execution scope.
+
+### Documentation
+
+- Document each captured usage field and its adapter-specific meaning.
+- Document prompt-component categories and how exact byte attribution is calculated.
+- Explain the difference among prompt bytes, input tokens, cached input tokens, output
+  tokens, reasoning-output tokens, and subscription usage allocation.
+- Document baseline collection, comparison requirements, degraded adapter behaviour,
+  retention, export, and privacy boundaries.
+- Document the compact progress view and where complete structured events, diagnostics,
+  and final results are retained.
+- Publish the measured baseline, implemented reductions, resulting measurements, and
+  remaining dominant cost drivers.
 
 ### Acceptance criteria
 
-- Appending a declared capability after an unchanged existing capability succeeds
-  when the only apparent change near the existing record is separator whitespace.
-- The reported changed-record set contains the newly added capability and does not
-  contain the unchanged preceding capability.
-- Adding or removing blank lines between two unchanged capability records does not
-  report either record as meaningfully changed.
-- Inserting a declared capability between existing records does not falsely report
-  either adjacent record as changed.
-- Normalizing LF/CRLF line endings or adding/removing the final newline does not
-  produce false undeclared-record failures.
-- A meaningful edit within an undeclared existing capability continues to fail
-  archive validation and identifies the correct capability.
-- Duplicate identifiers, malformed headings, ambiguous content, and unauthorized
-  record additions or removals continue to fail safely.
-- Automated regression tests reproduce the reported CAP-012/CAP-013 scenario and
-  pass without weakening undeclared-change protection.
+- Every supported real Codex invocation records its role, action, adapter version,
+  model, reasoning effort, duration, exact prompt bytes, prompt-component breakdown,
+  disposition, and all usage fields reported by Codex.
+- A completed `concoct run` summary reports per-action and aggregate usage without
+  double-counting, and mechanical actions with no model invocation report zero agent
+  usage explicitly or remain clearly excluded.
+- `concoct exec inspect` or its documented equivalent shows normalized usage and prompt
+  composition for a retained invocation without displaying the full prompt by default.
+- Product Owner, Task Planner, initial Developer, remediation Developer, Reviewer, and
+  Archivist controlled baselines can be reproduced and compared under named fixed
+  execution profiles.
+- The baseline report identifies the largest prompt components and repeated context for
+  each role and distinguishes exact local measurements from variable adapter usage.
+- At least one dominant fixed-role baseline shows a 30 percent or greater reduction in
+  exact rendered prompt bytes, or one provably redundant complete agent invocation is
+  eliminated, without weakening required context, gates, authority, role independence,
+  structured-result validation, or fixture outcomes.
+- Before-and-after evidence names every changed prompt component or eliminated
+  invocation and explains why the reduction preserves correctness.
+- Structured progress continues throughout a long invocation even after earlier
+  display history is discarded; full retained events and diagnostics remain available
+  within configured bounds.
+- Failed, cancelled, and timed-out invocations preserve any available usage and partial
+  event evidence without applying stale results or corrupting workflow state.
+- Missing or incompatible Codex event and usage support produces a clear diagnostic or
+  documented degraded mode rather than fabricated measurements.
+- Full automated tests use deterministic fixtures and do not require billable live
+  model invocations; an explicitly invoked integration test may validate current Codex
+  event compatibility.
