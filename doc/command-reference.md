@@ -710,6 +710,12 @@ the immutable parent before reusing the commit.
 
 Source, tests, accepted task history, completed reviews, and unrelated roadmap items are never rewritten by archival.
 
+Capability reconciliation compares canonical `CAP-NNN` records by identifier.
+Blank lines between records, LF versus CRLF line endings, and a final newline
+are formatting-only; all record content, record order, and ledger-level content
+remain protected. Malformed or duplicate capability records are rejected before
+archive mutation.
+
 ### Prompt produced
 
 An Archivist prompt with all preconditions, exact artifact ownership, transactional order, summary requirements, capability reconciliation rules, validation steps, and outgoing Product Owner or next-planning handoff.

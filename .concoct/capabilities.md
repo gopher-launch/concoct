@@ -699,6 +699,7 @@ handoffs, unsafe Git context, or manufactured role judgment.
 ## CAP-011 — Validated archive and capability reconciliation
 
 - Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
+- Updated by: `.concoct/archive/2026-08-13-CON-036-make-capability-ledger-change-detection-record-aware/summary.md`
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
 - Added by: `.concoct/archive/2026-07-31-CON-009-implement-archive-and-capability-reconciliation/summary.md`
@@ -731,6 +732,10 @@ capability reconciliation, and lifecycle-appropriate roadmap and Git evidence.
   roadmap boundaries; commits the accepted evidence once; records exact archival
   HEAD through the non-recursive `self` sentinel; retains current task evidence;
   and leaves delivery pending for integration.
+- Capability reconciliation compares ordered parsed records and protected
+  ledger structure, treating only record-boundary formatting, line endings, and
+  final-newline differences as non-semantic while rejecting malformed baseline
+  or candidate records before attribution.
 - Non-Git archival validates complete delivered evidence before clearing current
   state and returning the project to `ready`.
 - Valid clean Git retries reuse only an exact, fully revalidated archival

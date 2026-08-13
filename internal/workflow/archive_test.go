@@ -3,10 +3,13 @@ package workflow
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gopher-launch/concoct/internal/gitrepo"
 )
 
 func TestArchivedGitTaskPlanAppliesOnlyCompletionOwnedMetadata(t *testing.T) {
@@ -233,6 +236,177 @@ func TestCapabilityUndeclaredBytesPreservesNonRecordContentAndOrder(t *testing.T
 			}
 		})
 	}
+}
+
+func TestCapabilityLedgerSeparatesRecordsFromInterRecordFormatting(t *testing.T) {
+	base := "---\nversion: 1\n---\n# Capabilities\n\nIntro.\n\n## CAP-001 — One\n- Status: `active`\nBody\n\n## CAP-002 — Two\n- Status: `active`\nBody\n"
+	appendRecord := base + "\n\n## CAP-003 — Three\n- Status: `active`\nBody\n"
+	insertRecord := strings.Replace(base, "\n## CAP-002", "\n\n## CAP-003 — Three\n- Status: `active`\nBody\n\n## CAP-002", 1)
+	removedRecord := strings.Replace(base, "\n## CAP-002 — Two\n- Status: `active`\nBody\n", "\n\n", 1)
+	separatorOnly := strings.Replace(base, "Body\n\n## CAP-002", "Body\n\n\n\t\n## CAP-002", 1)
+	crlf := strings.ReplaceAll(base, "\n", "\r\n")
+	withoutFinalNewline := strings.TrimSuffix(base, "\n")
+
+	for name, tt := range map[string]struct {
+		before, after, impact string
+		ids                   []string
+	}{
+		"append":         {base, appendRecord, "add", []string{"CAP-003"}},
+		"insertion":      {base, insertRecord, "add", []string{"CAP-003"}},
+		"removal":        {base, removedRecord, "remove", []string{"CAP-002"}},
+		"separator-only": {base, separatorOnly, "none", nil},
+		"line-endings":   {base, crlf, "none", nil},
+		"final-newline":  {base, withoutFinalNewline, "none", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			beforeLedger, beforeDiags := parseCapabilityLedger(tt.before)
+			afterLedger, afterDiags := parseCapabilityLedger(tt.after)
+			if len(beforeDiags) != 0 || len(afterDiags) != 0 {
+				t.Fatalf("ledger diagnostics: before=%v after=%v", beforeDiags, afterDiags)
+			}
+			task := taskMeta{Impact: impact{Type: tt.impact, IDs: tt.ids}}
+			if err := validateCapabilitySectionChanges(beforeLedger.sections(), afterLedger.sections(), task); err != nil {
+				t.Fatal(err)
+			}
+			declared := map[string]bool{}
+			for _, id := range tt.ids {
+				declared[id] = true
+			}
+			if !bytes.Equal(beforeLedger.undeclaredBytes(declared), afterLedger.undeclaredBytes(declared)) {
+				t.Fatal("inter-record formatting or declared record affected protected content")
+			}
+		})
+	}
+}
+
+func TestCapabilityLedgerRejectsMalformedAndProtectsMeaningfulContent(t *testing.T) {
+	base := "# Capabilities\n\n## CAP-001 — One\n- Status: `active`\nBody\n\n## CAP-002 — Two\n- Status: `active`\nBody\n"
+	for name, candidate := range map[string]string{
+		"heading":    strings.Replace(base, "## CAP-001 — One", "## CAP-001 - One", 1),
+		"duplicate":  base + "\n## CAP-001 — Duplicate\n- Status: `active`\n",
+		"body-space": strings.Replace(base, "\nBody\n\n## CAP-002", "\nBody \n\n## CAP-002", 1),
+		"ordering":   strings.Replace(base, "## CAP-001 — One\n- Status: `active`\nBody\n\n## CAP-002 — Two\n- Status: `active`\nBody", "## CAP-002 — Two\n- Status: `active`\nBody\n\n## CAP-001 — One\n- Status: `active`\nBody", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidateLedger, diagnostics := parseCapabilityLedger(candidate)
+			if name == "heading" || name == "duplicate" {
+				if len(diagnostics) == 0 {
+					t.Fatal("malformed ledger was accepted")
+				}
+				return
+			}
+			baseLedger, _ := parseCapabilityLedger(base)
+			if bytes.Equal(baseLedger.undeclaredBytes(nil), candidateLedger.undeclaredBytes(nil)) {
+				t.Fatal("meaningful undeclared ledger change was ignored")
+			}
+		})
+	}
+}
+
+func TestValidateGitCapabilityDiffAllowsDeclaredAppendAcrossSeparator(t *testing.T) {
+	root := t.TempDir()
+	base := "# Capabilities\n\n## CAP-001 — One\n- Status: `active`\nBody\n"
+	write(t, filepath.Join(root, ".concoct/capabilities.md"), base)
+	runGit(t, root, "init", "-q", "-b", "main")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "baseline")
+	archiveRel := ".concoct/archive/2026-01-01-app-001"
+	write(t, filepath.Join(root, ".concoct/capabilities.md"), base+"\n\n## CAP-002 — Two\n- Status: `active`\n- Archive: `"+archiveRel+"/`\nBody\n")
+	repo, ok, err := gitrepo.Open(root)
+	if err != nil || !ok {
+		t.Fatalf("open repository: ok=%v err=%v", ok, err)
+	}
+	task := taskMeta{Impact: impact{Type: "add", IDs: []string{"CAP-002"}}}
+	if err := validateGitCapabilityDiff(repo, "HEAD", task, archiveRel); err != nil {
+		t.Fatalf("declared append was rejected: %v", err)
+	}
+}
+
+func TestValidateGitCapabilityDiffRejectsBaselineMissingRequiredMetadata(t *testing.T) {
+	root := t.TempDir()
+	baseline := "# Capabilities\n\n## CAP-001 — Existing\nBody\n"
+	write(t, filepath.Join(root, ".concoct/capabilities.md"), baseline)
+	runGit(t, root, "init", "-q", "-b", "main")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "baseline")
+
+	archiveRel := ".concoct/archive/2026-01-01-app-001"
+	candidate := "# Capabilities\n\n## CAP-001 — Existing\n- Status: `active`\nBody\n\n## CAP-002 — Added\n- Status: `active`\n- Archive: `" + archiveRel + "/`\nBody\n"
+	write(t, filepath.Join(root, ".concoct/capabilities.md"), candidate)
+	repo, ok, err := gitrepo.Open(root)
+	if err != nil || !ok {
+		t.Fatalf("open repository: ok=%v err=%v", ok, err)
+	}
+	task := taskMeta{Impact: impact{Type: "add", IDs: []string{"CAP-002"}}}
+	err = validateGitCapabilityDiff(repo, "HEAD", task, archiveRel)
+	if err == nil || !strings.Contains(err.Error(), "invalid baseline capabilities: .concoct/capabilities.md: CAP-001 missing Status") {
+		t.Fatalf("error = %v, want invalid baseline missing-Status diagnostic", err)
+	}
+}
+
+func TestCompleteGitArchiveAllowsDeclaredAppendAcrossSeparator(t *testing.T) {
+	root := fixture(t, "implementation-complete", "approved", "")
+	baseCapabilities := "---\nversion: 1\nproject: demo\n---\n# Capabilities\n\n## CAP-000 — Existing\n- Status: `active`\nBody\n"
+	write(t, filepath.Join(root, ".concoct/capabilities.md"), baseCapabilities)
+	runGit(t, root, "init", "-q", "-b", "main")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "config", "user.name", "Test")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "planning base")
+	base := runGit(t, root, "rev-parse", "HEAD")
+	taskBranch := "concoct/app-001-demo"
+	runGit(t, root, "checkout", "-qb", taskBranch)
+
+	taskPath := filepath.Join(root, ".concoct/current/task-plan.md")
+	taskData, err := os.ReadFile(taskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitMeta := "git:\n  enabled: true\n  trunk: main\n  task-branch: " + taskBranch + "\n  base: " + base + "\n  status: active\n"
+	write(t, taskPath, strings.Replace(string(taskData), "capability-impact:\n", gitMeta+"capability-impact:\n", 1))
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "accepted implementation")
+	roadmapPath := filepath.Join(root, ".concoct/roadmap.md")
+	baseRoadmap, err := os.ReadFile(roadmapPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	archiveRel := authorArchiveFixture(t, root, false, "", "")
+	summaryPath := filepath.Join(root, filepath.FromSlash(archiveRel), "summary.md")
+	summary, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary = []byte(strings.Replace(string(summary), "status: delivered", "status: archived", 1))
+	summary = []byte(strings.Replace(string(summary), "delivery: complete", "delivery: pending-integration", 1))
+	write(t, summaryPath, string(summary))
+
+	write(t, filepath.Join(root, ".concoct/capabilities.md"), baseCapabilities+"\n\n## CAP-001 — Added\n- Status: `active`\n- Archive: `"+archiveRel+"/`\nBody\n")
+	write(t, roadmapPath, string(baseRoadmap)+"- Archive: `"+archiveRel+"/`\n")
+
+	result, err := CompleteArchive(root, ArchiveOverride{})
+	if err != nil {
+		t.Fatalf("complete Git archive with declared append: %v", err)
+	}
+	if !result.Committed || runGit(t, root, "status", "--short") != "" {
+		t.Fatalf("archive result = %#v; status = %q", result, runGit(t, root, "status", "--short"))
+	}
+}
+
+func runGit(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = root
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func TestValidateCapabilitySectionChangesAllImpactTypes(t *testing.T) {

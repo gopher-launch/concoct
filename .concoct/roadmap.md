@@ -727,7 +727,8 @@ requires intervention.
 
 ## CON-036 — Make capability-ledger change detection record-aware
 
-- Status: `planned`
+- Status: `active`
+- Archive: `.concoct/archive/2026-08-13-CON-036-make-capability-ledger-change-detection-record-aware/` — pending integration
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-005

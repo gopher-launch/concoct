@@ -1096,22 +1096,81 @@ func parseRoadmap(s string) (map[string]roadItem, []string) {
 }
 
 var capabilityHeading = regexp.MustCompile(`(?m)^## (CAP-[0-9]+)\s+—`)
+var capabilityLikeHeading = regexp.MustCompile(`(?m)^##\s+CAP-[^\n]*$`)
 
-func parseCapabilities(s string) (map[string]capabilityRecord, []string) {
+type capabilityLedger struct {
+	Preamble string
+	Records  []capabilityLedgerRecord
+}
+
+type capabilityLedgerRecord struct {
+	ID, Content string
+}
+
+// parseCapabilityLedger keeps blank lines between records out of their bodies.
+// Newlines are canonicalized only for comparison and parsing; all other record
+// content remains significant.
+func parseCapabilityLedger(s string) (capabilityLedger, []string) {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.TrimSuffix(s, "\n")
 	matches := capabilityHeading.FindAllStringSubmatchIndex(s, -1)
-	records := map[string]capabilityRecord{}
+	ledger := capabilityLedger{}
 	var diagnostics []string
+	validStarts := map[int]bool{}
+	for _, match := range matches {
+		validStarts[match[0]] = true
+	}
+	for _, match := range capabilityLikeHeading.FindAllStringIndex(s, -1) {
+		if !validStarts[match[0]] {
+			diagnostics = append(diagnostics, ".concoct/capabilities.md: malformed capability heading "+strconv.Quote(s[match[0]:match[1]]))
+		}
+	}
+	if len(matches) == 0 {
+		ledger.Preamble = s
+		return ledger, diagnostics
+	}
+	ledger.Preamble = s[:matches[0][0]]
+	seen := map[string]bool{}
 	for i, match := range matches {
 		id := s[match[2]:match[3]]
 		end := len(s)
 		if i+1 < len(matches) {
 			end = matches[i+1][0]
 		}
-		section := s[match[0]:end]
-		if _, exists := records[id]; exists {
+		section := trimCapabilityRecordSeparator(s[match[0]:end])
+		if seen[id] {
 			diagnostics = append(diagnostics, ".concoct/capabilities.md: duplicate capability "+id)
 			continue
 		}
+		seen[id] = true
+		ledger.Records = append(ledger.Records, capabilityLedgerRecord{ID: id, Content: section})
+	}
+	return ledger, diagnostics
+}
+
+func trimCapabilityRecordSeparator(section string) string {
+	lines := strings.Split(section, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func parseCapabilities(s string) (map[string]capabilityRecord, []string) {
+	ledger, diagnostics := parseCapabilityLedger(s)
+	records, recordDiagnostics := parseCapabilityLedgerRecords(ledger)
+	diagnostics = append(diagnostics, recordDiagnostics...)
+	return records, diagnostics
+}
+
+// parseCapabilityLedgerRecords applies the capability-record schema to an
+// already parsed ledger. Archive comparison uses this same authority for both
+// its baseline and candidate before attributing any change.
+func parseCapabilityLedgerRecords(ledger capabilityLedger) (map[string]capabilityRecord, []string) {
+	records := map[string]capabilityRecord{}
+	var diagnostics []string
+	for _, entry := range ledger.Records {
+		id, section := entry.ID, entry.Content
 		statusMatch := regexp.MustCompile("(?m)^- Status: `?([^`\\n]+)`?\\s*$").FindStringSubmatch(section)
 		if len(statusMatch) != 2 {
 			diagnostics = append(diagnostics, ".concoct/capabilities.md: "+id+" missing Status")

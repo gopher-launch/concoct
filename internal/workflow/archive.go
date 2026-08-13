@@ -522,8 +522,20 @@ func validateGitCapabilityDiff(repo *gitrepo.Repository, baseline string, task t
 	if err != nil {
 		return err
 	}
-	before, _ := capabilitySections(string(old))
-	after, _ := capabilitySections(string(cur))
+	beforeLedger, beforeDiags := parseCapabilityLedger(string(old))
+	afterLedger, afterDiags := parseCapabilityLedger(string(cur))
+	_, beforeRecordDiags := parseCapabilityLedgerRecords(beforeLedger)
+	_, afterRecordDiags := parseCapabilityLedgerRecords(afterLedger)
+	beforeDiags = append(beforeDiags, beforeRecordDiags...)
+	afterDiags = append(afterDiags, afterRecordDiags...)
+	if len(beforeDiags) > 0 {
+		return fmt.Errorf("invalid baseline capabilities: %s", strings.Join(beforeDiags, "; "))
+	}
+	if len(afterDiags) > 0 {
+		return fmt.Errorf("invalid capabilities: %s", strings.Join(afterDiags, "; "))
+	}
+	before := beforeLedger.sections()
+	after := afterLedger.sections()
 	if err := validateCapabilitySectionChanges(before, after, task); err != nil {
 		return err
 	}
@@ -531,10 +543,10 @@ func validateGitCapabilityDiff(repo *gitrepo.Repository, baseline string, task t
 	for _, id := range task.Impact.IDs {
 		declared[id] = true
 	}
-	if !bytes.Equal(capabilityUndeclaredBytes(string(old), declared), capabilityUndeclaredBytes(string(cur), declared)) {
+	if !bytes.Equal(beforeLedger.undeclaredBytes(declared), afterLedger.undeclaredBytes(declared)) {
 		return fmt.Errorf("capability ledger changed content outside declared capability records")
 	}
-	if task.Impact.Type == "none" && !bytes.Equal(old, cur) {
+	if task.Impact.Type == "none" && !bytes.Equal(beforeLedger.undeclaredBytes(nil), afterLedger.undeclaredBytes(nil)) {
 		return fmt.Errorf("capability-impact none forbids capability ledger changes")
 	}
 	return validateCapabilityResult(repo.Root, task, archiveRel)
@@ -581,20 +593,27 @@ func validateCapabilitySectionChanges(before, after map[string]string, task task
 }
 
 func capabilityUndeclaredBytes(s string, declared map[string]bool) []byte {
-	matches := capabilityHeading.FindAllStringSubmatchIndex(s, -1)
-	var b strings.Builder
-	if len(matches) == 0 {
-		return []byte(s)
+	ledger, _ := parseCapabilityLedger(s)
+	return ledger.undeclaredBytes(declared)
+}
+
+func (ledger capabilityLedger) sections() map[string]string {
+	sections := make(map[string]string, len(ledger.Records))
+	for _, record := range ledger.Records {
+		sections[record.ID] = record.Content
 	}
-	b.WriteString(s[:matches[0][0]])
-	for i, m := range matches {
-		end := len(s)
-		if i+1 < len(matches) {
-			end = matches[i+1][0]
-		}
-		id := s[m[2]:m[3]]
-		if !declared[id] {
-			b.WriteString(s[m[0]:end])
+	return sections
+}
+
+func (ledger capabilityLedger) undeclaredBytes(declared map[string]bool) []byte {
+	var b strings.Builder
+	b.WriteString(ledger.Preamble)
+	for _, record := range ledger.Records {
+		if !declared[record.ID] {
+			b.WriteString("\x00")
+			b.WriteString(record.ID)
+			b.WriteString("\x00")
+			b.WriteString(record.Content)
 		}
 	}
 	return []byte(b.String())
@@ -641,16 +660,8 @@ func normalizedRoadmapForArchive(s, selected string) (string, bool) {
 }
 
 func capabilitySections(s string) (map[string]string, []string) {
-	matches := capabilityHeading.FindAllStringSubmatchIndex(s, -1)
-	out := map[string]string{}
-	for i, m := range matches {
-		end := len(s)
-		if i+1 < len(matches) {
-			end = matches[i+1][0]
-		}
-		out[s[m[2]:m[3]]] = s[m[0]:end]
-	}
-	return out, nil
+	ledger, diagnostics := parseCapabilityLedger(s)
+	return ledger.sections(), diagnostics
 }
 
 func nonEmptySection(s, heading string) bool {
