@@ -915,3 +915,100 @@ repository archaeology assigned to CON-022 and historical reporting retained
 in CON-012. CON-027 follows typed task origins but does not wait for Git
 strategy selection because its register and provenance rules apply across
 delivery strategies.
+
+## CON-035 — Make capability-ledger change detection record-aware
+
+- Status: `planned`
+- Priority: `critical`
+- Depends on: None
+- Capability prerequisites: CAP-005
+- Capability impact: prevents false undeclared-record failures when capabilities are appended or separated by formatting whitespace
+
+### Outcome
+
+Validate changes to `capabilities.md` according to semantic capability-record
+boundaries so that adding, removing, or normalizing whitespace between records does
+not falsely appear to modify an adjacent capability.
+
+### Rationale
+
+The archive step currently attributes separator whitespace between capability
+records to one of the adjacent records. Appending a new capability can therefore
+produce an error such as:
+
+```text
+error: capability ledger changed undeclared record CAP-012
+```
+
+even though the existing capability record is unchanged and only a new declared
+record was added:
+
+```diff
+ ## CAP-012 — Structured orchestration action and outcome validation
+ ...
++
++## CAP-013 — One-shot execution of an authorized workflow action
+```
+
+This blocks a routine archive operation and has required manual intervention for
+multiple tasks. The validation must distinguish meaningful changes within a
+capability record from non-semantic formatting between records.
+
+### Requirements
+
+- Parse the capability ledger into explicit capability records before comparing
+  declared and observed changes.
+- Define record boundaries using capability headings rather than raw diff hunks or
+  incidental surrounding whitespace.
+- Treat blank lines and line-ending differences between capability records as
+  ledger formatting, not as content belonging to either adjacent record.
+- Do not report an existing capability as changed solely because whitespace was
+  added, removed, or normalized at its record boundary.
+- Continue to detect meaningful changes within an existing capability record,
+  including changes to its heading, status, metadata, or descriptive content.
+- Continue to reject meaningful changes to capability records that were not
+  declared by the archive action.
+- Correctly recognize a newly appended declared capability without attributing its
+  leading separator whitespace to the preceding capability.
+- Apply the same record-boundary semantics when capabilities are inserted between
+  existing records or removed under an authorized operation.
+- Preserve strict validation for malformed ledgers, duplicate capability
+  identifiers, content outside recognized ledger structure, and ambiguous record
+  boundaries.
+- Keep comparison deterministic and independent of Git diff-hunk construction or
+  surrounding context-line selection.
+- Add regression coverage for the observed append scenario and other whitespace
+  boundary cases.
+
+### Product decisions
+
+- Blank lines separating capability headings are ledger-level formatting and do
+  not belong to either adjacent capability record.
+- Capability records are compared using their parsed semantic boundaries rather
+  than raw slices whose leading or trailing separator whitespace may vary.
+- Whitespace inside a capability record remains significant unless an existing
+  canonicalization rule explicitly defines it otherwise. The fix must not broadly
+  ignore whitespace changes that could conceal meaningful edits.
+- Line-ending normalization and the presence or absence of a final newline are
+  non-semantic for record-change attribution.
+- Malformed or ambiguous capability structure must fail safely rather than being
+  normalized into an apparently valid change set.
+
+### Acceptance criteria
+
+- Appending a declared capability after an unchanged existing capability succeeds
+  when the only apparent change near the existing record is separator whitespace.
+- The reported changed-record set contains the newly added capability and does not
+  contain the unchanged preceding capability.
+- Adding or removing blank lines between two unchanged capability records does not
+  report either record as meaningfully changed.
+- Inserting a declared capability between existing records does not falsely report
+  either adjacent record as changed.
+- Normalizing LF/CRLF line endings or adding/removing the final newline does not
+  produce false undeclared-record failures.
+- A meaningful edit within an undeclared existing capability continues to fail
+  archive validation and identifies the correct capability.
+- Duplicate identifiers, malformed headings, ambiguous content, and unauthorized
+  record additions or removals continue to fail safely.
+- Automated regression tests reproduce the reported CAP-012/CAP-013 scenario and
+  pass without weakening undeclared-change protection.
