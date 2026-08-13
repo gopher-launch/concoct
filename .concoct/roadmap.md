@@ -725,7 +725,7 @@ requires intervention.
 
 ---
 
-## CON-035 — Make capability-ledger change detection record-aware
+## CON-036 — Make capability-ledger change detection record-aware
 
 - Status: `planned`
 - Priority: `critical`
