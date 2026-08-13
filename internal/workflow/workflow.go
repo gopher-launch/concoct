@@ -673,6 +673,14 @@ func Detect(root string) (r Report) {
 			r.Diagnostics = append(r.Diagnostics, ".concoct/current/task-plan.md: archived Git task requires archive-commit")
 			return r
 		}
+		recoveryPath := filepath.Join(root, ".git", "concoct", "integrations", task.ID+".yaml")
+		if _, err := os.Stat(recoveryPath); err == nil || task.Git.Status == "integrating" {
+			r.State, r.Next = Integrating, "resolve and stage conflicts, then run concoct integrate --continue, or run concoct integrate --abort"
+			return r
+		} else if !os.IsNotExist(err) {
+			r.OperationalError = err
+			return r
+		}
 		if task.Git.Status == "archived" && task.Git.ArchiveCommit == "self" {
 			repo, ok, openErr := gitrepo.Open(root)
 			if openErr != nil || !ok {
@@ -698,10 +706,6 @@ func Detect(root string) (r Report) {
 				r.OperationalError = headErr
 				return r
 			}
-		}
-		if _, err := os.Stat(filepath.Join(root, ".git", "concoct", "integrations", task.ID+".yaml")); err == nil || task.Git.Status == "integrating" {
-			r.State, r.Next = Integrating, "resolve and stage conflicts, then run concoct integrate --continue, or run concoct integrate --abort"
-			return r
 		}
 		if task.Git.Status == "integrated" {
 			r.State, r.Next = Integrated, "concoct integrate --continue"

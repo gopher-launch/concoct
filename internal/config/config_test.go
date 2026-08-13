@@ -55,6 +55,43 @@ func TestResolveRejectsUnknownAndInvalidConfiguration(t *testing.T) {
 	}
 }
 
+func TestResolveRunUsesMonotonicFinitePolicy(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	writeConfig(t, filepath.Join(root, ".concoct", "config.yaml"), "run:\n  gates: [review]\n  max-actions: 12\n  max-cycles: 2\n")
+	policy, err := ResolveRun(root, RunOverrides{Gates: []string{"archive"}, MaxActions: 7, MaxCycles: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gate := range []string{"plan", "integration", "review", "archive"} {
+		if !policy.Requires(gate) {
+			t.Fatalf("effective policy omitted %s", gate)
+		}
+	}
+	if policy.MaxActions != 7 || policy.MaxCycles != 1 {
+		t.Fatalf("policy = %#v", policy)
+	}
+	if _, err := ResolveRun(root, RunOverrides{MaxActions: 13}); err == nil || !strings.Contains(err.Error(), "cannot raise") {
+		t.Fatalf("raised invocation bound error = %v", err)
+	}
+}
+
+func TestResolveRunRejectsUnknownDuplicateAndOutOfRangeValues(t *testing.T) {
+	for _, body := range []string{
+		"run:\n  gates: [mystery]\n",
+		"run:\n  gates: [review, review]\n",
+		"run:\n  max-actions: 0\n",
+		"run:\n  max-cycles: 4\n",
+	} {
+		root := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		writeConfig(t, filepath.Join(root, ".concoct", "config.yaml"), body)
+		if _, err := ResolveRun(root, RunOverrides{}); err == nil {
+			t.Fatalf("run configuration accepted: %s", body)
+		}
+	}
+}
+
 func writeConfig(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

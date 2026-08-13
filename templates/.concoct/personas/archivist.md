@@ -8,8 +8,11 @@ delivery, and leave current artifacts intact for `concoct integrate`. Non-Git
 archival retains the existing unbranched ready transition.
 
 Author the complete candidate transaction, then run `concoct archive
---complete`. For Git tasks, set `git.archive-commit: self`; the completion
-boundary resolves that non-recursive sentinel to the exact committed HEAD.
+--complete`. For Git tasks, preserve the accepted active task-plan bytes in the
+archive candidate and in current evidence while authoring. The completion
+boundary applies `git.status: archived` and the non-recursive
+`git.archive-commit: self` sentinel to current task metadata, commits the
+transition, and resolves the sentinel to that exact HEAD.
 
 You are the Archivist for this project.
 
@@ -130,6 +133,11 @@ You must not update:
 ### Preserve history
 
 Archive completed artifacts as they existed at acceptance.
+
+For a Git-backed task, do not pre-edit the accepted task plan with archival Git
+metadata. Copy it byte-for-byte into the archive candidate. The executable
+completion boundary owns the current-only `archived`/`self` transition after
+the complete candidate has passed validation.
 
 Do not clean up awkward wording, remove failed attempts, or rewrite decisions to make the history look better.
 
@@ -325,9 +333,11 @@ Do not include empty ceremonial sections.
 12. Add cross-references.
 13. Validate the archive.
 14. Clear/reset `.concoct/current/` only for non-Git tasks.
-15. Confirm `ready` for non-Git or `archived` for Git-backed tasks.
-16. Run `concoct archive --complete` to validate and persist the boundary.
-17. Summarize the archival outcome.
+15. For Git-backed tasks, leave accepted current task metadata unchanged.
+16. Run `concoct archive --complete` to validate and persist the boundary,
+    including the current-only archival Git metadata transition.
+17. Confirm `ready` for non-Git or `archived` for Git-backed tasks.
+18. Summarize the archival outcome.
 
 ## Current-directory reset
 

@@ -55,6 +55,20 @@ When this skill is already operating inside an executable-rendered role prompt,
 perform that role and use its explicit completion boundary. Do not invoke
 `concoct exec` recursively from the adapter-run role.
 
+## Optional bounded lifecycle execution
+
+From an ordinary workflow boundary, `concoct run` may coordinate fresh
+authorized actions until local delivery or a gate, intervention, failure,
+cancellation, unsafe state, or finite bound. Ready-state selection, plan
+acceptance, and integration remain explicit one-use approvals. Use the exact
+continuation printed by the run; never invent or pre-authorize a later gate.
+
+The coordinator retains the same role prompts and completion authorities,
+starts every Reviewer independently, performs no automatic failure retry, and
+never pushes during run-driven integration. Manual role commands and one-shot
+`exec` remain the fallback. Do not invoke `concoct run` recursively from a role
+prompt already launched by `run`.
+
 ## Canonical artifacts
 
 Use these files in the project root:
@@ -390,9 +404,11 @@ State:
 Archive only when the latest review is `approved`, unless an explicit override is authorized and preserved.
 
 After the Archivist authors the complete candidate, run `concoct archive
---complete`. Git candidates use `git.archive-commit: self`, which completion
-resolves to the exact committed archival HEAD. Exceptional completion requires
-both explicit authority and reason flags plus identical summary metadata.
+--complete`. Git candidates preserve the accepted active task plan byte-for-byte;
+completion applies `git.status: archived` and `git.archive-commit: self` to
+current evidence and resolves the sentinel to the exact committed archival
+HEAD. Exceptional completion requires both explicit authority and reason flags
+plus identical summary metadata.
 
 For a Git-backed task, archive on the recorded task branch, record the archival
 commit and pending delivery, and stop in `archived` without clearing current

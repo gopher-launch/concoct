@@ -13,10 +13,22 @@ import (
 )
 
 func TestGitArchiveCompletionIntegratesExactArchivedHead(t *testing.T) {
-	root, _ := prepareGitArchiveCandidate(t)
+	root, archiveRel := prepareGitArchiveCandidate(t)
+	acceptedTask, err := os.ReadFile(filepath.Join(root, ".concoct/current/task-plan.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
 	if err := Run([]string{"archive", "--complete"}, &out, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
+	}
+	archivedCopy, err := os.ReadFile(filepath.Join(root, archiveRel, "task-plan.md"))
+	if err != nil || !bytes.Equal(archivedCopy, acceptedTask) {
+		t.Fatalf("archive task-plan changed from accepted evidence: %v", err)
+	}
+	currentTask, err := os.ReadFile(filepath.Join(root, ".concoct/current/task-plan.md"))
+	if err != nil || !strings.Contains(string(currentTask), "  status: archived\n  archive-commit: self\n") {
+		t.Fatalf("current task lacks completion-owned archival metadata: %v\n%s", err, currentTask)
 	}
 	archiveHead := gitOutput(t, root, "rev-parse", "HEAD")
 	if !strings.Contains(out.String(), "Git archive commit: "+archiveHead) {
@@ -58,11 +70,10 @@ func TestGitArchiveCleanRetryRejectsInvalidCommittedTransition(t *testing.T) {
 			runGit(t, root, "add", path)
 			runGit(t, root, "commit", "--amend", "--no-edit", "-q")
 		}},
-		{name: "non archived state", want: "requires git.status archived", corrupt: func(t *testing.T, root string) {
-			for _, path := range []string{filepath.Join(root, ".concoct/current/task-plan.md"), filepath.Join(root, ".concoct/archive", time.Now().Format("2006-01-02")+"-APP-001-transition", "task-plan.md")} {
-				data, _ := os.ReadFile(path)
-				writeArchiveTestFile(t, path, strings.Replace(string(data), "  status: archived", "  status: active", 1))
-			}
+		{name: "non archived state", want: "not the exact archival metadata transition", corrupt: func(t *testing.T, root string) {
+			path := filepath.Join(root, ".concoct/current/task-plan.md")
+			data, _ := os.ReadFile(path)
+			writeArchiveTestFile(t, path, strings.Replace(string(data), "  status: archived", "  status: active", 1))
 			runGit(t, root, "add", "-A")
 			runGit(t, root, "commit", "--amend", "--no-edit", "-q")
 		}},
@@ -80,6 +91,90 @@ func TestGitArchiveCleanRetryRejectsInvalidCommittedTransition(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestGitArchiveCommitFailureRestoresAcceptedTaskAndCanRetry(t *testing.T) {
+	root, archiveRel := prepareGitArchiveCandidate(t)
+	acceptedTask, err := os.ReadFile(filepath.Join(root, ".concoct/current/task-plan.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := gitOutput(t, root, "rev-parse", "HEAD")
+	hook := filepath.Join(root, ".git", "hooks", "pre-commit")
+	writeArchiveTestFile(t, hook, "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run([]string{"archive", "--complete"}, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("archive completion succeeded despite failing commit hook")
+	}
+	if got := gitOutput(t, root, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("failed completion changed HEAD from %s to %s", head, got)
+	}
+	currentTask, err := os.ReadFile(filepath.Join(root, ".concoct/current/task-plan.md"))
+	if err != nil || !bytes.Equal(currentTask, acceptedTask) {
+		t.Fatalf("failed completion did not restore accepted task evidence: %v", err)
+	}
+	archivedCopy, err := os.ReadFile(filepath.Join(root, archiveRel, "task-plan.md"))
+	if err != nil || !bytes.Equal(archivedCopy, acceptedTask) {
+		t.Fatalf("failed completion changed archive candidate: %v", err)
+	}
+	if staged := gitOutput(t, root, "diff", "--cached", "--name-only"); staged != "" {
+		t.Fatalf("failed completion left staged paths: %s", staged)
+	}
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run([]string{"archive", "--complete"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("retry after restored commit failure: %v", err)
+	}
+}
+
+func TestGitArchiveRejectsPremutatedCandidateWithoutChangingCurrentEvidence(t *testing.T) {
+	root, archiveRel := prepareGitArchiveCandidate(t)
+	currentPath := filepath.Join(root, ".concoct/current/task-plan.md")
+	acceptedTask, err := os.ReadFile(currentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(root, archiveRel, "task-plan.md")
+	premutated := strings.Replace(string(acceptedTask), "  status: active\n", "  status: archived\n  archive-commit: self\n", 1)
+	writeArchiveTestFile(t, archivePath, premutated)
+	head := gitOutput(t, root, "rev-parse", "HEAD")
+
+	err = Run([]string{"archive", "--complete"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "not byte-identical to accepted current evidence") {
+		t.Fatalf("error = %v", err)
+	}
+	currentTask, readErr := os.ReadFile(currentPath)
+	if readErr != nil || !bytes.Equal(currentTask, acceptedTask) {
+		t.Fatalf("rejected candidate changed current evidence: %v", readErr)
+	}
+	if got := gitOutput(t, root, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("rejected candidate changed HEAD from %s to %s", head, got)
+	}
+}
+
+func TestGitArchiveResumesExactInterruptedCurrentMetadataTransition(t *testing.T) {
+	root, archiveRel := prepareGitArchiveCandidate(t)
+	currentPath := filepath.Join(root, ".concoct/current/task-plan.md")
+	acceptedTask, err := os.ReadFile(currentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted := strings.Replace(string(acceptedTask), "  status: active\n", "  status: archived\n  archive-commit: self\n", 1)
+	writeArchiveTestFile(t, currentPath, interrupted)
+
+	if err := Run([]string{"archive", "--complete"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("resume exact interrupted transition: %v", err)
+	}
+	archivedCopy, err := os.ReadFile(filepath.Join(root, archiveRel, "task-plan.md"))
+	if err != nil || !bytes.Equal(archivedCopy, acceptedTask) {
+		t.Fatalf("resumed transition changed accepted archive copy: %v", err)
+	}
+	if subject := gitOutput(t, root, "log", "-1", "--pretty=%s"); subject != "concoct: archive APP-001" {
+		t.Fatalf("resumed transition commit subject = %s", subject)
 	}
 }
 
@@ -132,9 +227,6 @@ func prepareGitArchiveCandidate(t *testing.T) (string, string) {
 	writeArchiveTestFile(t, filepath.Join(root, ".concoct/current/review-01.md"), "---\ntask-id: APP-001\nreview: 1\nstatus: approved\ncreated: 2026-07-31\npersona: reviewer\n---\n# Review\n\n## Outcome\n\n`approved`\n")
 	runGit(t, root, "add", "-A")
 	runGit(t, root, "commit", "-qm", "concoct: record review-01.md for APP-001")
-	taskPath := filepath.Join(root, ".concoct/current/task-plan.md")
-	taskData, _ := os.ReadFile(taskPath)
-	writeArchiveTestFile(t, taskPath, strings.Replace(string(taskData), "  status: active\n", "  archive-commit: self\n  status: archived\n", 1))
 	date := time.Now().Format("2006-01-02")
 	archiveRel := ".concoct/archive/" + date + "-APP-001-transition"
 	archiveDir := filepath.Join(root, filepath.FromSlash(archiveRel))

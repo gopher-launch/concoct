@@ -3,6 +3,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +20,8 @@ const (
 	DefaultMaxAge       = 14 * 24 * time.Hour
 	DefaultMaxLogBytes  = int64(256 * 1024)
 	DefaultMaxTotal     = int64(20 * 1024 * 1024)
+	HardRunMaxActions   = 20
+	HardRunMaxCycles    = 3
 )
 
 type profile struct {
@@ -41,6 +45,11 @@ type fileConfig struct {
 			MaxTotal     int64  `yaml:"max-total-bytes"`
 		} `yaml:"retention"`
 	} `yaml:"exec"`
+	Run struct {
+		Gates      []string `yaml:"gates"`
+		MaxActions *int     `yaml:"max-actions"`
+		MaxCycles  *int     `yaml:"max-cycles"`
+	} `yaml:"run"`
 }
 
 type Overrides struct{ Adapter, Model, Reasoning, Timeout string }
@@ -66,6 +75,88 @@ type Resolved struct {
 	TimeoutSource             string
 	Retention                 Retention
 	RetentionSource           map[string]string
+}
+
+// RunOverrides are invocation-only restrictions. They can add approval gates
+// and lower bounds, but never remove or raise project requirements.
+type RunOverrides struct {
+	Gates      []string
+	MaxActions int
+	MaxCycles  int
+}
+
+// RunPolicy is the finite effective policy for one coordinator invocation.
+type RunPolicy struct {
+	Gates      map[string]bool
+	MaxActions int
+	MaxCycles  int
+}
+
+var supportedRunGates = map[string]bool{
+	"development": true, "review": true, "archive": true,
+}
+
+func (p RunPolicy) Requires(gate string) bool { return p.Gates[gate] }
+
+// ResolveRun composes built-in, user, project, and invocation restrictions.
+// Every layer is monotonic: gates are unioned and bounds take the minimum.
+func ResolveRun(root string, override RunOverrides) (RunPolicy, error) {
+	projectPath := filepath.Join(root, ".concoct", "config.yaml")
+	project, projectExists, err := read(projectPath)
+	if err != nil {
+		return RunPolicy{}, fmt.Errorf("parse .concoct/config.yaml: %w", err)
+	}
+	userPath, err := UserPath()
+	if err != nil {
+		return RunPolicy{}, err
+	}
+	user, userExists, err := read(userPath)
+	if err != nil {
+		return RunPolicy{}, fmt.Errorf("parse user configuration %s: %w", userPath, err)
+	}
+	if err := validateFile(project, projectExists, projectPath); err != nil {
+		return RunPolicy{}, err
+	}
+	if err := validateFile(user, userExists, userPath); err != nil {
+		return RunPolicy{}, err
+	}
+	policy := RunPolicy{Gates: map[string]bool{"plan": true, "integration": true}, MaxActions: HardRunMaxActions, MaxCycles: HardRunMaxCycles}
+	applyRun := func(c fileConfig) {
+		for _, gate := range c.Run.Gates {
+			policy.Gates[gate] = true
+		}
+		if c.Run.MaxActions != nil && *c.Run.MaxActions < policy.MaxActions {
+			policy.MaxActions = *c.Run.MaxActions
+		}
+		if c.Run.MaxCycles != nil && *c.Run.MaxCycles < policy.MaxCycles {
+			policy.MaxCycles = *c.Run.MaxCycles
+		}
+	}
+	if userExists {
+		applyRun(user)
+	}
+	if projectExists {
+		applyRun(project)
+	}
+	if err := validateRunOverrides(override, "invocation"); err != nil {
+		return RunPolicy{}, err
+	}
+	for _, gate := range override.Gates {
+		policy.Gates[gate] = true
+	}
+	if override.MaxActions > 0 {
+		if override.MaxActions > policy.MaxActions {
+			return RunPolicy{}, fmt.Errorf("invocation max-actions %d cannot raise effective bound %d", override.MaxActions, policy.MaxActions)
+		}
+		policy.MaxActions = override.MaxActions
+	}
+	if override.MaxCycles > 0 {
+		if override.MaxCycles > policy.MaxCycles {
+			return RunPolicy{}, fmt.Errorf("invocation max-cycles %d cannot raise effective bound %d", override.MaxCycles, policy.MaxCycles)
+		}
+		policy.MaxCycles = override.MaxCycles
+	}
+	return policy, nil
 }
 
 func Resolve(root, role string, override Overrides, defaults Defaults) (Resolved, error) {
@@ -162,6 +253,31 @@ func AutoPush(root string) (bool, error) {
 	return exists && c.Git.AutoPush, nil
 }
 
+// EvidenceDigest binds pending approvals to project and user configuration
+// bytes without retaining configuration content in runtime records.
+func EvidenceDigest(root string) (string, error) {
+	userPath, err := UserPath()
+	if err != nil {
+		return "", err
+	}
+	var material []byte
+	for _, item := range []struct{ label, path string }{{"project", filepath.Join(root, ".concoct", "config.yaml")}, {"user", userPath}} {
+		path := item.path
+		data, readErr := os.ReadFile(path)
+		if os.IsNotExist(readErr) {
+			material = append(material, []byte(item.label+":absent\n")...)
+			continue
+		}
+		if readErr != nil {
+			return "", readErr
+		}
+		sum := sha256.Sum256(data)
+		material = append(material, []byte(item.label+":"+hex.EncodeToString(sum[:])+"\n")...)
+	}
+	sum := sha256.Sum256(material)
+	return hex.EncodeToString(sum[:]), nil
+}
+
 func read(path string) (fileConfig, bool, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -209,7 +325,41 @@ func validateFile(c fileConfig, exists bool, source string) error {
 			return fmt.Errorf("%s: %w", source, err)
 		}
 	}
+	if err := validateRunValues(c.Run.Gates, c.Run.MaxActions, c.Run.MaxCycles, source); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateRunValues(gates []string, actions, cycles *int, source string) error {
+	seen := map[string]bool{}
+	for _, gate := range gates {
+		if !supportedRunGates[gate] {
+			return fmt.Errorf("%s: unknown run gate %q", source, gate)
+		}
+		if seen[gate] {
+			return fmt.Errorf("%s: duplicate run gate %q", source, gate)
+		}
+		seen[gate] = true
+	}
+	if actions != nil && (*actions < 1 || *actions > HardRunMaxActions) {
+		return fmt.Errorf("%s: run max-actions must be between 1 and %d when set", source, HardRunMaxActions)
+	}
+	if cycles != nil && (*cycles < 1 || *cycles > HardRunMaxCycles) {
+		return fmt.Errorf("%s: run max-cycles must be between 1 and %d when set", source, HardRunMaxCycles)
+	}
+	return nil
+}
+
+func validateRunOverrides(override RunOverrides, source string) error {
+	var actions, cycles *int
+	if override.MaxActions != 0 {
+		actions = &override.MaxActions
+	}
+	if override.MaxCycles != 0 {
+		cycles = &override.MaxCycles
+	}
+	return validateRunValues(override.Gates, actions, cycles, source)
 }
 
 func applyDefaults(r *Resolved, p ProfileDefaults, source string) {

@@ -9,6 +9,22 @@ import (
 	"time"
 )
 
+func TestArchivedGitTaskPlanAppliesOnlyCompletionOwnedMetadata(t *testing.T) {
+	accepted := []byte("---\nid: APP-001\ntitle: Exact archive transition\nroadmap-id: APP-001\nstatus: implementation-complete\ncreated: 2026-01-01\nupdated: 2026-01-02\ngit:\n  enabled: true\n  trunk: main\n  task-branch: concoct/app-001-exact\n  base: abc123\n  status: active\ncapability-impact:\n  type: none\n  ids: []\n  rationale: Internal transition fix.\n---\n# Task\n\nPreserve this body byte-for-byte.\n")
+	want := bytes.Replace(accepted, []byte("  status: active\n"), []byte("  status: archived\n  archive-commit: self\n"), 1)
+
+	got, err := archivedGitTaskPlan(accepted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("archival metadata transition changed unrelated task bytes\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	if _, err := archivedGitTaskPlan(got); err == nil || !strings.Contains(err.Error(), "active and omit archive-commit") {
+		t.Fatalf("already archived evidence was accepted: %v", err)
+	}
+}
+
 func TestCompleteArchiveNonGitReconcilesAndClearsLast(t *testing.T) {
 	root := fixture(t, "implementation-complete", "approved", "")
 	archiveRel := authorArchiveFixture(t, root, false, "", "")

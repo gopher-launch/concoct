@@ -243,7 +243,7 @@ func selectRole(root string, request Request, c workflow.PromptContext, policy i
 		}
 		reads := append(base, ".concoct/roadmap.md", ".concoct/current/task-plan.md", ".concoct/current/notes.md", "complete implementation and Git evidence")
 		reads = append(reads, c.ReviewFiles...)
-		return roleSpec{"archivist", "built-in:handoff-reviewer-to-archivist", "handoff-reviewer-to-archivist", "archival", "Archive approved evidence and reconcile capability and pending roadmap evidence. For a Git-backed task, commit the archive on the task branch, record git.archive-commit and git.status archived, and do not clear current state or mark delivery.", "Git-backed task → `concoct integrate`; non-Git task → `concoct next`", reads, []string{".concoct/archive/<dated-task>/", ".concoct/capabilities.md", ".concoct/roadmap.md (pending delivery evidence only)", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}}, nil
+		return roleSpec{"archivist", "built-in:handoff-reviewer-to-archivist", "handoff-reviewer-to-archivist", "archival", "Archive approved evidence and reconcile capability and pending roadmap evidence. For a Git-backed task, preserve accepted task-plan bytes in the candidate; completion applies current archival Git metadata and commits the archive on the task branch without clearing current state or marking delivery.", "Git-backed task → `concoct integrate`; non-Git task → `concoct next`", reads, []string{".concoct/archive/<dated-task>/", ".concoct/capabilities.md", ".concoct/roadmap.md (pending delivery evidence only)", ".concoct/current/task-plan.md", ".concoct/current/notes.md"}}, nil
 	default:
 		return roleSpec{}, fmt.Errorf("unsupported prompt command %q", request.Command)
 	}

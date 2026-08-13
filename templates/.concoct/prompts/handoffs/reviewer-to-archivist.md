@@ -29,11 +29,13 @@ Archive transactionally:
 3. Create `summary.md`.
 4. Reconcile `capabilities.md` with delivered behavior.
 5. Add cross-references and validate the archive.
-6. For a Git-backed task, record pending roadmap reconciliation, set
-   `git.status: archived`, commit all archival evidence on the recorded task
-   branch, use the non-recursive `git.archive-commit: self` sentinel that the
-   completion boundary resolves to exact HEAD. Do not mark
-   delivery or clear current state.
+6. For a Git-backed task, record pending roadmap reconciliation, preserve the
+   accepted task plan byte-for-byte in the archive candidate, and leave current
+   task metadata unchanged while authoring. The completion boundary applies
+   `git.status: archived` and non-recursive `git.archive-commit: self` to the
+   current task, commits all archival evidence on the recorded task branch,
+   and resolves the sentinel to exact HEAD. Do not mark delivery or clear
+   current state.
 7. For a non-Git task only, mark the roadmap item `delivered`, clear current
    state after validation, and confirm `ready`.
 

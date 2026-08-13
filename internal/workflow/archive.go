@@ -69,10 +69,6 @@ func CompleteArchive(root string, override ArchiveOverride) (TransitionResult, e
 		return TransitionResult{}, fmt.Errorf("archive completion requires implementation-complete task evidence")
 	}
 
-	archiveRel, summary, err := validateArchiveCandidate(root, task, reviews, override, policy)
-	if err != nil {
-		return TransitionResult{}, err
-	}
 	repo, gitBacked, err := gitrepo.Open(root)
 	if err != nil {
 		return TransitionResult{}, err
@@ -81,7 +77,11 @@ func CompleteArchive(root string, override ArchiveOverride) (TransitionResult, e
 		return TransitionResult{}, fmt.Errorf("task Git metadata disagrees with repository type")
 	}
 	if gitBacked {
-		return completeGitArchive(root, repo, task, archiveRel, summary)
+		return completeGitArchive(root, repo, taskData, task, reviews, override, policy)
+	}
+	archiveRel, summary, err := validateArchiveCandidate(root, taskData, task, reviews, override, policy)
+	if err != nil {
+		return TransitionResult{}, err
 	}
 	if err := validateNonGitDelivery(root, task, archiveRel, summary); err != nil {
 		return TransitionResult{}, err
@@ -95,25 +95,30 @@ func CompleteArchive(root string, override ArchiveOverride) (TransitionResult, e
 	return TransitionResult{Message: "Archive transition completed at " + archiveRel}, nil
 }
 
-func validateArchiveCandidate(root string, task taskMeta, reviews []review, override ArchiveOverride, policy instruction.Policy) (string, archiveSummary, error) {
+func validateArchiveCandidate(root string, acceptedTaskData []byte, task taskMeta, reviews []review, override ArchiveOverride, policy instruction.Policy) (string, archiveSummary, error) {
 	archiveRel := deterministicArchivePath(task, time.Now())
 	archivePath := filepath.Join(root, filepath.FromSlash(archiveRel))
 	info, err := os.Stat(archivePath)
 	if err != nil || !info.IsDir() {
 		return "", archiveSummary{}, fmt.Errorf("expected authored archive candidate at exact deterministic path %s", archiveRel)
 	}
-	for _, name := range []string{"task-plan.md", "notes.md"} {
-		current, err := os.ReadFile(filepath.Join(root, ".concoct/current", name))
-		if err != nil {
-			return "", archiveSummary{}, err
-		}
-		archived, err := os.ReadFile(filepath.Join(archivePath, name))
-		if err != nil {
-			return "", archiveSummary{}, fmt.Errorf("archive is missing %s: %w", name, err)
-		}
-		if !bytes.Equal(current, archived) {
-			return "", archiveSummary{}, fmt.Errorf("archive %s is not byte-identical to accepted current evidence", name)
-		}
+	archivedTask, err := os.ReadFile(filepath.Join(archivePath, "task-plan.md"))
+	if err != nil {
+		return "", archiveSummary{}, fmt.Errorf("archive is missing task-plan.md: %w", err)
+	}
+	if !bytes.Equal(acceptedTaskData, archivedTask) {
+		return "", archiveSummary{}, fmt.Errorf("archive task-plan.md is not byte-identical to accepted current evidence")
+	}
+	currentNotes, err := os.ReadFile(filepath.Join(root, ".concoct/current/notes.md"))
+	if err != nil {
+		return "", archiveSummary{}, err
+	}
+	archivedNotes, err := os.ReadFile(filepath.Join(archivePath, "notes.md"))
+	if err != nil {
+		return "", archiveSummary{}, fmt.Errorf("archive is missing notes.md: %w", err)
+	}
+	if !bytes.Equal(currentNotes, archivedNotes) {
+		return "", archiveSummary{}, fmt.Errorf("archive notes.md is not byte-identical to accepted current evidence")
 	}
 	for _, review := range reviews {
 		current, _ := os.ReadFile(filepath.Join(root, ".concoct/current", review.name))
@@ -184,7 +189,7 @@ func deterministicArchivePath(task taskMeta, now time.Time) string {
 	return ".concoct/archive/" + now.Format("2006-01-02") + "-" + task.RoadmapID + "-" + slug
 }
 
-func completeGitArchive(root string, repo *gitrepo.Repository, task taskMeta, archiveRel string, summary archiveSummary) (TransitionResult, error) {
+func completeGitArchive(root string, repo *gitrepo.Repository, taskData []byte, task taskMeta, reviews []review, override ArchiveOverride, policy instruction.Policy) (TransitionResult, error) {
 	if repo.OperationInProgress() {
 		return TransitionResult{}, fmt.Errorf("an unrelated Git operation is in progress")
 	}
@@ -200,41 +205,75 @@ func completeGitArchive(root string, repo *gitrepo.Repository, task taskMeta, ar
 	if err != nil || !ancestor {
 		return TransitionResult{}, fmt.Errorf("recorded Git base is not an ancestor of the task branch")
 	}
-	if summary.Status != "archived" || summary.Delivery != "pending-integration" {
-		return TransitionResult{}, fmt.Errorf("Git archive summary requires status archived and delivery pending-integration")
-	}
-	if task.Git.Status != "archived" || task.Git.ArchiveCommit != "self" {
-		return TransitionResult{}, fmt.Errorf("Git archive task metadata requires git.status archived and non-recursive git.archive-commit self")
-	}
 	entries, err := repo.StatusEntries()
 	if err != nil {
 		return TransitionResult{}, err
 	}
 	if len(entries) == 0 {
-		return validateCommittedArchiveRetry(root, repo, task, archiveRel, head)
+		return validateCommittedArchiveRetry(root, repo, task, reviews, override, policy, head)
+	}
+	acceptedTaskData, err := repo.FileAt(head, ".concoct/current/task-plan.md")
+	if err != nil {
+		return TransitionResult{}, fmt.Errorf("cannot read accepted task evidence at HEAD: %w", err)
+	}
+	var acceptedTask taskMeta
+	if err := parseFront(acceptedTaskData, &acceptedTask); err != nil {
+		return TransitionResult{}, fmt.Errorf("accepted task evidence at HEAD: %w", err)
+	}
+	if acceptedTask.ID != task.ID || acceptedTask.RoadmapID != task.RoadmapID {
+		return TransitionResult{}, fmt.Errorf("current task identity differs from accepted evidence at HEAD")
+	}
+	archivedTaskData, err := archivedGitTaskPlan(acceptedTaskData)
+	if err != nil {
+		return TransitionResult{}, fmt.Errorf("accepted task evidence at HEAD: %w", err)
+	}
+	partialMetadataRetry := bytes.Equal(taskData, archivedTaskData)
+	if !bytes.Equal(taskData, acceptedTaskData) && !partialMetadataRetry {
+		return TransitionResult{}, fmt.Errorf("Archivist must preserve accepted current task-plan.md; only the exact completion-owned archival Git metadata transition is retryable")
+	}
+	archiveRel, summary, err := validateArchiveCandidate(root, acceptedTaskData, acceptedTask, reviews, override, policy)
+	if err != nil {
+		return TransitionResult{}, err
+	}
+	if summary.Status != "archived" || summary.Delivery != "pending-integration" {
+		return TransitionResult{}, fmt.Errorf("Git archive summary requires status archived and delivery pending-integration")
 	}
 	for _, entry := range entries {
 		for _, path := range entry.Paths {
 			p := filepath.ToSlash(path)
-			if !(strings.HasPrefix(p, archiveRel+"/") || p == ".concoct/capabilities.md" || p == ".concoct/roadmap.md" || p == ".concoct/current/task-plan.md" || p == ".concoct/current/notes.md") {
+			if p == ".concoct/current/task-plan.md" {
+				if !partialMetadataRetry {
+					return TransitionResult{}, fmt.Errorf("Archivist must preserve accepted current task-plan.md; archival Git metadata is applied by archive completion")
+				}
+				continue
+			}
+			if !(strings.HasPrefix(p, archiveRel+"/") || p == ".concoct/capabilities.md" || p == ".concoct/roadmap.md" || p == ".concoct/current/notes.md") {
 				return TransitionResult{}, fmt.Errorf("Archivist transition contains forbidden path %s", p)
 			}
 		}
 	}
-	if err := validateGitCapabilityDiff(repo, "HEAD", task, archiveRel); err != nil {
+	if err := validateGitCapabilityDiff(repo, "HEAD", acceptedTask, archiveRel); err != nil {
 		return TransitionResult{}, err
 	}
-	if err := validateGitRoadmapDiff(repo, "HEAD", task); err != nil {
+	if err := validateGitRoadmapDiff(repo, "HEAD", acceptedTask); err != nil {
 		return TransitionResult{}, err
 	}
-	if err := validateRoadmapEvidence(root, task, archiveRel, "active"); err != nil {
+	if err := validateRoadmapEvidence(root, acceptedTask, archiveRel, "active"); err != nil {
 		return TransitionResult{}, err
+	}
+	taskPath := filepath.Join(root, ".concoct/current/task-plan.md")
+	if !partialMetadataRetry {
+		if err := writeAtomicFile(taskPath, archivedTaskData); err != nil {
+			return TransitionResult{}, fmt.Errorf("apply archival Git metadata: %w", err)
+		}
 	}
 	if err := repo.AddAll(); err != nil {
-		return TransitionResult{}, err
+		return TransitionResult{}, rollbackArchiveAttempt(repo, head, taskPath, acceptedTaskData, err)
 	}
 	if err := repo.Commit("concoct: archive " + task.ID); err != nil {
-		return TransitionResult{}, err
+		if current, headErr := repo.Head(); headErr != nil || current == head {
+			return TransitionResult{}, rollbackArchiveAttempt(repo, head, taskPath, acceptedTaskData, err)
+		}
 	}
 	commit, err := repo.Head()
 	if err != nil {
@@ -249,7 +288,7 @@ func completeGitArchive(root string, repo *gitrepo.Repository, task taskMeta, ar
 	return TransitionResult{Message: "Archive transition completed at " + archiveRel, Committed: true, Commit: commit}, nil
 }
 
-func validateCommittedArchiveRetry(root string, repo *gitrepo.Repository, task taskMeta, archiveRel, head string) (TransitionResult, error) {
+func validateCommittedArchiveRetry(root string, repo *gitrepo.Repository, task taskMeta, reviews []review, override ArchiveOverride, policy instruction.Policy, head string) (TransitionResult, error) {
 	wantSubject := "concoct: archive " + task.ID
 	subject, err := repo.LastCommitSubject()
 	if err != nil || subject != wantSubject {
@@ -258,6 +297,35 @@ func validateCommittedArchiveRetry(root string, repo *gitrepo.Repository, task t
 	parent, err := repo.Ref(head + "^")
 	if err != nil {
 		return TransitionResult{}, fmt.Errorf("cannot validate archive retry against its immutable parent: %w", err)
+	}
+	acceptedTaskData, err := repo.FileAt(parent, ".concoct/current/task-plan.md")
+	if err != nil {
+		return TransitionResult{}, fmt.Errorf("cannot read accepted pre-archive task evidence: %w", err)
+	}
+	var acceptedTask taskMeta
+	if err := parseFront(acceptedTaskData, &acceptedTask); err != nil {
+		return TransitionResult{}, fmt.Errorf("accepted pre-archive task evidence: %w", err)
+	}
+	if acceptedTask.ID != task.ID || acceptedTask.RoadmapID != task.RoadmapID {
+		return TransitionResult{}, fmt.Errorf("archive retry task identity differs from accepted pre-archive evidence")
+	}
+	expectedCurrent, err := archivedGitTaskPlan(acceptedTaskData)
+	if err != nil {
+		return TransitionResult{}, fmt.Errorf("accepted pre-archive task evidence: %w", err)
+	}
+	currentTaskData, err := os.ReadFile(filepath.Join(root, ".concoct/current/task-plan.md"))
+	if err != nil {
+		return TransitionResult{}, err
+	}
+	if !bytes.Equal(currentTaskData, expectedCurrent) {
+		return TransitionResult{}, fmt.Errorf("committed archive task-plan.md is not the exact archival metadata transition")
+	}
+	archiveRel, summary, err := validateArchiveCandidate(root, acceptedTaskData, acceptedTask, reviews, override, policy)
+	if err != nil {
+		return TransitionResult{}, err
+	}
+	if summary.Status != "archived" || summary.Delivery != "pending-integration" {
+		return TransitionResult{}, fmt.Errorf("Git archive summary requires status archived and delivery pending-integration")
 	}
 	paths, err := repo.DiffPaths(parent, head)
 	if err != nil {
@@ -269,13 +337,13 @@ func validateCommittedArchiveRetry(root string, repo *gitrepo.Repository, task t
 			return TransitionResult{}, fmt.Errorf("committed Archivist transition contains forbidden path %s", p)
 		}
 	}
-	if err := validateGitCapabilityDiff(repo, parent, task, archiveRel); err != nil {
+	if err := validateGitCapabilityDiff(repo, parent, acceptedTask, archiveRel); err != nil {
 		return TransitionResult{}, fmt.Errorf("committed archive capability transition is invalid: %w", err)
 	}
-	if err := validateGitRoadmapDiff(repo, parent, task); err != nil {
+	if err := validateGitRoadmapDiff(repo, parent, acceptedTask); err != nil {
 		return TransitionResult{}, fmt.Errorf("committed archive roadmap transition is invalid: %w", err)
 	}
-	if err := validateRoadmapEvidence(root, task, archiveRel, "active"); err != nil {
+	if err := validateRoadmapEvidence(root, acceptedTask, archiveRel, "active"); err != nil {
 		return TransitionResult{}, err
 	}
 	report := Detect(root)
@@ -283,6 +351,102 @@ func validateCommittedArchiveRetry(root string, repo *gitrepo.Repository, task t
 		return TransitionResult{}, fmt.Errorf("clean archive retry does not validate as exact archived HEAD")
 	}
 	return TransitionResult{Message: "Archive transition already committed; reused clean valid transition at " + archiveRel, Committed: true, Commit: head}, nil
+}
+
+func archivedGitTaskPlan(data []byte) ([]byte, error) {
+	var task taskMeta
+	if err := parseFront(data, &task); err != nil {
+		return nil, err
+	}
+	if !task.Git.Enabled || (task.Git.Status != "" && task.Git.Status != "active") || task.Git.ArchiveCommit != "" {
+		return nil, fmt.Errorf("accepted Git task metadata must be active and omit archive-commit")
+	}
+	lines := strings.Split(string(data), "\n")
+	gitLine, frontEnd := -1, -1
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == "---" {
+			frontEnd = i
+			break
+		}
+		if lines[i] == "git:" {
+			gitLine = i
+		}
+	}
+	if gitLine < 0 || frontEnd < 0 || gitLine >= frontEnd {
+		return nil, fmt.Errorf("task-plan front matter lacks a writable git mapping")
+	}
+	blockEnd := frontEnd
+	childIndent := ""
+	statusLine, archiveLine := -1, -1
+	for i := gitLine + 1; i < frontEnd; i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := lines[i][:len(lines[i])-len(strings.TrimLeft(lines[i], " \t"))]
+		if indent == "" {
+			blockEnd = i
+			break
+		}
+		if childIndent == "" {
+			childIndent = indent
+		}
+		if indent != childIndent {
+			continue
+		}
+		switch strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[0]) {
+		case "status":
+			statusLine = i
+		case "archive-commit":
+			archiveLine = i
+		}
+	}
+	if childIndent == "" {
+		childIndent = "  "
+	}
+	if archiveLine >= 0 {
+		return nil, fmt.Errorf("accepted Git task metadata already contains archive-commit")
+	}
+	if statusLine >= 0 {
+		lines[statusLine] = childIndent + "status: archived"
+		lines = append(lines[:statusLine+1], append([]string{childIndent + "archive-commit: self"}, lines[statusLine+1:]...)...)
+	} else {
+		addition := []string{childIndent + "status: archived", childIndent + "archive-commit: self"}
+		lines = append(lines[:blockEnd], append(addition, lines[blockEnd:]...)...)
+	}
+	return []byte(strings.Join(lines, "\n")), nil
+}
+
+func writeAtomicFile(path string, data []byte) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".task-plan-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err = tmp.Write(data); err == nil {
+		err = tmp.Chmod(info.Mode().Perm())
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(name, path)
+}
+
+func rollbackArchiveAttempt(repo *gitrepo.Repository, head, taskPath string, taskData []byte, cause error) error {
+	resetErr := repo.ResetMixed(head)
+	restoreErr := writeAtomicFile(taskPath, taskData)
+	if resetErr != nil || restoreErr != nil {
+		return fmt.Errorf("%v; restore failed archive attempt: reset index: %v; restore task-plan.md: %v", cause, resetErr, restoreErr)
+	}
+	return cause
 }
 
 func validateNonGitDelivery(root string, task taskMeta, archiveRel string, summary archiveSummary) error {

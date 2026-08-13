@@ -96,6 +96,26 @@ invocation runs at most one action and returns control; it never starts the
 next role automatically. `inspect` reads the latest retained attempt (or a
 named invocation) from ignored private local state.
 
+To coordinate consecutive authorized actions while retaining explicit product,
+plan, and integration decisions, use:
+
+```bash
+concoct run
+concoct run --approve next
+concoct run --approve plan
+concoct run --approve integration
+```
+
+`run` stops at a Product Owner proposal, plan acceptance, and local integration
+approval by default. Each approval is one-use and bound to the exact pending
+task, action, and repository evidence; drift requires a fresh run. The command
+uses a fresh adapter process for every role, stops on interventions or failures,
+and attempts at most 20 actions and three completed review cycles. Run-driven
+integration is always local-only, even when manual integration has automatic
+push enabled. Sandboxed role agents author and verify candidates; the outer
+executable validates and commits canonical Planner, Developer, Reviewer, and
+Archivist transitions without granting the adapter Git-metadata access.
+
 ### 1. Decide what comes next
 
 ```bash
@@ -166,10 +186,20 @@ exec:
     max-age: 336h
     max-log-bytes: 262144
     max-total-bytes: 20971520
+
+run:
+  # Added to the built-in plan and integration gates.
+  gates: [review]
+  # May only lower the hard 20-action and three-cycle limits.
+  max-actions: 12
+  max-cycles: 2
 ```
 
 One-run overrides are `--adapter`, `--model`, `--reasoning`, and `--timeout`.
-Unknown settings and unsupported values fail before launch.
+For `run`, `--gate` adds one supported gate and `--max-actions` or
+`--max-cycles` lowers the effective bounds. Unknown settings, duplicate gates,
+unsupported values, and permissive overrides fail before runtime evidence or
+workflow mutation.
 
 ### 4. Review independently when required
 

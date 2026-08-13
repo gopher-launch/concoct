@@ -102,6 +102,7 @@ type DurableFacts struct {
 	Class                                                  OutcomeClass
 	Artifacts                                              []string
 	Intervention                                           Intervention
+	Recommendation                                         Recommendation
 }
 
 // Spec defines the authority and observable completion requirements for one
@@ -229,6 +230,31 @@ func Authorize(root, kind, attemptID string) (Action, error) {
 	if strings.TrimSpace(attemptID) == "" {
 		return Action{}, errors.New("attempt id is required")
 	}
+	return newAction(spec, report.RoadmapItem, attemptID, evidence)
+}
+
+// AuthorizePlanning is the narrow additional authority used after a validated
+// Product Owner selection. Ordinary ready-state resolution remains limited to
+// product-owner-next.
+func AuthorizePlanning(root, itemID, attemptID string) (Action, error) {
+	if err := workflow.ValidatePlanItem(root, itemID); err != nil {
+		return Action{}, fmt.Errorf("selected planning item is not eligible: %w", err)
+	}
+	spec, _ := Find("task-planning")
+	evidence, report, err := Snapshot(root)
+	if err != nil {
+		return Action{}, err
+	}
+	if report.State != workflow.Ready {
+		return Action{}, fmt.Errorf("task planning is not authorized in workflow state %s", report.State)
+	}
+	return newAction(spec, itemID, attemptID, evidence)
+}
+
+func newAction(spec Spec, taskID, attemptID string, evidence Evidence) (Action, error) {
+	if strings.TrimSpace(attemptID) == "" {
+		return Action{}, errors.New("attempt id is required")
+	}
 	invocation, err := randomID()
 	if err != nil {
 		return Action{}, err
@@ -237,7 +263,7 @@ func Authorize(root, kind, attemptID string) (Action, error) {
 	if err != nil {
 		return Action{}, err
 	}
-	return Action{ProtocolVersion: ProtocolVersion, Correlation: Correlation{InvocationID: invocation, ActionID: actionID, TaskID: report.RoadmapItem, AttemptID: attemptID, Role: spec.Role}, Kind: spec.Kind, Gate: spec.Gate, Executable: true, Explanation: spec.Explanation, Evidence: evidence}, nil
+	return Action{ProtocolVersion: ProtocolVersion, Correlation: Correlation{InvocationID: invocation, ActionID: actionID, TaskID: taskID, AttemptID: attemptID, Role: spec.Role}, Kind: spec.Kind, Gate: spec.Gate, Executable: true, Explanation: spec.Explanation, Evidence: evidence}, nil
 }
 
 // Snapshot includes only hashes and bounded state metadata; it never retains
@@ -292,28 +318,24 @@ func Snapshot(root string) (Evidence, workflow.Report, error) {
 // state. A process exit code is deliberately absent: invocation health cannot
 // establish a workflow transition.
 func ValidateOutcome(root string, action Action, outcome Outcome) (DurableFacts, error) {
-	if action.ProtocolVersion != ProtocolVersion || outcome.ProtocolVersion != ProtocolVersion {
-		return DurableFacts{}, fmt.Errorf("unsupported protocol version")
-	}
-	spec, ok := Find(action.Kind)
-	if !ok {
-		return DurableFacts{}, fmt.Errorf("unsupported action kind %q", action.Kind)
-	}
-	if action.Correlation.Role != spec.Role || !sameCorrelation(action.Correlation, outcome.Correlation) {
-		return DurableFacts{}, errors.New("outcome correlation does not match authorized action")
-	}
-	if !containsOutcome(spec.SupportedOutcomes, outcome.Class) {
-		return DurableFacts{}, fmt.Errorf("outcome class %q is not supported for %s", outcome.Class, action.Kind)
-	}
-	if err := bounded(outcome); err != nil {
+	return validateOutcome(root, action, outcome, false)
+}
+
+// ValidateSupervisedOutcome permits role-owned partial repository effects for
+// accepted non-completion outcomes after the executor has validated their
+// changed paths. Ordinary callers retain the stricter unchanged-evidence rule.
+func ValidateSupervisedOutcome(root string, action Action, outcome Outcome) (DurableFacts, error) {
+	return validateOutcome(root, action, outcome, true)
+}
+
+func validateOutcome(root string, action Action, outcome Outcome, allowPartialEffects bool) (DurableFacts, error) {
+	if err := ValidateCandidate(action, outcome); err != nil {
 		return DurableFacts{}, err
 	}
+	spec, _ := Find(action.Kind)
 	current, report, err := Snapshot(root)
 	if err != nil {
 		return DurableFacts{}, err
-	}
-	if outcome.Class != Completed && current.Digest != action.Evidence.Digest {
-		return DurableFacts{}, errors.New("outcome is stale: repository evidence changed after authorization")
 	}
 	if outcome.Class == Completed {
 		if action.Kind == "product-owner-next" {
@@ -332,11 +354,36 @@ func ValidateOutcome(root string, action Action, outcome Outcome) (DurableFacts,
 		if err := spec.CompletionValidator(report); err != nil {
 			return DurableFacts{}, err
 		}
+	} else if current.Digest != action.Evidence.Digest && !allowPartialEffects {
+		return DurableFacts{}, errors.New("outcome is stale: repository evidence changed after authorization")
+	}
+	return DurableFacts{ActionID: action.Correlation.ActionID, InvocationID: action.Correlation.InvocationID, AttemptID: action.Correlation.AttemptID, Role: action.Correlation.Role, Kind: action.Kind, Class: outcome.Class, Summary: outcome.Summary, Artifacts: append([]string(nil), outcome.Artifacts...), Intervention: outcome.Intervention, Recommendation: outcome.Recommendation}, nil
+}
+
+// ValidateCandidate validates the bounded structured claim before any
+// supervised completion authority is invoked. Repository effects are checked
+// separately by the executor against the role-owned candidate boundary.
+func ValidateCandidate(action Action, outcome Outcome) error {
+	if action.ProtocolVersion != ProtocolVersion || outcome.ProtocolVersion != ProtocolVersion {
+		return fmt.Errorf("unsupported protocol version")
+	}
+	spec, ok := Find(action.Kind)
+	if !ok {
+		return fmt.Errorf("unsupported action kind %q", action.Kind)
+	}
+	if action.Correlation.Role != spec.Role || !sameCorrelation(action.Correlation, outcome.Correlation) {
+		return errors.New("outcome correlation does not match authorized action")
+	}
+	if !containsOutcome(spec.SupportedOutcomes, outcome.Class) {
+		return fmt.Errorf("outcome class %q is not supported for %s", outcome.Class, action.Kind)
+	}
+	if err := bounded(outcome); err != nil {
+		return err
 	}
 	if containsOutcome(spec.Intervention.RequiredFor, outcome.Class) && (outcome.Intervention.Kind != spec.Intervention.Kind || outcome.Intervention.Next != spec.Intervention.Next) {
-		return DurableFacts{}, fmt.Errorf("outcome class %q requires intervention %q", outcome.Class, spec.Intervention.Kind)
+		return fmt.Errorf("outcome class %q requires intervention %q", outcome.Class, spec.Intervention.Kind)
 	}
-	return DurableFacts{ActionID: action.Correlation.ActionID, InvocationID: action.Correlation.InvocationID, AttemptID: action.Correlation.AttemptID, Role: action.Correlation.Role, Kind: action.Kind, Class: outcome.Class, Summary: outcome.Summary, Artifacts: append([]string(nil), outcome.Artifacts...), Intervention: outcome.Intervention}, nil
+	return nil
 }
 
 // WriteAtomicResult enforces the process-adapter single-result contract. The

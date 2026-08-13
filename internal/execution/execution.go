@@ -21,8 +21,10 @@ import (
 
 	"github.com/gopher-launch/concoct/internal/adapter"
 	"github.com/gopher-launch/concoct/internal/config"
+	"github.com/gopher-launch/concoct/internal/gitrepo"
 	"github.com/gopher-launch/concoct/internal/integration"
 	"github.com/gopher-launch/concoct/internal/orchestration"
+	"github.com/gopher-launch/concoct/internal/planning"
 	"github.com/gopher-launch/concoct/internal/prompt"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
@@ -30,8 +32,11 @@ import (
 const terminationGrace = 2 * time.Second
 
 type Options struct {
-	DryRun   bool
-	Override config.Overrides
+	DryRun           bool
+	Override         config.Overrides
+	SelectedPlan     string
+	LocalIntegration bool
+	AttemptID        string
 	// beforeLaunch is a test seam for changing covered evidence after the
 	// invocation record is created but before the final authorization check.
 	beforeLaunch func(string, Prepared) error
@@ -47,7 +52,25 @@ type Prepared struct {
 	ConfigDigest string
 	Override     config.Overrides
 	Direct       bool
+	Plan         *planning.Session
+	InitialHead  string
+	InitialFiles map[string]string
+	UserConfig   string
 }
+
+const supervisionAppendix = `
+
+## Executable supervision boundary
+
+This prompt's role instructions above remain the unchanged semantic authority.
+Author and verify the complete role-owned candidate, but do not write Git
+metadata, create a commit, or invoke the final Concoct completion command. The
+outer Concoct executable will validate the candidate through the canonical
+completion boundary and create any required transition commit. Return a
+completed structured outcome only when the candidate is ready for that exact
+validation; blockers, decisions, and failures must retain their honest
+non-completion outcome.
+`
 
 type Metadata struct {
 	InvocationID    string `json:"invocation_id"`
@@ -82,6 +105,8 @@ type Result struct {
 	Prepared       Prepared
 	RecordPath     string
 	Reconciliation Reconciliation
+	Outcome        orchestration.Outcome
+	Facts          orchestration.DurableFacts
 }
 
 type retentionRecord struct {
@@ -90,29 +115,55 @@ type retentionRecord struct {
 	size   int64
 }
 
-func Prepare(root string, options Options) (Prepared, error) {
+func Prepare(root string, options Options) (prepared Prepared, resultErr error) {
+	if options.DryRun && options.SelectedPlan != "" {
+		return Prepared{}, fmt.Errorf("selected planning cannot be prepared as a dry run")
+	}
+	var session *planning.Session
+	defer func() {
+		if resultErr != nil && session != nil {
+			_ = session.Rollback()
+		}
+	}()
 	resolution, err := orchestration.Resolve(root)
+	if options.SelectedPlan != "" {
+		session, err = planning.Start(root, options.SelectedPlan)
+		resolution = orchestration.Resolution{Kind: "task-planning", Role: "task-planner", PromptCommand: "plan", Command: "concoct plan " + options.SelectedPlan, Executable: true}
+	}
 	if err != nil {
 		return Prepared{}, err
 	}
 	if !resolution.Executable {
 		return Prepared{Resolution: resolution}, fmt.Errorf("execution refused: %s", resolution.Refusal)
 	}
-	attemptID, err := orchestration.NewID()
-	if err != nil {
-		return Prepared{}, err
+	attemptID := options.AttemptID
+	if attemptID == "" {
+		attemptID, err = orchestration.NewID()
+		if err != nil {
+			return Prepared{}, err
+		}
 	}
-	action, err := orchestration.Authorize(root, resolution.Kind, attemptID)
+	var action orchestration.Action
+	if options.SelectedPlan != "" {
+		action, err = orchestration.AuthorizePlanning(root, options.SelectedPlan, attemptID)
+	} else {
+		action, err = orchestration.Authorize(root, resolution.Kind, attemptID)
+	}
 	if err != nil {
 		return Prepared{}, err
 	}
 
-	prepared := Prepared{Resolution: resolution, Action: action, Override: options.Override, Direct: resolution.Kind == "integration"}
-	if !prepared.Direct {
+	prepared = Prepared{Resolution: resolution, Action: action, Override: options.Override, Direct: resolution.Kind == "integration", Plan: session}
+	if session != nil {
+		prepared.Prompt, err = session.Render()
+	} else if !prepared.Direct {
 		prepared.Prompt, err = prompt.Render(root, prompt.Request{Command: resolution.PromptCommand})
 		if err != nil {
 			return Prepared{}, err
 		}
+	}
+	if err == nil && !prepared.Direct && resolution.Kind != "product-owner-next" {
+		prepared.Prompt = append(prepared.Prompt, []byte(supervisionAppendix)...)
 	}
 	spec, ok := adapter.Find(firstNonEmpty(options.Override.Adapter, "codex"))
 	if !ok && options.Override.Adapter != "" {
@@ -139,8 +190,29 @@ func Prepare(root string, options Options) (Prepared, error) {
 	if err != nil {
 		return Prepared{}, err
 	}
+	prepared.UserConfig, err = userConfigDigest()
+	if err != nil {
+		return Prepared{}, err
+	}
 	if prepared.Direct {
 		return prepared, nil
+	}
+	if repo, ok, openErr := gitrepo.Open(root); openErr != nil {
+		return Prepared{}, openErr
+	} else if ok {
+		prepared.InitialHead, err = repo.Head()
+		if err != nil {
+			// A freshly initialized repository may have an unborn branch. There
+			// is no commit identity to protect until planning creates its base.
+			if _, statusErr := repo.StatusEntries(); statusErr != nil {
+				return Prepared{}, err
+			}
+		}
+	} else {
+		prepared.InitialFiles, err = snapshotFiles(root)
+		if err != nil {
+			return Prepared{}, err
+		}
 	}
 
 	base := filepath.Join(root, ".concoct", "runtime", "invocations", action.Correlation.InvocationID)
@@ -177,6 +249,20 @@ func Describe(prepared Prepared) string {
 }
 
 func Run(ctx context.Context, root string, options Options, input io.Reader, progress io.Writer) (Result, error) {
+	result, err := run(ctx, root, options, input, progress)
+	if err == nil && result.Reconciliation.ResultAccepted && result.Reconciliation.OutcomeClass != string(orchestration.Completed) {
+		return result, fmt.Errorf("action returned accepted non-completion outcome %s", result.Reconciliation.OutcomeClass)
+	}
+	return result, err
+}
+
+// RunAccepted exposes an accepted structured non-completion outcome to the
+// lifecycle coordinator while preserving Run's one-shot refusal contract.
+func RunAccepted(ctx context.Context, root string, options Options, input io.Reader, progress io.Writer) (Result, error) {
+	return run(ctx, root, options, input, progress)
+}
+
+func run(ctx context.Context, root string, options Options, input io.Reader, progress io.Writer) (Result, error) {
 	prepared, err := Prepare(root, options)
 	if err != nil {
 		return Result{}, err
@@ -186,6 +272,9 @@ func Run(ctx context.Context, root string, options Options, input io.Reader, pro
 	}
 	record, err := createRecord(root, prepared)
 	if err != nil {
+		if prepared.Plan != nil {
+			_ = prepared.Plan.Rollback()
+		}
 		return Result{}, err
 	}
 	result := Result{Prepared: prepared, RecordPath: record}
@@ -199,16 +288,37 @@ func Run(ctx context.Context, root string, options Options, input io.Reader, pro
 	}
 	if runErr != nil {
 		disposition = "authorization-changed"
+		if prepared.Plan != nil {
+			_ = prepared.Plan.Rollback()
+		}
 	} else if prepared.Direct {
-		disposition, runErr = runDirect(ctx, root, record, prepared, input, progress)
+		disposition, runErr = runDirect(ctx, root, record, prepared, options.LocalIntegration, input, progress)
 		if runErr == nil && disposition == "completed" {
 			outcome := orchestration.Outcome{ProtocolVersion: orchestration.ProtocolVersion, Correlation: prepared.Action.Correlation, Class: orchestration.Completed, Summary: "direct integration completed"}
 			runErr = orchestration.WriteAtomicResult(filepath.Join(record, "result.json"), outcome)
 		}
 	} else {
 		disposition, runErr = runAdapter(ctx, record, prepared, progress)
+		if disposition == "startup-failed" && prepared.Plan != nil {
+			_ = prepared.Plan.Rollback()
+		}
+		if runErr == nil && disposition == "completed" {
+			outcome, candidateErr := orchestration.ReadResult(filepath.Join(record, "result.json"))
+			if candidateErr == nil {
+				candidateErr = orchestration.ValidateCandidate(prepared.Action, outcome)
+			}
+			if candidateErr == nil {
+				candidateErr = validateSupervisedEffects(root, prepared)
+			}
+			if candidateErr == nil && outcome.Class == orchestration.Completed && prepared.Resolution.Kind != "product-owner-next" {
+				candidateErr = finalizeSupervised(root, prepared)
+			}
+			if candidateErr != nil {
+				disposition, runErr = "finalization-failed", candidateErr
+			}
+		}
 	}
-	reconcileErr := reconcile(root, record, prepared, disposition, runErr, &result.Reconciliation)
+	reconcileErr := reconcile(root, record, prepared, disposition, runErr, &result)
 	if pruneErr := Prune(root, prepared.Settings.Retention, prepared.Action.Correlation.InvocationID); pruneErr != nil && reconcileErr == nil {
 		reconcileErr = pruneErr
 	}
@@ -224,7 +334,7 @@ func Run(ctx context.Context, root string, options Options, input io.Reader, pro
 	return result, nil
 }
 
-func runDirect(ctx context.Context, root, record string, prepared Prepared, input io.Reader, progress io.Writer) (string, error) {
+func runDirect(ctx context.Context, root, record string, prepared Prepared, localOnly bool, input io.Reader, progress io.Writer) (string, error) {
 	stdoutFile, err := privateFile(filepath.Join(record, "stdout.log"))
 	if err != nil {
 		return "startup-failed", err
@@ -238,7 +348,7 @@ func runDirect(ctx context.Context, root, record string, prepared Prepared, inpu
 	output := newBoundedRedactedWriter(stdoutFile, &lockedWriter{writer: progress}, prepared.Settings.Retention.MaxLogBytes)
 	timerCtx, cancel := context.WithTimeout(ctx, prepared.Settings.Timeout)
 	defer cancel()
-	err = integration.RunContext(timerCtx, root, "", input, output)
+	err = integration.RunContextOptions(timerCtx, root, "", input, output, integration.Options{LocalOnly: localOnly})
 	output.finish()
 	if err != nil {
 		if errors.Is(timerCtx.Err(), context.DeadlineExceeded) {
@@ -342,20 +452,29 @@ func readCandidate(path string) (orchestration.Outcome, error) {
 	return outcome, nil
 }
 
-func reconcile(root, record string, prepared Prepared, disposition string, runErr error, target *Reconciliation) error {
+func reconcile(root, record string, prepared Prepared, disposition string, runErr error, target *Result) error {
 	reconciliation := Reconciliation{InvocationDisposition: disposition, FinishedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	report := workflow.Detect(root)
 	reconciliation.ObservedState, reconciliation.ObservedNext = report.State, report.Next
 	var validationErr error
-	if err := configurationStable(root, prepared.Override, prepared); err != nil {
+	if currentUserConfig, err := userConfigDigest(); err != nil {
 		validationErr = err
+	} else if currentUserConfig != prepared.UserConfig {
+		validationErr = fmt.Errorf("user execution configuration changed after authorization")
+	} else if prepared.Resolution.Kind != "development" {
+		validationErr = configurationStable(root, prepared.Override, prepared)
 	}
 	if outcome, err := orchestration.ReadResult(filepath.Join(record, "result.json")); err == nil {
+		target.Outcome = outcome
 		reconciliation.OutcomeClass = string(outcome.Class)
-		if validationErr == nil {
-			_, validationErr = orchestration.ValidateOutcome(root, prepared.Action, outcome)
+		if validationErr == nil && runErr == nil {
+			if prepared.Direct {
+				target.Facts, validationErr = orchestration.ValidateOutcome(root, prepared.Action, outcome)
+			} else {
+				target.Facts, validationErr = orchestration.ValidateSupervisedOutcome(root, prepared.Action, outcome)
+			}
 		}
-		if validationErr == nil {
+		if validationErr == nil && runErr == nil {
 			reconciliation.ResultAccepted = true
 		}
 	} else if !os.IsNotExist(err) {
@@ -372,7 +491,7 @@ func reconcile(root, record string, prepared Prepared, disposition string, runEr
 	if err := writeJSON(filepath.Join(record, "reconciliation.json"), reconciliation); err != nil {
 		return err
 	}
-	*target = reconciliation
+	target.Reconciliation = reconciliation
 	if report.OperationalError != nil {
 		return report.OperationalError
 	}
@@ -385,8 +504,160 @@ func reconcile(root, record string, prepared Prepared, disposition string, runEr
 	if runErr == nil && !reconciliation.ResultAccepted {
 		return fmt.Errorf("execution produced no accepted structured result")
 	}
-	if reconciliation.ResultAccepted && reconciliation.OutcomeClass != string(orchestration.Completed) {
-		return fmt.Errorf("action returned accepted non-completion outcome %s", reconciliation.OutcomeClass)
+	return nil
+}
+
+func validateSupervisedEffects(root string, prepared Prepared) error {
+	if prepared.Resolution.Kind == "product-owner-next" {
+		// Product Owner completion is separately required to preserve the exact
+		// authorization evidence and never enters a Git finalization boundary.
+		return nil
+	}
+	repo, ok, err := gitrepo.Open(root)
+	if err != nil {
+		return err
+	}
+	var paths []string
+	if ok {
+		head, headErr := repo.Head()
+		if headErr != nil {
+			return headErr
+		}
+		if prepared.InitialHead != "" && head != prepared.InitialHead {
+			return fmt.Errorf("supervised %s action created or changed a Git commit; outer finalization refused", prepared.Resolution.Kind)
+		}
+		entries, statusErr := repo.StatusEntries()
+		if statusErr != nil {
+			return statusErr
+		}
+		for _, entry := range entries {
+			paths = append(paths, entry.Paths...)
+		}
+	} else {
+		current, snapshotErr := snapshotFiles(root)
+		if snapshotErr != nil {
+			return snapshotErr
+		}
+		paths = changedFiles(prepared.InitialFiles, current)
+	}
+	for _, raw := range paths {
+		path := filepath.ToSlash(raw)
+		switch prepared.Resolution.Kind {
+		case "task-planning":
+			if path != ".concoct/current/task-plan.md" && path != ".concoct/current/notes.md" && path != ".concoct/roadmap.md" {
+				return fmt.Errorf("Task Planner action contains forbidden path %s", path)
+			}
+		case "development":
+			if strings.HasPrefix(path, ".concoct/current/review-") || path == ".concoct/roadmap.md" || path == ".concoct/capabilities.md" || strings.HasPrefix(path, ".concoct/archive/") {
+				return fmt.Errorf("Developer action contains forbidden workflow path %s", path)
+			}
+		case "independent-review":
+			if !regexp.MustCompile(`^\.concoct/current/review-[0-9]{2}\.md$`).MatchString(path) {
+				return fmt.Errorf("Reviewer action contains forbidden path %s", path)
+			}
+		case "archival":
+			if !(strings.HasPrefix(path, ".concoct/archive/") || path == ".concoct/capabilities.md" || path == ".concoct/roadmap.md" || path == ".concoct/current/task-plan.md" || path == ".concoct/current/notes.md") {
+				return fmt.Errorf("Archivist action contains forbidden path %s", path)
+			}
+		}
+	}
+	return nil
+}
+
+func snapshotFiles(root string) (map[string]string, error) {
+	files := map[string]string{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if info.IsDir() && (rel == ".git" || rel == ".concoct/runtime") {
+			return filepath.SkipDir
+		}
+		if info.IsDir() || rel == "." {
+			return nil
+		}
+		var data []byte
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			data = []byte("symlink:" + target)
+		} else if info.Mode().IsRegular() {
+			data, err = os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+		} else {
+			data = []byte(info.Mode().String())
+		}
+		sum := sha256.Sum256(data)
+		files[rel] = hex.EncodeToString(sum[:])
+		return nil
+	})
+	return files, err
+}
+
+func changedFiles(before, after map[string]string) []string {
+	changed := map[string]bool{}
+	for path, digest := range before {
+		if after[path] != digest {
+			changed[path] = true
+		}
+	}
+	for path, digest := range after {
+		if before[path] != digest {
+			changed[path] = true
+		}
+	}
+	paths := make([]string, 0, len(changed))
+	for path := range changed {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func userConfigDigest() (string, error) {
+	path, err := config.UserPath()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func finalizeSupervised(root string, prepared Prepared) error {
+	var err error
+	switch prepared.Resolution.Kind {
+	case "task-planning":
+		if prepared.Plan == nil {
+			return fmt.Errorf("supervised planning completion lacks its planning session")
+		}
+		_, err = prepared.Plan.Complete()
+	case "development":
+		_, err = workflow.CompleteDeveloper(root)
+	case "independent-review":
+		_, err = workflow.CompleteReview(root)
+	case "archival":
+		_, err = workflow.CompleteArchive(root, workflow.ArchiveOverride{})
+	default:
+		return fmt.Errorf("action %s has no supervised completion boundary", prepared.Resolution.Kind)
+	}
+	if err != nil {
+		return fmt.Errorf("finalize supervised %s candidate: %w", prepared.Resolution.Kind, err)
 	}
 	return nil
 }

@@ -895,3 +895,55 @@ as proof that a workflow transition occurred.
   as role completion.
 - Repeated agent execution, workflow diagnostics, recovery, history reporting,
   upgrades, and overlays remain roadmap intent rather than current capabilities.
+
+## CAP-014 — Bounded repeated lifecycle orchestration
+
+- Status: `active`
+- Audience: `project maintainers, developers, and coding agents`
+- Added by: `.concoct/archive/2026-08-12-CON-033-orchestrate-the-task-lifecycle-with-configurable-gates/summary.md`
+- Documentation: `README.md`, `doc/command-reference.md`, `doc/workflow.md`
+
+### Capability
+
+Concoct provides `concoct run` to repeatedly execute fresh authorized workflow
+actions through planning, development, independent review, remediation,
+archival, and local integration until completion or a necessary intervention.
+It applies configurable restrictive approval gates and finite action and
+cycle bounds, validates evidence-bound one-use approvals, detects missing
+progress, preserves role and Git completion authorities, and reports exact
+continuation or recovery actions.
+
+### User value
+
+Users can supervise meaningful lifecycle decisions while Concoct performs safe,
+observable mechanical handoffs without weakening review independence, agent
+safety boundaries, or integration authorization.
+
+### Outputs and effects
+
+Runs produce bounded summaries of attempted actions, accepted outcomes,
+progress, current state, gates, interventions, and safe continuation commands.
+Supervised role actions retain manual prompt parity and are finalized by the
+outer executable. Run-driven integration is local-only and never implies
+remote push authority.
+
+### Limitations
+
+- Runs are bounded invocations and do not provide crash-resumable coordination,
+  abandoned-run reconciliation, or permanent run history.
+- Approval gates and supported actions are finite and executable-owned; the
+  command does not provide arbitrary workflow graphs or permission bypasses.
+
+### Verification evidence
+
+- `internal/runloop`, `internal/runstate`, `internal/execution`, and
+  `internal/integration` tests cover lifecycle, gates, progress, supervision,
+  recovery, and local-only integration boundaries.
+- `.concoct/archive/2026-08-12-CON-033-orchestrate-the-task-lifecycle-with-configurable-gates/review-03.md`
+  records independent approval after remediation.
+
+### Related capabilities
+
+- `CAP-012` supplies the structured action and outcome contract.
+- `CAP-013` supplies the one-shot execution primitive composed by `run`.
+- `CAP-007` supplies Git integration authority.

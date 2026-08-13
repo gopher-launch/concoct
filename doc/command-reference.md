@@ -20,9 +20,10 @@ upstreams remain local success.
 ## Contract status
 
 This reference defines the implemented command surface and its durable workflow
-contract. Role commands render guidance; `exec` may supervise one authorized
-action; explicit code/review completion, Git-backed `plan`, and `integrate`
-remain the documented mutation authorities.
+contract. Role commands render guidance; `exec` supervises one authorized
+action and `run` composes fresh authorized actions within finite gates and
+bounds. Explicit role completion, shared Git-backed planning setup, archival
+completion, and integration remain the mutation authorities.
 
 Workflow state names and transition validity are defined in [state-machine.md](state-machine.md). Project-relative paths in this reference are resolved from the Concoct-enabled project root.
 
@@ -90,7 +91,8 @@ Every role prompt includes the selected persona, exact required context, allowed
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `init` | Bootstrap a project | Project target | `uninitialized` target | Template source and target parent | None | Creates project contract and Git repository | Bootstrap guidance | `ready` | Yes | `next` |
 | `status` | Report state | Project root discovery | Any initialized valid or invalid state | State-bearing artifacts | None | None | None | Unchanged | Yes | State-dependent |
-| `exec` | Execute one recommendation | Optional one-run profile overrides | One unambiguous executable state recommendation | Complete action evidence and exact manual prompt | State-selected role, or direct integration | One adapter process at most; private ignored runtime record | Byte-identical manual role prompt | Claimed outcome reconciled with observed state | Yes | Reported and never auto-run |
+| `exec` | Execute one recommendation | Optional one-run profile overrides | One unambiguous executable state recommendation | Complete action evidence and exact manual prompt core | State-selected role, or direct integration | One adapter process at most; private ignored runtime record | Manual prompt core plus fixed supervision appendix | Claimed outcome finalized and reconciled with observed state | Yes | Reported and never auto-run |
+| `run` | Coordinate one bounded lifecycle | Optional current-gate approval, added gates, lower bounds, and profile overrides | `ready` or an ordinary actionable task state | Fresh action, workflow, policy, configuration, Git, and pending-gate evidence per iteration | Fresh state-selected role per action | Consecutive canonical role transitions; one private pending gate; local-only integration | Manual prompt core plus fixed supervision appendix per role | Integrated/ready or bounded gate/intervention summary | Yes | Exact safe continuation when available |
 | `roadmap` | Prepare Product Owner work | Optional human input supplied outside the command contract | `ready` | Guidance, capabilities, roadmap, archive summaries | Product Owner | CLI: none; role: roadmap only | Product Owner handoff | `ready` | Yes | `plan <id>` or `roadmap` |
 | `plan` | Prepare one active task | Roadmap ID | `ready` | Guidance, capabilities, roadmap, history, repository evidence | Task Planner | Git CLI: safe task branch; role: task plan, notes, selected roadmap status | Planner handoff | `planned` | Yes | `code` |
 | `code` | Prepare implementation or remediation | Active task | `planned`, `implementation-in-progress`, `review-changes-requested` | Guidance, capabilities, task, notes, applicable reviews, repository | Developer | CLI: none; role: scoped implementation, tests/docs, plan, notes | Developer handoff | `implementation-complete` via in-progress | Yes | `review` |
@@ -245,13 +247,20 @@ evidence. Real execution launches at most one adapter process and returns after
 one outcome; it never retries or starts the reported next command.
 
 The built-in `codex` adapter runs non-interactively in the exact project root,
-receives the byte-identical manual role prompt on standard input, uses the
+receives the byte-identical manual role prompt as the leading semantic core on
+standard input followed by a fixed executable supervision appendix, uses the
 `workspace-write` sandbox without bypass flags, ignores Codex user configuration
 while retaining project rules and authentication, and receives an invocation-
 specific output schema containing the authorized correlation. The adapter
 inherits only an allowlist of operational and authentication variables; the
-environment is never retained. Direct Git integration uses the existing
-integration authority instead of manufacturing an agent-only prompt.
+environment is never retained. The appendix directs supervised role agents to
+author and verify candidates without writing Git metadata or invoking final
+completion. The outer executable accepts only a correlated completed candidate
+with role-owned effects, calls the existing completion authority, and creates
+the transition commit. Valid non-completion work is preserved but not committed;
+forbidden effects and adapter-created commits are rejected. Direct Git
+integration uses the existing integration authority instead of manufacturing
+an agent-only prompt.
 
 ### Configuration
 
@@ -294,6 +303,61 @@ selects the most recent attempt; an explicit ID selects only that record.
 Missing pieces are reported as partial rather than regenerated from current
 configuration or workflow state. The ordinary manual command reported by
 `status` remains the fallback.
+
+## `concoct run`
+
+### Purpose and authorization
+
+`concoct run` repeatedly re-detects state and prepares one fresh action through
+the same structured executor until the selected task is locally delivered or a
+gate, intervention, cancellation, unsafe state, failure, no-progress condition,
+or bound stops the invocation. It never invokes `concoct exec` recursively and
+does not infer completion from process output.
+
+Ready state runs only Product Owner judgment. A valid `plan` recommendation is
+stored as a bounded proposal and always stops at `next`; only
+`--approve next` may establish its still-eligible planning context. The shared
+planning operation gives manual and coordinated planning identical eligibility,
+branch, base, and prompt behavior. Planned work stops at `plan` by default.
+`--approve plan` authorizes only the exact pending plan. Archived work likewise
+stops until `--approve integration`, after which integration is local-only.
+
+Each approval names exactly one current gate and one forthcoming action
+occurrence. Missing, wrong, replayed,
+malformed, or evidence-stale approval refuses before the protected operation.
+The private mode-0600 `.concoct/runtime/pending-gate.json` record is bounded,
+atomic, Git-ignored, and consumed once; it is not workflow state or resumable
+run history. If another configured gate protects that same action, the next
+record carries the consumed prerequisite approval. It never carries authority
+to a later remediation or review occurrence, which must stop for a fresh gate
+and attempt correlation.
+
+### Policy, bounds, and isolation
+
+Built-in gates are `plan` and `integration`; `next` is invariant. Strict
+`run.gates` configuration and repeated `--gate` flags may add only
+`development`, `review`, or `archive`. Gates compose by union. `run.max-actions`
+and `run.max-cycles`, plus matching invocation flags, may lower but never raise
+the hard limits of 20 actions and three completed Reviewer actions. Unknown or
+duplicate gates, unknown configuration, raised bounds, and non-positive bounds
+fail before runtime evidence.
+
+Every iteration freshly resolves workflow, policy, configuration, role,
+adapter, prompt, and authorization. Every Reviewer receives an independent
+ephemeral adapter invocation. A changes-requested outcome advances the material
+fingerprint and may continue through remediation; repeating an action with the
+same fingerprint stops. Recoverable execution failure is reported without an
+automatic retry.
+
+### Stop summary and compatibility
+
+The bounded summary lists attempted actions and accepted outcomes, action and
+cycle usage, final workflow state, pending gate or intervention, and an exact
+continuation when one is safe. Cancellation, blocked or decision outcomes,
+invalid and integration-recovery states, failures, and exhausted bounds always
+stop. Manual prompts and completion commands, `exec`, `status`, review
+immutability, archival validation, and manual integration remain available.
+Manual integration retains its configured push behavior; `run` never pushes.
 
 ## `concoct next`
 
@@ -637,8 +701,12 @@ before current-task cleanup.
 
 Plain `concoct archive` remains read-only prompt rendering. The Archivist
 authors the candidate transaction and invokes `concoct archive --complete`.
-Git metadata uses `archive-commit: self`, a non-recursive committed sentinel
-that resolves to the exact archival HEAD; clean retries reuse that commit.
+For Git tasks, the candidate task plan remains byte-identical to accepted
+active evidence. Completion alone applies `git.status: archived` and
+`git.archive-commit: self` to the current task before committing. The
+non-recursive sentinel resolves to the exact archival HEAD; clean retries
+reconstruct and validate that exact current-only metadata transition against
+the immutable parent before reusing the commit.
 
 Source, tests, accepted task history, completed reviews, and unrelated roadmap items are never rewritten by archival.
 

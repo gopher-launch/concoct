@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gopher-launch/concoct/internal/config"
 	"github.com/gopher-launch/concoct/internal/prompt"
+	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
 func TestPrepareDryRunPreservesPromptBytesAndRuntime(t *testing.T) {
@@ -33,6 +35,56 @@ func TestPrepareDryRunPreservesPromptBytesAndRuntime(t *testing.T) {
 	}
 	if !strings.Contains(Describe(prepared), "workspace-write") || !strings.Contains(Describe(prepared), "stdin") {
 		t.Fatal("dry-run omitted safety or prompt posture")
+	}
+}
+
+func TestEverySupervisedRoleReceivesExactManualPromptPlusFixedAppendix(t *testing.T) {
+	t.Run("task-planner", func(t *testing.T) {
+		root := planningPromptFixture(t)
+		prepared, err := Prepare(root, Options{SelectedPlan: "APP-001"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer prepared.Plan.Rollback()
+		manual, err := prepared.Plan.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertSupervisedPrompt(t, prepared.Prompt, manual)
+	})
+
+	for _, test := range []struct {
+		name    string
+		state   string
+		command string
+	}{
+		{name: "developer", state: "planned", command: "code"},
+		{name: "reviewer", state: "implementation-complete", command: "review"},
+		{name: "archivist", state: "approved", command: "archive"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := supervisedPromptFixture(t, test.state)
+			prepared, err := Prepare(root, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			manual, err := prompt.Render(root, prompt.Request{Command: test.command})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertSupervisedPrompt(t, prepared.Prompt, manual)
+		})
+	}
+}
+
+func assertSupervisedPrompt(t *testing.T, got, manual []byte) {
+	t.Helper()
+	want := append(append([]byte(nil), manual...), []byte(supervisionAppendix)...)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("supervised prompt is not the byte-identical manual core plus the fixed appendix: got=%d bytes want=%d bytes", len(got), len(want))
+	}
+	if !bytes.HasPrefix(got, manual) || bytes.Count(got, []byte("## Executable supervision boundary")) != 1 {
+		t.Fatal("supervised prompt core or appendix boundary is ambiguous")
 	}
 }
 
@@ -210,6 +262,163 @@ func TestRepositoryDriftAfterPreparePreventsDirectIntegration(t *testing.T) {
 		t.Fatalf("direct integration started after evidence drift: %v", statErr)
 	}
 }
+
+func TestSupervisedDeveloperCandidateIsValidatedAndCommittedByOuterExecutor(t *testing.T) {
+	root := plannedGitFixture(t)
+	installFakeCodex(t, supervisedOutcomeScript(`
+sed -i '0,/status: planned/s//status: implementation-complete/' .concoct/current/task-plan.md
+printf '\n## Handoff to reviewer\n\n### Implemented\n\nChanged source.\n\n### Verification\n\nChecked.\n\n### Known risks\n\nNone.\n\n### Capability impact\n\nNone.\n\n### Suggested review focus\n\nSource.\n' >> .concoct/current/notes.md
+printf 'implemented\n' > feature.txt
+printf 'run:\n  max-actions: 10\n' > .concoct/config.yaml
+`, "completed", "", ""))
+	before := executionGit(t, root, "rev-parse", "HEAD")
+	result, err := Run(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := executionGit(t, root, "rev-parse", "HEAD")
+	if before == after || executionGit(t, root, "log", "-1", "--format=%s") != "concoct: complete APP-001 implementation" {
+		t.Fatalf("outer completion did not create the Developer transition: before=%s after=%s", before, after)
+	}
+	if status := executionGit(t, root, "status", "--short"); status != "" {
+		t.Fatalf("worktree not clean: %s", status)
+	}
+	retry, err := workflow.CompleteDeveloper(root)
+	if err != nil || !retry.Committed || retry.Commit != after {
+		t.Fatalf("clean completion retry=%#v err=%v", retry, err)
+	}
+	prompt, err := os.ReadFile(filepath.Join(result.RecordPath, "prompt.md"))
+	if err != nil || !strings.Contains(string(prompt), "do not write Git") || !strings.Contains(string(prompt), "# Developer") {
+		t.Fatalf("supervision appendix/core missing: err=%v", err)
+	}
+}
+
+func TestSupervisedPartialWorkIsPreservedButForbiddenEffectsAreRejected(t *testing.T) {
+	t.Run("partial", func(t *testing.T) {
+		root := plannedGitFixture(t)
+		installFakeCodex(t, supervisedOutcomeScript("printf 'partial\\n' > feature.txt", "failed-recoverable", "developer-remediation", "Developer resolves implementation evidence or escalates scope"))
+		before := executionGit(t, root, "rev-parse", "HEAD")
+		result, err := RunAccepted(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
+		if err != nil || !result.Reconciliation.ResultAccepted || result.Reconciliation.RetrySafe {
+			t.Fatalf("result=%#v err=%v", result, err)
+		}
+		if executionGit(t, root, "rev-parse", "HEAD") != before {
+			t.Fatal("partial outcome was committed")
+		}
+		if _, err := os.Stat(filepath.Join(root, "feature.txt")); err != nil {
+			t.Fatal("valid partial work was not preserved")
+		}
+	})
+	t.Run("forbidden", func(t *testing.T) {
+		root := plannedGitFixture(t)
+		installFakeCodex(t, supervisedOutcomeScript("printf '\\nforbidden\\n' >> .concoct/capabilities.md", "failed-recoverable", "developer-remediation", "Developer resolves implementation evidence or escalates scope"))
+		result, err := RunAccepted(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
+		if err == nil || result.Reconciliation.ResultAccepted || !strings.Contains(err.Error(), "forbidden workflow path") {
+			t.Fatalf("result=%#v err=%v", result, err)
+		}
+	})
+	t.Run("forbidden non-Git", func(t *testing.T) {
+		root := plannedNonGitFixture(t)
+		installFakeCodex(t, supervisedOutcomeScript("printf '\\nforbidden\\n' >> .concoct/capabilities.md", "failed-recoverable", "developer-remediation", "Developer resolves implementation evidence or escalates scope"))
+		result, err := RunAccepted(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
+		if err == nil || result.Reconciliation.ResultAccepted || !strings.Contains(err.Error(), "forbidden workflow path") {
+			t.Fatalf("result accepted=%v disposition=%s err=%v", result.Reconciliation.ResultAccepted, result.Reconciliation.InvocationDisposition, err)
+		}
+	})
+	t.Run("adapter commit", func(t *testing.T) {
+		root := plannedGitFixture(t)
+		installFakeCodex(t, supervisedOutcomeScript("printf 'committed\\n' > feature.txt\ngit add feature.txt\ngit commit -qm 'unauthorized adapter commit'", "completed", "", ""))
+		result, err := RunAccepted(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
+		if err == nil || result.Reconciliation.ResultAccepted || !strings.Contains(err.Error(), "created or changed a Git commit") {
+			t.Fatalf("result accepted=%v disposition=%s err=%v", result.Reconciliation.ResultAccepted, result.Reconciliation.InvocationDisposition, err)
+		}
+	})
+	t.Run("outer commit failure", func(t *testing.T) {
+		root := plannedGitFixture(t)
+		realGit, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		installFakeCodex(t, supervisedOutcomeScript(`
+sed -i '0,/status: planned/s//status: implementation-complete/' .concoct/current/task-plan.md
+printf '\n## Handoff to reviewer\n\n### Implemented\n\nChanged.\n\n### Verification\n\nChecked.\n\n### Known risks\n\nNone.\n\n### Capability impact\n\nNone.\n\n### Suggested review focus\n\nSource.\n' >> .concoct/current/notes.md
+printf 'implemented\n' > feature.txt
+`, "completed", "", ""))
+		adapterDir := strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))[0]
+		wrapper := "#!/bin/sh\nif [ \"$1\" = commit ]; then exit 9; fi\nexec " + shellQuote(realGit) + " \"$@\"\n"
+		if err := os.WriteFile(filepath.Join(adapterDir, "git"), []byte(wrapper), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		before := executionGit(t, root, "rev-parse", "HEAD")
+		result, runErr := RunAccepted(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
+		if runErr == nil || result.Reconciliation.ResultAccepted || !strings.Contains(runErr.Error(), "git commit") {
+			t.Fatalf("result accepted=%v disposition=%s err=%v", result.Reconciliation.ResultAccepted, result.Reconciliation.InvocationDisposition, runErr)
+		}
+		if after := executionGit(t, root, "rev-parse", "HEAD"); after != before {
+			t.Fatalf("failed outer commit moved HEAD from %s to %s", before, after)
+		}
+	})
+}
+
+func plannedGitFixture(t *testing.T) string {
+	t.Helper()
+	root := readyFixture(t)
+	write := func(rel, body string) {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".concoct/roadmap.md", "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n## APP-001 — Demo\n- Status: `planned`\n- Depends on: `none`\n")
+	executionGit(t, root, "init", "-q", "-b", "main")
+	executionGit(t, root, "config", "user.email", "test@example.com")
+	executionGit(t, root, "config", "user.name", "Test")
+	executionGit(t, root, "add", "-A")
+	executionGit(t, root, "commit", "-qm", "base")
+	base := executionGit(t, root, "rev-parse", "HEAD")
+	executionGit(t, root, "checkout", "-qb", "concoct/app-001-demo")
+	write(".concoct/roadmap.md", "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n## APP-001 — Demo\n- Status: `active`\n- Depends on: `none`\n")
+	write(".concoct/current/task-plan.md", "---\nid: APP-001\ntitle: Demo\nroadmap-id: APP-001\nstatus: planned\ncreated: 2026-01-01\nupdated: 2026-01-01\ngit:\n  enabled: true\n  trunk: main\n  task-branch: concoct/app-001-demo\n  base: "+base+"\n  status: active\ncapability-impact:\n  type: none\n  rationale: No impact.\n---\n# Task Plan\n")
+	write(".concoct/current/notes.md", "# Notes\n\nPlanned.\n")
+	executionGit(t, root, "add", "-A")
+	executionGit(t, root, "commit", "-qm", "concoct: plan APP-001")
+	return root
+}
+
+func plannedNonGitFixture(t *testing.T) string {
+	t.Helper()
+	root := readyFixture(t)
+	if err := os.WriteFile(filepath.Join(root, ".concoct", "roadmap.md"), []byte("---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n## APP-001 — Demo\n- Status: `active`\n- Depends on: `none`\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := "---\nid: APP-001\ntitle: Demo\nroadmap-id: APP-001\nstatus: planned\ncreated: 2026-01-01\nupdated: 2026-01-01\ncapability-impact:\n  type: none\n  rationale: No impact.\n---\n# Task Plan\n"
+	if err := os.WriteFile(filepath.Join(root, ".concoct", "current", "task-plan.md"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".concoct", "current", "notes.md"), []byte("# Notes\n\nPlanned.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func supervisedOutcomeScript(mutations, class, intervention, next string) string {
+	return `schema=""
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-schema) schema="$2"; shift 2 ;;
+    --output-last-message) output="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat > /dev/null
+value() {
+  awk -v key="\"$1\"" '$0 ~ key { found=1 } found && /"const":/ { line=$0; sub(/^.*"const": "/, "", line); sub(/".*$/, "", line); print line; exit }' "$schema"
+}
+` + mutations + `
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"%s","summary":"candidate","artifacts":[],"intervention":{"kind":"%s","next":"%s"},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" ` + shellQuote(class) + ` ` + shellQuote(intervention) + ` ` + shellQuote(next) + ` > "$output"`
+}
+
+func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
 
 func TestDirectIntegrationCancellationAndTimeoutCloseInspectably(t *testing.T) {
 	for _, test := range []struct {
@@ -409,6 +618,62 @@ func readyFixture(t *testing.T) string {
 	write(".concoct/capabilities.md", "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Capabilities\n")
 	write(".concoct/current/task-plan.md", "# task-plan.md\n")
 	write(".concoct/current/notes.md", "# notes.md\n_Add decisions here._\n_Record meaningful verification results here._\n")
+	return root
+}
+
+func planningPromptFixture(t *testing.T) string {
+	t.Helper()
+	root := readyFixture(t)
+	roadmap := "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n\n## APP-001 — Demo\n\n- Status: `planned`\n- Depends on: `none`\n"
+	if err := os.WriteFile(filepath.Join(root, ".concoct", "roadmap.md"), []byte(roadmap), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	executionGit(t, root, "init", "-q", "-b", "main")
+	executionGit(t, root, "config", "user.email", "test@example.com")
+	executionGit(t, root, "config", "user.name", "Test")
+	executionGit(t, root, "add", "-A")
+	executionGit(t, root, "commit", "-qm", "base")
+	return root
+}
+
+func supervisedPromptFixture(t *testing.T, state string) string {
+	t.Helper()
+	root := plannedGitFixture(t)
+	if state == "planned" {
+		return root
+	}
+	planPath := filepath.Join(root, ".concoct", "current", "task-plan.md")
+	plan, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan = []byte(strings.Replace(string(plan), "status: planned", "status: implementation-complete", 1))
+	if err := os.WriteFile(planPath, plan, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	notesPath := filepath.Join(root, ".concoct", "current", "notes.md")
+	notes, err := os.ReadFile(notesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoff := "\n## Handoff to reviewer\n\n### Implemented\n\nDemo.\n\n### Verification\n\nPassed.\n\n### Known risks\n\nNone.\n\n### Capability impact\n\nNone.\n\n### Suggested review focus\n\nDemo.\n"
+	if err := os.WriteFile(notesPath, append(notes, []byte(handoff)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	executionGit(t, root, "add", "-A")
+	executionGit(t, root, "commit", "-qm", "concoct: complete APP-001 implementation")
+	if state == "implementation-complete" {
+		return root
+	}
+	if state != "approved" {
+		t.Fatalf("unsupported supervised prompt state %q", state)
+	}
+	review := "---\ntask-id: APP-001\nreview: 1\nstatus: approved\ncreated: 2026-01-01\npersona: reviewer\n---\n# Review 01\n\n<!-- Replace status: reserved with exactly one supported outcome and complete the review. -->\n\n## Outcome\n\n`approved`\n"
+	if err := os.WriteFile(filepath.Join(root, ".concoct", "current", "review-01.md"), []byte(review), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	executionGit(t, root, "add", "-A")
+	executionGit(t, root, "commit", "-qm", "concoct: review APP-001 approved")
 	return root
 }
 

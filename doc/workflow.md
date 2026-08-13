@@ -10,10 +10,13 @@ characters, then prefixes `concoct/`. Planning refuses dirty, detached,
 operation-in-progress, and branch-collision inputs.
 
 The Archivist ends at `archived`, without delivery or current-state cleanup.
-After the Archivist authors the archive, summary, capability, roadmap, and
-current metadata, `concoct archive --complete` validates them as one boundary.
-The non-recursive `archive-commit: self` value is valid only in a committed
-archived task and resolves to that exact checked-out HEAD.
+The authored archive keeps `task-plan.md` byte-identical to the accepted active
+task and leaves current task metadata unchanged. After the Archivist authors
+the archive, summary, capability, and roadmap evidence, `concoct archive
+--complete` validates the candidate, applies `git.status: archived` and
+`git.archive-commit: self` to current task metadata, and commits the transition
+as one boundary. The non-recursive `self` value is valid only in that committed
+archived task and resolves to the exact checked-out HEAD.
 `concoct integrate` squash-integrates the recorded archive commit into the
 recorded trunk. Recovery evidence under `.git/concoct/integrations/` supports
 human-resolved `--continue` and exact `--abort`; it is removed only after final
@@ -82,10 +85,14 @@ its exact prompt and resolved profile, and the launch safety posture.
 loops into the next role.
 
 The executor binds the action to workflow, policy, Git, configuration, current
-task/review, and referenced archive evidence. The adapter receives the same
-prompt bytes as the manual command and a schema-bound correlation. Existing
-completion commands remain authoritative, and actual post-run state outranks
-the adapter's claim. Private bounded records under
+task/review, and referenced archive evidence. The adapter receives the exact
+manual role prompt as its semantic core, followed by a fixed supervision
+appendix, plus a schema-bound correlation. For Planner, Developer, Reviewer,
+and Archivist completion, the adapter authors and verifies the candidate while
+the outer executable validates role-owned effects, invokes the existing
+completion authority, and creates any Git transition commit. Existing manual
+completion commands remain available, and actual post-run state outranks the
+adapter's claim. Private bounded records under
 `.concoct/runtime/invocations/` support `concoct exec inspect`; they are ignored
 by Git and are not workflow artifacts.
 
@@ -93,6 +100,28 @@ Each role has reusable executable-owned guidance. A task prompt selects and
 embeds the appropriate persona after composing the attributed protocol, policy,
 repository guidance, and active task context described in
 `instruction-layers.md`.
+
+## Bounded lifecycle runs
+
+`concoct run` composes the same one-shot action boundary into a bounded loop.
+It re-detects workflow, Git, policy, configuration, role, prompt, and adapter
+before every action. Ready state can execute only the Product Owner decision;
+a valid plan proposal is stored privately and stops at the invariant `next`
+gate. Plan acceptance and local integration are gated by default, while project
+configuration and invocation flags may add finite gates or lower the hard
+20-action and three-review-cycle bounds.
+
+Only the current gate is retained under
+`.concoct/runtime/pending-gate.json`. It is mode `0600`, bounded, atomic,
+Git-ignored, one-use, and tied to the exact evidence fingerprint. It is not
+workflow truth, action history, or crash-recovery evidence. When multiple gates
+protect the same forthcoming action, the record may carry the already-consumed
+prerequisite gate so a later approval cannot erase or repeat it. Every
+recurring action occurrence still requires a fresh gate and attempt. Every Reviewer uses
+a fresh adapter invocation. A changes-requested review is productive progress;
+failures are not retried automatically. Integration started by `run` never
+pushes a remote. Manual prompts, `exec`, completion commands, and manual
+integration remain available unchanged.
 
 ## Durable files
 

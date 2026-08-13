@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gopher-launch/concoct/internal/buildinfo"
@@ -15,8 +16,10 @@ import (
 	"github.com/gopher-launch/concoct/internal/execution"
 	"github.com/gopher-launch/concoct/internal/gitrepo"
 	"github.com/gopher-launch/concoct/internal/integration"
+	"github.com/gopher-launch/concoct/internal/planning"
 	"github.com/gopher-launch/concoct/internal/project"
 	"github.com/gopher-launch/concoct/internal/prompt"
+	"github.com/gopher-launch/concoct/internal/runloop"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
@@ -28,6 +31,8 @@ const usage = `Usage:
   concoct status
   concoct exec [--dry-run] [--adapter <name>] [--model <model>] [--reasoning <level>] [--timeout <duration>]
   concoct exec inspect [<invocation-id>]
+  concoct run [--approve <gate>] [--gate <gate>] [--max-actions <count>] [--max-cycles <count>]
+              [--adapter <name>] [--model <model>] [--reasoning <level>] [--timeout <duration>]
   concoct next [--output <path>]
   concoct roadmap [--output <path>]
   concoct plan <roadmap-id> [--output <path>]
@@ -118,6 +123,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return nil
 	case "exec":
 		return runExec(args[1:], stdout, stderr)
+	case "run":
+		return runLifecycle(args[1:], stdout, stderr)
 	case "next", "roadmap", "plan", "code", "review", "archive":
 		if args[0] == "archive" && len(args) >= 2 && args[1] == "--complete" {
 			return runArchiveTransition(args[2:], stdout, stderr)
@@ -157,6 +164,66 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprint(stderr, usage)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runLifecycle(args []string, stdout, stderr io.Writer) error {
+	base, err := callerDir()
+	if err != nil {
+		return err
+	}
+	root, err := project.Discover(base)
+	if err != nil {
+		return err
+	}
+	options := runloop.Options{Input: os.Stdin, Progress: stderr}
+	seen := map[string]bool{}
+	for len(args) > 0 {
+		flag := args[0]
+		if len(args) < 2 || strings.TrimSpace(args[1]) == "" {
+			return fmt.Errorf("%s requires one non-empty value", flag)
+		}
+		value := strings.TrimSpace(args[1])
+		switch flag {
+		case "--gate":
+			options.Policy.Gates = append(options.Policy.Gates, value)
+		case "--approve", "--max-actions", "--max-cycles", "--adapter", "--model", "--reasoning", "--timeout":
+			if seen[flag] {
+				return fmt.Errorf("%s may be specified only once", flag)
+			}
+			seen[flag] = true
+			switch flag {
+			case "--approve":
+				options.Approve = value
+			case "--max-actions", "--max-cycles":
+				n, parseErr := strconv.Atoi(value)
+				if parseErr != nil || n < 1 {
+					return fmt.Errorf("%s requires a positive integer", flag)
+				}
+				if flag == "--max-actions" {
+					options.Policy.MaxActions = n
+				} else {
+					options.Policy.MaxCycles = n
+				}
+			case "--adapter":
+				options.Execution.Adapter = value
+			case "--model":
+				options.Execution.Model = value
+			case "--reasoning":
+				options.Execution.Reasoning = value
+			case "--timeout":
+				options.Execution.Timeout = value
+			}
+		default:
+			fmt.Fprint(stderr, usage)
+			return fmt.Errorf("unknown run option %q", flag)
+		}
+		args = args[2:]
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	summary, runErr := runloop.Run(ctx, root, options)
+	fmt.Fprint(stdout, summary.String())
+	return runErr
 }
 
 func runExec(args []string, stdout, stderr io.Writer) error {
@@ -353,12 +420,8 @@ func runPrompt(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	request := prompt.Request{Command: command, RoadmapID: roadmapID}
-	var repo *gitrepo.Repository
-	var start gitrepo.TaskStart
+	var session *planning.Session
 	if command == "plan" {
-		if err := workflow.ValidatePlanItem(root, roadmapID); err != nil {
-			return err
-		}
 		if output != "" {
 			target := output
 			if !filepath.IsAbs(target) {
@@ -368,7 +431,7 @@ func runPrompt(args []string, stdout, stderr io.Writer) error {
 				return fmt.Errorf("create output %s without overwriting: file exists", target)
 			}
 		}
-		if candidate, ok, openErr := gitrepo.Open(root); openErr != nil {
+		if _, ok, openErr := gitrepo.Open(root); openErr != nil {
 			return openErr
 		} else if ok {
 			if output != "" {
@@ -381,25 +444,24 @@ func runPrompt(args []string, stdout, stderr io.Writer) error {
 					return fmt.Errorf("Git-backed plan output must be outside the project so the new task branch remains clean")
 				}
 			}
-			title, titleErr := workflow.PlanItemTitle(root, roadmapID)
-			if titleErr != nil {
-				return titleErr
-			}
-			start, err = candidate.CreateTaskBranch(roadmapID, title)
-			if err != nil {
-				return err
-			}
-			repo = candidate
-			request.GitTrunk, request.GitTaskBranch, request.GitBase = start.Trunk, start.Branch, start.Base
 		}
+		session, err = planning.Start(root, roadmapID)
+		if err != nil {
+			return err
+		}
+		request = session.Request
 	}
 	rollback := func() {
-		if repo != nil {
-			_ = repo.Checkout(start.Trunk)
-			_ = repo.DeleteBranch(start.Branch)
+		if session != nil {
+			_ = session.Rollback()
 		}
 	}
-	content, err := prompt.Render(root, request)
+	var content []byte
+	if session != nil {
+		content, err = session.Render()
+	} else {
+		content, err = prompt.Render(root, request)
+	}
 	if err != nil {
 		rollback()
 		return err

@@ -28,6 +28,12 @@ type recovery struct {
 	Phase              string `yaml:"phase"`
 }
 
+type Options struct {
+	// LocalOnly suppresses every remote push path while retaining the existing
+	// integration transaction, recovery, validation, and cleanup behavior.
+	LocalOnly bool
+}
+
 // Run performs an integration transaction. Input is used only for the default
 // push confirmation when the recorded trunk has a matching upstream.
 func Run(root, mode string, input io.Reader, output io.Writer) error {
@@ -38,6 +44,10 @@ func Run(root, mode string, input io.Reader, output io.Writer) error {
 // interactive push confirmation observe ctx. Recovery evidence remains the
 // authority for any transaction interrupted after mutation begins.
 func RunContext(ctx context.Context, root, mode string, input io.Reader, output io.Writer) error {
+	return RunContextOptions(ctx, root, mode, input, output, Options{})
+}
+
+func RunContextOptions(ctx context.Context, root, mode string, input io.Reader, output io.Writer, options Options) error {
 	if err := contextError(ctx); err != nil {
 		return err
 	}
@@ -56,7 +66,7 @@ func RunContext(ctx context.Context, root, mode string, input io.Reader, output 
 		if mode == "abort" {
 			return abort(g, r, path)
 		}
-		return resume(ctx, g, r, path, input, output)
+		return resume(ctx, g, r, path, input, output, options)
 	}
 	if mode != "" {
 		return fmt.Errorf("unknown integration mode %q", mode)
@@ -76,10 +86,10 @@ func RunContext(ctx context.Context, root, mode string, input io.Reader, output 
 		return fmt.Errorf("integration requires enabled git metadata with status archived and archive-commit")
 	}
 	path := filepath.Join(root, ".git", "concoct", "integrations", c.ID+".yaml")
-	return start(ctx, g, c, path, input, output)
+	return start(ctx, g, c, path, input, output, options)
 }
 
-func start(ctx context.Context, g *gitrepo.Repository, c workflow.GitContext, path string, input io.Reader, output io.Writer) error {
+func start(ctx context.Context, g *gitrepo.Repository, c workflow.GitContext, path string, input io.Reader, output io.Writer, options Options) error {
 	if err := contextError(ctx); err != nil {
 		return err
 	}
@@ -128,10 +138,10 @@ func start(ctx context.Context, g *gitrepo.Repository, c workflow.GitContext, pa
 	if err := writeRecovery(path, r, false); err != nil {
 		return err
 	}
-	return finish(ctx, g, &r, path, input, output)
+	return finish(ctx, g, &r, path, input, output, options)
 }
 
-func resume(ctx context.Context, g *gitrepo.Repository, r recovery, path string, input io.Reader, output io.Writer) error {
+func resume(ctx context.Context, g *gitrepo.Repository, r recovery, path string, input io.Reader, output io.Writer, options Options) error {
 	if err := contextError(ctx); err != nil {
 		return err
 	}
@@ -193,10 +203,10 @@ func resume(ctx context.Context, g *gitrepo.Repository, r recovery, path string,
 			return err
 		}
 	}
-	return finish(ctx, g, &r, path, input, output)
+	return finish(ctx, g, &r, path, input, output, options)
 }
 
-func finish(ctx context.Context, g *gitrepo.Repository, r *recovery, path string, input io.Reader, output io.Writer) error {
+func finish(ctx context.Context, g *gitrepo.Repository, r *recovery, path string, input io.Reader, output io.Writer, options Options) error {
 	if err := contextError(ctx); err != nil {
 		return err
 	}
@@ -267,8 +277,10 @@ func finish(ctx context.Context, g *gitrepo.Repository, r *recovery, path string
 			return err
 		}
 	}
-	if err := maybePush(ctx, g, r.Trunk, input, output); err != nil {
-		return err
+	if !options.LocalOnly {
+		if err := maybePush(ctx, g, r.Trunk, input, output); err != nil {
+			return err
+		}
 	}
 	if err := contextError(ctx); err != nil {
 		return err

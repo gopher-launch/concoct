@@ -240,6 +240,10 @@ func (r *Repository) ResetHard(commit string) error {
 	_, err := r.run("reset", "--hard", commit)
 	return err
 }
+func (r *Repository) ResetMixed(commit string) error {
+	_, err := r.run("reset", "--mixed", commit)
+	return err
+}
 func (r *Repository) HasUnmerged() (bool, error) {
 	s, err := r.run("diff", "--name-only", "--diff-filter=U")
 	return s != "", err

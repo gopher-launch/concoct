@@ -25,8 +25,8 @@ func TestInitializeEndToEnd(t *testing.T) {
 		}
 	}
 	ignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
-	if err != nil || !strings.Contains(string(ignore), ".concoct/runtime/invocations/") {
-		t.Fatalf("runtime invocation path is not ignored: %v: %s", err, ignore)
+	if err != nil || !strings.Contains(string(ignore), ".concoct/runtime/invocations/") || !strings.Contains(string(ignore), ".concoct/runtime/pending-gate.json") {
+		t.Fatalf("private runtime paths are not ignored: %v: %s", err, ignore)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".concoct", "runtime")); !os.IsNotExist(err) {
 		t.Fatalf("init created runtime evidence: %v", err)

@@ -679,7 +679,9 @@ explicit bug provenance.
 
 ## CON-033 — Orchestrate the task lifecycle with configurable gates
 
-- Status: `planned`
+- Status: `active`
+- Archive: `.concoct/archive/2026-08-12-CON-033-orchestrate-the-task-lifecycle-with-configurable-gates/summary.md`
+- Delivery: `pending-integration`
 - Priority: `high`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-009, CAP-013

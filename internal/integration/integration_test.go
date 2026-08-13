@@ -248,6 +248,30 @@ func TestAutoPushConfiguration(t *testing.T) {
 	}
 }
 
+func TestLocalOnlyIntegrationSuppressesConfiguredAutoPush(t *testing.T) {
+	root, _, _ := setupArchived(t, false)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	command(t, "", "git", "init", "--bare", "-q", remote)
+	git(t, root, "remote", "add", "origin", remote)
+	git(t, root, "checkout", "trunk")
+	write(t, root, ".concoct/config.yaml", "git:\n  auto-push: true\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "enable auto push")
+	git(t, root, "push", "-qu", "origin", "trunk")
+	remoteBefore := command(t, "", "git", "--git-dir", remote, "rev-parse", "refs/heads/trunk")
+	git(t, root, "checkout", "concoct/app-001-demo")
+	if err := RunContextOptions(context.Background(), root, "", &bytes.Buffer{}, &bytes.Buffer{}, Options{LocalOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	remoteAfter := command(t, "", "git", "--git-dir", remote, "rev-parse", "refs/heads/trunk")
+	if remoteAfter != remoteBefore {
+		t.Fatal("local-only integration pushed the remote trunk")
+	}
+	if local := git(t, root, "rev-parse", "trunk"); local == remoteAfter {
+		t.Fatal("local-only integration did not advance the local trunk")
+	}
+}
+
 func TestContinueAfterIntegrationCommitInterruption(t *testing.T) {
 	root, road, pre := setupArchived(t, false)
 	archive := git(t, root, "rev-parse", "concoct/app-001-demo~1")

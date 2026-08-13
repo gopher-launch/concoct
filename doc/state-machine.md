@@ -39,6 +39,14 @@ State detection reads the smallest set of artifacts needed to establish a phase 
 - `.concoct/current/review-NN.md` files record sequential review attempts. Each completed review has one outcome: `approved`, `changes-requested`, or `blocked`.
 - `.concoct/archive/*/` records completed tasks. Archive contents support validation and history reporting but do not make an active task current.
 
+Private records under `.concoct/runtime/` are never canonical state evidence.
+Invocation records retain bounded one-shot diagnostics. A single pending-gate
+record can carry one-use approval context between `concoct run` invocations;
+workflow or repository drift invalidates it instead of changing detected state.
+When two configured gates protect the same immediate action, that record may
+also carry the already-consumed prerequisite gate. It cannot authorize a later
+occurrence of the same action kind.
+
 Empty tracked placeholders do not count as active artifacts. A parser must distinguish a documented placeholder from a populated artifact and must reject partially populated task or review files as malformed.
 
 ## Normative states
@@ -190,6 +198,10 @@ Resolving a blocker is an explicit handoff under the responsible role. Product O
 - `exec --dry-run` never starts a process or creates workflow, Git, or runtime
   evidence. Real `exec` creates ignored local diagnostics, but those records do
   not affect detected state.
+- `run` may create, consume, or invalidate a private pending-gate record while
+  leaving canonical state unchanged at an approval stop. Every executed action
+  still advances only through its existing role completion or integration
+  authority. Run-driven integration suppresses remote push.
 - Successful prompt rendering by `next`, `roadmap`, `plan`, `code`, `review`, or `archive` never changes workflow state by itself.
 - `code --complete` validates Developer-owned output as a coherent whole before
   committing it, including a Git-backed freshness comparison for the final
