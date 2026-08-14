@@ -368,13 +368,13 @@ byte stream.
 
 Explicitly observed invocations included:
 
-| Invocation | Tokens |
-|---|---:|
-| Initial blocked Product Owner run | 29,513 |
-| Successful Product Owner selection | 29,627 |
-| Review-remediation Developer | 76,142 |
-| Archivist | 45,838 |
-| Known subtotal | 181,120 |
+| Invocation                         |  Tokens |
+| ---------------------------------- | ------: |
+| Initial blocked Product Owner run  |  29,513 |
+| Successful Product Owner selection |  29,627 |
+| Review-remediation Developer       |  76,142 |
+| Archivist                          |  45,838 |
+| Known subtotal                     | 181,120 |
 
 This subtotal excludes planning, initial development, both reviews, recovery
 development, other lifecycle invocations, and human/assistant diagnosis. The complete
@@ -466,3 +466,116 @@ The findings should later be consolidated into a small set of coherent items:
 4. Harden orchestration contracts, diagnostics, accounting, fixtures, and reporting.
 5. Improve structured progress rendering and retained execution diagnostics, either
    within the cost-instrumentation work or as a separately justified item.
+
+# Post CON-037 Findings
+
+## Quantified context amplification
+
+Replace the earlier token hypotheses with the measured CON-037 evidence:
+
+- 2,575,638 total input tokens across Developer, Reviewer, and Archivist.
+- 2,368,768 cached input tokens—approximately 92%.
+- Only 35,870 rendered prompt bytes.
+- The 6.5 KB Developer prompt amplified into 1,742,734 processed input tokens.
+- Activity count correlated much more strongly with consumption than initial prompt size.
+
+This changes context amplification from a hypothesis into an observed critical defect.
+
+## Invocation records lack semantic activity detail
+
+CON-037 records aggregate usage and generic events, but not:
+
+- semantic item types;
+- tool commands;
+- repeated file reads;
+- command-output sizes;
+- per-exchange usage;
+- compaction events.
+
+This is a specific observability gap now addressed by CON-038.
+
+## Oversized narrow-role personas
+
+The measured prompt composition showed:
+
+- Reviewer persona: 9,279 bytes, 71% of its prompt.
+- Archivist persona: 11,667 bytes, 72% of its prompt.
+- Developer persona: only 3,353 bytes.
+
+The narrowest, most deterministic role has the largest persona. That is a concrete prompt-design defect, not merely a general suspicion about instruction size.
+
+## Archivist invented an unsupported roadmap field
+
+For CON-037, the Archivist correctly created the archive path but added:
+
+```markdown
+- Delivery: `pending-integration` on the recorded task branch
+```
+
+This is distinct from the CON-036 archive-reference syntax problem. It demonstrates that the agent is being asked to perform schema-defined mutations that should be executable-owned.
+
+## Finalization rejection wastes an otherwise usable invocation
+
+The Archivist consumed 306,372 input tokens, generated substantially correct artifacts, and then failed finalization over one unsupported field. Concoct reported:
+
+```text
+Retry safe from original evidence: false
+```
+
+The candidate was actually repairable manually. This exposes a mismatch between:
+
+- candidate reusability;
+- retry classification;
+- supported recovery;
+- actual recoverability.
+
+The document should explicitly record that the system can preserve work physically while still providing no supported way to recover it.
+
+## Validation is protective but not sufficiently diagnostic
+
+The error:
+
+```text
+roadmap changed content outside selected item status and Archive fields
+```
+
+correctly protected the ledger, but did not identify:
+
+- the offending `Delivery` field;
+- its location;
+- the allowed fields;
+- whether removing it was safe;
+- whether another agent invocation was necessary.
+
+This strengthens the existing conclusion that recovery requires expert artifact knowledge.
+
+## Post-integration reporting remains misleading
+
+After successful CON-037 integration, Concoct returned to ready, but reported completed-task policies as blocked and integration as not applicable:
+
+```text
+Policy task-planning: blocked
+Policy development: blocked
+Policy independent-review: blocked
+Policy integration: not-applicable
+Next: concoct next
+```
+
+This is related to—but different from—the existing stale branch snapshot. The report evaluates the new empty ready state without clearly reporting that CON-037 completed successfully. It should distinguish completed-transition results from current-state eligibility.
+
+## Structured progress improved, but remains semantically weak
+
+The new compact stream avoids flooding the terminal, which is progress. However:
+
+```text
+turn.started
+item.started
+item.started
+...
+```
+
+does not tell the operator whether Codex is reading, editing, testing, retrying, or stuck. The findings should update the progress issue from “raw output flood” to “compact but non-semantic progress.”
+
+## Codex model-cache errors are resolved environmental noise
+
+Repeated `base_instructions` model-cache errors were caused by incompatible Codex CLI and VS Code extension versions sharing the cache. Updating the CLI resolved them. No evidence connects the errors to Concoct’s measured inference usage.
