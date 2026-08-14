@@ -63,7 +63,7 @@ are reconciled. Their identifiers remain reserved and must not be reused.
 
 Reserved historical identifiers: `CON-003`, `CON-004`, `CON-005`, `CON-006`,
 `CON-007`, `CON-008`, `CON-009`, `CON-015`, `CON-018`, `CON-028`, `CON-029`,
-`CON-010`, `CON-030`, `CON-031`, `CON-032`, `CON-035`.
+`CON-010`, `CON-030`, `CON-031`, `CON-032`, `CON-035`, `CON-036`, `CON-037`.
 Accepted delivery evidence is preserved by the corresponding capability records
 and archives; CON-004 was cancelled as redundant and has no delivery archive.
 
@@ -725,231 +725,255 @@ requires intervention.
 
 ---
 
-## CON-037 — Measure and reduce agent invocation cost
+## CON-038 — Reduce agent context amplification and bound invocation cost
 
-- Status: `delivered`
+- Status: `planned`
 - Priority: `critical`
-- Depends on: None
-- Capability prerequisites: CAP-005, CAP-006, CAP-010, CAP-013, CAP-014
-- Capability impact: makes agent execution cost observable and establishes evidence-backed reductions required for practical daily orchestration
-- Archive: `.concoct/archive/2026-08-14-CON-037-measure-and-reduce-agent-invocation-cost/` — pending-integration on the recorded task branch
+- Depends on: None.
+- Capability prerequisites: CAP-005, CAP-013, CAP-014, CAP-015
+- Capability impact: reduces cumulative agent context processing, bounds runaway invocation cost, and preserves recoverable evidence when an execution exceeds its budget
 
 ### Outcome
 
-Measure the complete prompt composition and reported token usage of every supported
-agent invocation, establish reproducible per-role baselines, and deliver verified
-initial reductions without weakening workflow authority, role independence, safety,
-or structured-result validation.
+Make Concoct practical for routine use by materially reducing the repeated model and
+tool interactions that amplify a small rendered prompt into hundreds of thousands or
+millions of processed input tokens, while preserving workflow correctness, role
+authority, review independence, safety, and structured-result validation.
 
 ### Rationale
 
-The first real `concoct run` completed an end-to-end lifecycle but consumed an
-unsustainable amount of the user's ChatGPT Plus usage allocation. Four explicitly
-observed invocations alone reported 181,120 tokens, including a 76,142-token Developer
-remediation and a 45,838-token Archivist invocation. The complete lifecycle consumed
-materially more.
+CON-037 made agent invocation cost observable and established that rendered prompt
+size alone does not explain Concoct's usage. Three measured CON-037 lifecycle
+invocations produced the following results:
 
-At the current rate, more than half of the available usage allocation can be consumed
-in less than two days. This prevents Concoct from serving as the intended daily
-execution engine.
+| Role      | Prompt bytes |  Events | Reported items |  Input tokens | Cached input tokens | Output tokens | Result              |
+| --------- | -----------: | ------: | -------------: | ------------: | ------------------: | ------------: | ------------------- |
+| Developer |        6,546 |      77 |             34 |     1,742,734 |           1,637,888 |        14,566 | accepted            |
+| Reviewer  |       13,090 |      41 |             17 |       526,532 |             469,760 |         4,463 | accepted            |
+| Archivist |       16,234 |      24 |              8 |       306,372 |             261,120 |         4,742 | finalization failed |
+| **Total** |   **35,870** | **142** |         **59** | **2,575,638** |       **2,368,768** |    **23,771** | —                   |
 
-Likely contributors include repeated executable-owned instructions, broad roadmap and
-capability context, duplicated instruction layers, repository rediscovery, large tool
-outputs, uniformly expensive execution profiles, and repeated agent invocations caused
-by failed mechanical transitions. These are hypotheses rather than measurements.
-Optimization must begin with reliable attribution, then make reductions against fixed
-baselines while preserving behaviour.
+The smallest rendered prompt produced the most expensive invocation. Approximately
+92 percent of all reported input was cached input, strongly indicating that an
+expanding conversation was repeatedly processed as agents discovered files, invoked
+tools, inspected results, edited artifacts, ran checks, and prepared handoffs.
 
-The complete originating evidence is recorded in:
+The Archivist additionally consumed 306,372 input tokens before its otherwise usable
+candidate was rejected for inventing an unsupported roadmap field. This demonstrates
+that invocation amplification and non-recoverable finalization failures combine to
+make current execution cost operationally unacceptable.
 
-```text
-.concoct/reports/con-033-first-run-findings.md
-```
+The retained CON-037 records expose aggregate usage and abbreviated progress, but not
+the semantic item types, tool arguments, repeated file reads, command-output sizes,
+per-exchange usage growth, or compaction behaviour required to attribute the
+amplification precisely. CON-038 must close that observability gap and use the result
+to implement verified reductions. It must not stop after adding further measurement.
 
 ### Requirements
 
-#### Capture authoritative invocation usage
+#### Attribute activity and context growth
 
-- Run the Codex adapter with machine-readable execution events and retain the final
-  structured result independently from progress and diagnostic output.
-- Capture the usage reported by Codex for every completed or failed turn, including
-  input tokens, cached input tokens, output tokens, reasoning-output tokens when
-  supplied, and any total reported by the installed adapter version.
-- Treat adapter-reported usage as attribution evidence rather than reconstructing an
-  incompatible total when fields are unavailable or change across versions.
-- Record the acting role, action, adapter, model, reasoning effort, start time,
-  duration, disposition, retry or predecessor relationship, and invocation identity
-  alongside usage.
-- Preserve partial usage and execution evidence when an invocation fails, times out,
-  or is cancelled and the adapter emitted it before termination.
-- Do not confuse cached input with free input. Report it separately so both gross
-  context size and effective cache reuse remain visible.
+- Extend the Codex adapter's structured-event normalization to classify model
+  exchanges and agent activities using stable adapter-level categories, including
+  reasoning or message items, command execution, file reads, searches, edits, test
+  runs, compaction, and terminal results when the installed adapter exposes them.
+- Record counts by normalized activity type rather than reporting only generic
+  `item.started` events.
+- Record bounded metadata sufficient to identify repeated file reads, repeated
+  searches, repeated commands, and repeated checks without retaining unrestricted
+  repository content or secrets.
+- Record command-output byte counts, truncation, exit status, and duration without
+  copying unbounded command output into the cost report.
+- Capture cumulative or incremental usage at each model exchange when Codex exposes
+  authoritative usage snapshots. Clearly report when only terminal aggregate usage
+  is available.
+- Detect and report context-compaction events when exposed by the adapter.
+- Correlate activity, elapsed time, context growth, and final disposition for one
+  invocation without treating an `item.started` event as necessarily equivalent to a
+  model turn.
+- Keep adapter-specific event interpretation outside the workflow engine.
+- Make detailed raw event retention optional, bounded, local, ignored by Git, and
+  disabled or summarized by default when it could retain repository content.
 
-#### Attribute prompt composition
+#### Establish controlled amplification benchmarks
 
-- Measure the exact rendered prompt byte count supplied to the adapter.
-- Attribute prompt bytes to stable semantic components, including executable protocol,
-  persona, handoff, supervision appendix, project guidance, policy, roadmap context,
-  capability context, task plan, notes, reviews, archive evidence, and other selected
-  task inputs.
-- Define component boundaries during prompt composition rather than attempting to
-  reverse-engineer them from the final concatenated prompt.
-- Record whether each component was included in full, selected, summarized, or absent.
-- Detect duplicated byte-identical or normalized-identical instruction material and
-  report its contribution without silently removing it.
-- Never retain secrets, unrestricted environment content, authentication material, or
-  otherwise prohibited data merely for cost attribution.
+- Use the retained CON-037 Developer, Reviewer, and Archivist measurements as the
+  originating production evidence.
+- Add reproducible controlled benchmarks for at least one development action, one
+  independent review, and one archival action.
+- Hold repository state, task evidence, adapter version, model, reasoning effort,
+  safety mode, completion schema, and expected result constant within each
+  before-and-after comparison.
+- Report rendered prompt bytes, activity counts, model exchanges when observable,
+  command-output bytes, duration, input tokens, cached input tokens, uncached input
+  tokens, output tokens, reasoning-output tokens, disposition, and finalization
+  acceptance.
+- Distinguish exact deterministic measurements from externally variable model usage
+  and cache behaviour.
+- Do not require ordinary automated tests to invoke a billable live model. Live
+  benchmark collection must be an explicit integration or operator action.
 
-#### Provide useful inspection and summaries
+#### Reduce model and tool round trips
 
-- Extend retained invocation inspection to show usage totals, prompt size and
-  composition, execution profile, duration, outcome, and comparison with a prior or
-  baseline invocation when available.
-- Include a concise per-action usage line in `concoct exec` and `concoct run` summaries.
-- Include aggregate run totals by role and action while avoiding double-counting the
-  same adapter-reported usage event.
-- Distinguish agent cost from mechanical Concoct actions that invoke no model.
-- Make retained measurement data bounded by existing invocation retention policy and
-  keep it local and ignored by Git unless deliberately exported.
-- Provide an explicit diagnostic/export view suitable for comparing controlled
-  baselines without exposing full prompts or sensitive repository content by default.
+- Revise role instructions so each agent performs one deliberate initial evidence
+  discovery pass before beginning implementation, review, or archival work.
+- Direct agents to batch related file discovery and reads when doing so remains
+  understandable and produces bounded output.
+- Direct agents not to reread unchanged evidence, rerun successful checks, or repeat
+  repository discovery without recording a concrete reason.
+- Prefer focused checks during iteration and run broader required validation once at
+  the completion boundary unless failure evidence requires another run.
+- Bound command output at the command source where practical rather than allowing
+  large output to enter the model context and truncating it only for terminal display.
+- Prefer summaries, counts, targeted matches, and selected line ranges over complete
+  dumps when full content is not required.
+- Direct agents to stop exploration and produce the required structured handoff as
+  soon as the role's completion contract is satisfied.
+- Remove instructions that encourage redundant repository-wide rediscovery already
+  supplied deterministically by Concoct.
+- Do not reduce interaction count by omitting required evidence, weakening validation,
+  concealing failed checks, or preventing an agent from investigating a material
+  uncertainty.
 
-#### Establish reproducible baselines
+#### Reduce fixed role context
 
-- Define controlled fixtures for Product Owner, Task Planner, initial Developer,
-  remediation Developer, Reviewer, and Archivist invocations.
-- Hold repository state, prompt inputs, adapter version, model, reasoning effort, and
-  expected result contract constant within each comparison.
-- Record prompt composition and adapter-reported usage for every baseline.
-- Permit baseline collection without mutating a real active project or consuming a
-  production workflow transition.
-- Clearly distinguish deterministic local measurements such as prompt bytes from
-  externally variable measurements such as model token use, cache hits, duration, and
-  reasoning output.
-- Produce a baseline report identifying the largest prompt components, roles, repeated
-  context, and avoidable re-invocation patterns.
-
-#### Deliver evidence-backed initial reductions
-
-- Use the baseline evidence to implement at least one material reduction in repeated
-  prompt or context cost during this item; do not stop after adding instrumentation.
-- Prefer removal of proven duplication, selection of task-relevant records, compact
-  machine requirements, and elimination of unnecessary agent invocations before
-  lowering model capability or reasoning effort.
-- Include only roadmap items, capability records, reviews, archive evidence, and other
-  context that the role contract actually requires, while retaining explicit
-  provenance for selected or summarized inputs.
-- Avoid asking an agent to rediscover deterministic workflow facts or perform
-  executable-owned mechanical transitions that Concoct can resolve safely itself.
-- Preserve byte-identical manual and automated semantic instructions for the same role
-  and state, subject to the same measured composition rules.
+- Review every built-in role persona and handoff for duplication, obsolete workflow
+  responsibilities, narrative restatement of machine-enforced rules, and instructions
+  that can be represented more compactly without ambiguity.
+- Prioritize the narrow Reviewer and Archivist roles, whose measured personas consumed
+  9,279 and 11,667 rendered bytes respectively.
+- Reduce the Archivist persona by at least 50 percent in the controlled baseline unless
+  benchmark evidence demonstrates that an alternative change produces a larger safe
+  reduction in total processed input.
+- Replace broad historical context with task-relevant selected evidence and explicit
+  provenance.
+- Avoid including complete roadmaps, capability ledgers, archives, or review histories
+  when the role requires only selected records or the latest authoritative evidence.
+- Preserve all authority boundaries, prohibited operations, required evidence,
+  structured completion requirements, and supervision rules after compaction.
 - Record every removed, selected, summarized, or relocated instruction component and
-  demonstrate why the resulting role still receives sufficient authority, context,
-  constraints, and completion requirements.
-- Do not weaken Product Owner authority, plan acceptance, Reviewer independence,
-  capability-impact validation, archive validation, permission controls, or human
-  approval gates to reduce usage.
+  explain how correctness remains protected.
 
-#### Improve progress handling needed for measurement
+#### Introduce observable execution budgets
 
-- Consume structured Codex execution events rather than treating raw combined output
-  as the primary progress protocol.
-- Retain structured events, final result, and stderr diagnostics as distinct bounded
-  artifacts.
-- Render a compact continuous progress view from selected semantic events so reaching
-  a display limit does not make an active invocation appear frozen.
-- Keep display truncation independent from diagnostic retention limits and continue
-  processing later events after earlier display content has been discarded.
-- Preserve enough raw structured evidence to diagnose usage and execution behaviour
-  without flooding the terminal.
+- Support configurable per-role warning budgets for elapsed time, normalized activity
+  counts, processed input tokens, uncached input tokens, output tokens, and command
+  output when the adapter exposes the corresponding measurement.
+- Support hard bounds only where Concoct can enforce them without fabricating usage or
+  corrupting workflow state.
+- Define defaults from measured evidence and documented product decisions rather than
+  arbitrary hidden constants.
+- Emit a clear warning when an invocation crosses a warning threshold while allowing
+  the agent an opportunity to complete or produce a bounded handoff.
+- On hard-budget exhaustion, stop safely, retain available usage and diagnostic
+  evidence, reject stale or incomplete structured results, and report whether retry or
+  repair is safe.
+- Distinguish a budget stop from adapter failure, timeout, cancellation, model refusal,
+  and workflow finalization failure.
+- Allow budgets to be configured by role using the project's established configuration
+  format and precedence rules.
+- Do not silently downgrade models, lower reasoning effort, or weaken safety settings
+  when a budget is approached.
 
-#### Protect compatibility and failure behaviour
+#### Preserve useful work and expose wasted cost
 
-- Detect when an installed Codex version lacks required structured events or usage
-  fields and fail clearly or use an explicitly documented degraded mode.
-- Do not parse human-readable progress text as authoritative usage when structured
-  usage is available.
-- Treat malformed, duplicate, contradictory, or out-of-order terminal usage events as
-  diagnostic failures rather than silently producing misleading totals.
-- Preserve the accepted structured outcome and workflow state even when usage
-  attribution or progress rendering encounters a recoverable error.
-- Keep adapter-specific event and usage semantics outside the workflow engine.
+- Report usage consumed by candidates that fail structured-result validation or
+  workflow finalization separately from accepted invocation cost.
+- When finalization fails, identify whether the candidate artifacts remain reusable,
+  which deterministic invariant failed, and whether repair can proceed without
+  another agent invocation.
+- Preserve valid candidate artifacts and retained event evidence whenever doing so is
+  safe; do not force an expensive rerun merely because a mechanical mutation is
+  repairable.
+- Ensure a failed or budget-stopped invocation cannot advance workflow state or apply a
+  stale result.
+- Include finalization acceptance rate and wasted processed input in benchmark reports
+  so an apparent per-invocation reduction cannot hide increased retries.
+
+#### Keep progress concise and continuous
+
+- Render semantic progress from normalized structured events rather than emitting every
+  raw event to stdout or stderr.
+- Continue showing current progress after earlier display history reaches its bound;
+  truncation must not make a live invocation appear frozen.
+- Keep terminal progress limits independent from retained diagnostic and event limits.
+- Provide an explicit verbose or diagnostic mode for operators who need deeper event
+  visibility.
+- Do not allow progress rendering or measurement failures to discard an otherwise
+  valid structured result.
 
 ### Product decisions
 
-- Treat cost observability as part of the adapter execution boundary. The workflow
-  engine knows roles and actions; the adapter translates its native event stream into
-  normalized optional usage and progress evidence.
-- Use adapter-reported token fields as the authoritative observed values and retain
-  their original meanings. Do not collapse input, cached input, output, and reasoning
-  output into an unexplained single number.
-- Record exact prompt bytes and semantic component sizes for deterministic local
-  attribution. Token estimates may supplement these measurements but must be labelled
-  as estimates unless reported by the adapter.
-- Keep detailed invocation measurements in ignored, bounded runtime state. Durable
-  project history records only material optimization decisions and benchmark results,
-  not full prompts, raw event streams, or per-turn repository content.
-- Baselines are execution-profile-specific. Comparisons must name adapter version,
-  model, reasoning effort, fixture identity, and relevant cache state rather than
-  presenting one universal token number.
-- Require this item to ship at least one measured reduction. Instrumentation alone is
-  insufficient because current usage is already a critical blocker.
-- Define a material initial reduction as at least a 30 percent decrease in exact
-  rendered prompt bytes for one or more dominant fixed-role baselines, or an equivalent
-  elimination of a redundant full agent invocation, with no regression in required
-  inputs, structured outcomes, workflow validation, or fixture acceptance behaviour.
-- Do not make automatic model downgrades part of the initial reduction. Model and
-  reasoning-profile experiments may be reported for later product decisions, but
-  correctness-preserving context and orchestration improvements come first.
-- Use structured events for both measurement and compact progress rendering, but keep
-  the retained event log, terminal presentation, and authoritative final result as
-  separate concerns.
-- The first-run findings report is source evidence for this investigation; CON-037
-  does not absorb unrelated orchestration-boundary defects merely because those
-  defects caused expensive retries. It measures their cost and may eliminate only
-  redundant invocations whose safe removal is within this item's execution scope.
+- Treat total processed input as the primary amplification measure while continuing to
+  report cached and uncached input separately. Cached input is not assumed to be free
+  or irrelevant to subscription allocation.
+- Optimize model and tool interaction count before relying on model downgrades. The
+  measured evidence shows substantial amplification even for Luna with low reasoning.
+- Treat prompt reduction as necessary but insufficient. A small prompt can still grow
+  into a very expensive invocation through repeated exchanges.
+- Use normalized activity categories for cross-version reporting, but retain the native
+  event type in diagnostic evidence when safe and available.
+- Do not equate generic Codex items with model turns unless the adapter contract proves
+  that equivalence for the installed version.
+- Prefer executable-owned deterministic workflow facts and mutations over asking an
+  agent to rediscover or synthesize them. Broader transfer of lifecycle mutation
+  ownership may be delivered by a separate roadmap item when it exceeds this item's
+  cost-reduction scope.
+- Do not count a lower-cost invocation as an improvement if it increases review
+  findings, finalization failures, retries, or operator repair.
+- Initial budgets are observability and containment controls, not guarantees about
+  ChatGPT subscription accounting, which remains externally defined.
+- No automatic model or reasoning downgrade is authorized by this item.
 
 ### Documentation
 
-- Document each captured usage field and its adapter-specific meaning.
-- Document prompt-component categories and how exact byte attribution is calculated.
-- Explain the difference among prompt bytes, input tokens, cached input tokens, output
-  tokens, reasoning-output tokens, and subscription usage allocation.
-- Document baseline collection, comparison requirements, degraded adapter behaviour,
-  retention, export, and privacy boundaries.
-- Document the compact progress view and where complete structured events, diagnostics,
-  and final results are retained.
-- Publish the measured baseline, implemented reductions, resulting measurements, and
-  remaining dominant cost drivers.
+- Document normalized activity categories and their mapping to supported Codex event
+  versions.
+- Document which usage and activity measurements are authoritative, inferred, or
+  unavailable for each supported adapter version.
+- Document raw-event retention, privacy, size bounds, redaction, and Git-ignore
+  behaviour.
+- Document benchmark reproduction and the controls required for valid before-and-after
+  comparison.
+- Document per-role warning and hard budgets, configuration precedence, stop behaviour,
+  and recovery semantics.
+- Publish before-and-after measurements, changed prompt components, interaction-count
+  reductions, acceptance results, and remaining dominant cost drivers.
+- Explain why prompt bytes, cached input, uncached input, total processed input, output,
+  and subscription usage are related but not interchangeable.
 
 ### Acceptance criteria
 
-- Every supported real Codex invocation records its role, action, adapter version,
-  model, reasoning effort, duration, exact prompt bytes, prompt-component breakdown,
-  disposition, and all usage fields reported by Codex.
-- A completed `concoct run` summary reports per-action and aggregate usage without
-  double-counting, and mechanical actions with no model invocation report zero agent
-  usage explicitly or remain clearly excluded.
-- `concoct exec inspect` or its documented equivalent shows normalized usage and prompt
-  composition for a retained invocation without displaying the full prompt by default.
-- Product Owner, Task Planner, initial Developer, remediation Developer, Reviewer, and
-  Archivist controlled baselines can be reproduced and compared under named fixed
-  execution profiles.
-- The baseline report identifies the largest prompt components and repeated context for
-  each role and distinguishes exact local measurements from variable adapter usage.
-- At least one dominant fixed-role baseline shows a 30 percent or greater reduction in
-  exact rendered prompt bytes, or one provably redundant complete agent invocation is
-  eliminated, without weakening required context, gates, authority, role independence,
-  structured-result validation, or fixture outcomes.
-- Before-and-after evidence names every changed prompt component or eliminated
-  invocation and explains why the reduction preserves correctness.
-- Structured progress continues throughout a long invocation even after earlier
-  display history is discarded; full retained events and diagnostics remain available
-  within configured bounds.
-- Failed, cancelled, and timed-out invocations preserve any available usage and partial
-  event evidence without applying stale results or corrupting workflow state.
-- Missing or incompatible Codex event and usage support produces a clear diagnostic or
-  documented degraded mode rather than fabricated measurements.
-- Full automated tests use deterministic fixtures and do not require billable live
-  model invocations; an explicitly invoked integration test may validate current Codex
-  event compatibility.
+- Retained invocation inspection reports normalized activity counts, repeated reads or
+  commands, bounded command-output measurements, duration, prompt composition, usage,
+  disposition, finalization acceptance, and wasted cost when the installed Codex event
+  stream provides the required evidence.
+- Reports clearly state when per-exchange usage, compaction, tool detail, or another
+  measurement is unavailable instead of inferring unsupported values.
+- Controlled Developer, Reviewer, and Archivist benchmarks can be reproduced under
+  named fixed execution profiles and compared without mutating a real active task.
+- At least one representative controlled lifecycle benchmark shows a 50 percent or
+  greater reduction in total processed input relative to its recorded baseline.
+- The aggregate controlled benchmark set shows a material reduction in normalized
+  activity or model/tool exchanges consistent with the processed-input reduction.
+- The Archivist persona is reduced by at least 50 percent, or retained benchmark
+  evidence demonstrates and documents a different correctness-preserving change with
+  greater impact on Archivist processed input.
+- Before-and-after candidates satisfy the same structured outcome schema, workflow
+  validation, required tests, role authority, safety controls, and finalization
+  acceptance criteria.
+- The optimized benchmark does not increase review-remediation cycles, finalization
+  failures, or required manual artifact repair.
+- Per-role warning budgets are configurable and visibly reported; enforceable hard
+  bounds stop safely and preserve available evidence without advancing workflow state.
+- A finalization-rejected candidate reports its consumed usage, exact failed invariant,
+  artifact reusability, and safe recovery classification.
+- Long-running progress remains visibly current after earlier output is discarded, and
+  retained diagnostic evidence remains independently bounded.
+- Automated tests cover event normalization, repeated-activity attribution, output
+  bounds, budget warnings, safe budget stops, partial usage retention, unavailable
+  adapter fields, and rejection of stale terminal results without live billable model
+  calls.
+- An explicitly invoked compatibility test validates the currently supported Codex
+  structured-event stream and records its adapter version without becoming part of the
+  default test suite.
