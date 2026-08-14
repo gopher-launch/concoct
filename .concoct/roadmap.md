@@ -727,7 +727,7 @@ requires intervention.
 
 ## CON-037 — Measure and reduce agent invocation cost
 
-- Status: `active`
+- Status: `delivered`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-005, CAP-006, CAP-010, CAP-013, CAP-014
