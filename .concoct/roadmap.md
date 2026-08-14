@@ -729,7 +729,7 @@ requires intervention.
 
 - Status: `planned`
 - Priority: `critical`
-- Depends on: None.
+- Depends on: None
 - Capability prerequisites: CAP-005, CAP-013, CAP-014, CAP-015
 - Capability impact: reduces cumulative agent context processing, bounds runaway invocation cost, and preserves recoverable evidence when an execution exceeds its budget
 
