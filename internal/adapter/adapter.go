@@ -21,8 +21,8 @@ type Spec struct {
 }
 
 type Invocation struct {
-	Adapter, Executable, Root, SchemaPath, CandidatePath, Safety string
-	Args, Environment                                            []string
+	Adapter, AdapterVersion, Executable, Root, SchemaPath, CandidatePath, Safety string
+	Args, Environment                                                            []string
 }
 
 var registry = []Spec{{
@@ -65,7 +65,7 @@ func Resolve(root string, action orchestration.Action, settings config.Resolved,
 	if !map[string]bool{"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true}[settings.Reasoning.Value] {
 		return Invocation{}, fmt.Errorf("unsupported codex reasoning value %q", settings.Reasoning.Value)
 	}
-	args := []string{"exec", "--strict-config", "--ignore-user-config", "--sandbox", "workspace-write", "--cd", root, "--ephemeral", "--color", "never", "--output-schema", schemaPath, "--output-last-message", candidatePath}
+	args := []string{"exec", "--strict-config", "--ignore-user-config", "--sandbox", "workspace-write", "--cd", root, "--ephemeral", "--color", "never", "--json", "--output-schema", schemaPath, "--output-last-message", candidatePath}
 	if settings.Model.Value != "" {
 		args = append(args, "--model", settings.Model.Value)
 	}
@@ -75,6 +75,21 @@ func Resolve(root string, action orchestration.Action, settings config.Resolved,
 		CandidatePath: candidatePath, Args: args, Environment: allowlistedEnvironment(),
 		Safety: "workspace-write sandbox; project rules and Codex approval policy retained; user config ignored; no bypass flags; allowlisted inherited environment",
 	}, nil
+}
+
+// Version records the adapter's self-reported version when available.  A
+// probe failure intentionally does not prevent a normal invocation: version
+// evidence is observational, never an execution or workflow authority.
+func Version(executable string) (string, error) {
+	output, err := exec.Command(executable, "--version").Output()
+	if err != nil {
+		return "", err
+	}
+	version := strings.TrimSpace(string(output))
+	if len(version) > 256 {
+		return "", fmt.Errorf("adapter version output exceeds 256 bytes")
+	}
+	return version, nil
 }
 
 func Schema(action orchestration.Action) ([]byte, error) {

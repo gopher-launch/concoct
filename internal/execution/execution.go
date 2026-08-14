@@ -37,25 +37,31 @@ type Options struct {
 	SelectedPlan     string
 	LocalIntegration bool
 	AttemptID        string
+	// PredecessorInvocationID links this observation to a prior authorized
+	// action when a run gate supplied that correlation. It grants neither retry
+	// nor replay authority.
+	PredecessorInvocationID string
 	// beforeLaunch is a test seam for changing covered evidence after the
 	// invocation record is created but before the final authorization check.
 	beforeLaunch func(string, Prepared) error
 }
 
 type Prepared struct {
-	Resolution   orchestration.Resolution
-	Action       orchestration.Action
-	Prompt       []byte
-	Settings     config.Resolved
-	Invocation   adapter.Invocation
-	Schema       []byte
-	ConfigDigest string
-	Override     config.Overrides
-	Direct       bool
-	Plan         *planning.Session
-	InitialHead  string
-	InitialFiles map[string]string
-	UserConfig   string
+	Resolution              orchestration.Resolution
+	Action                  orchestration.Action
+	Prompt                  []byte
+	Composition             prompt.Composition
+	Settings                config.Resolved
+	Invocation              adapter.Invocation
+	Schema                  []byte
+	ConfigDigest            string
+	Override                config.Overrides
+	Direct                  bool
+	Plan                    *planning.Session
+	InitialHead             string
+	InitialFiles            map[string]string
+	UserConfig              string
+	PredecessorInvocationID string
 }
 
 const supervisionAppendix = `
@@ -73,21 +79,27 @@ non-completion outcome.
 `
 
 type Metadata struct {
-	InvocationID    string `json:"invocation_id"`
-	Action          string `json:"action"`
-	Role            string `json:"role"`
-	Adapter         string `json:"adapter"`
-	Model           string `json:"model,omitempty"`
-	ModelSource     string `json:"model_source"`
-	Reasoning       string `json:"reasoning"`
-	ReasoningSource string `json:"reasoning_source"`
-	Timeout         string `json:"timeout"`
-	TimeoutSource   string `json:"timeout_source"`
-	Safety          string `json:"safety"`
-	Command         string `json:"command"`
-	PromptFile      string `json:"prompt_file,omitempty"`
-	StartedAt       string `json:"started_at"`
-	ConfigDigest    string `json:"config_digest"`
+	InvocationID            string `json:"invocation_id"`
+	PredecessorInvocationID string `json:"predecessor_invocation_id,omitempty"`
+	Action                  string `json:"action"`
+	Role                    string `json:"role"`
+	Adapter                 string `json:"adapter"`
+	AdapterVersion          string `json:"adapter_version,omitempty"`
+	Model                   string `json:"model,omitempty"`
+	ModelSource             string `json:"model_source"`
+	Reasoning               string `json:"reasoning"`
+	ReasoningSource         string `json:"reasoning_source"`
+	Timeout                 string `json:"timeout"`
+	TimeoutSource           string `json:"timeout_source"`
+	Safety                  string `json:"safety"`
+	Command                 string `json:"command"`
+	PromptFile              string `json:"prompt_file,omitempty"`
+	StartedAt               string `json:"started_at"`
+	FinishedAt              string `json:"finished_at,omitempty"`
+	Duration                string `json:"duration,omitempty"`
+	PromptBytes             int    `json:"prompt_bytes"`
+	CompositionFile         string `json:"composition_file,omitempty"`
+	ConfigDigest            string `json:"config_digest"`
 }
 
 type Reconciliation struct {
@@ -107,6 +119,7 @@ type Result struct {
 	Reconciliation Reconciliation
 	Outcome        orchestration.Outcome
 	Facts          orchestration.DurableFacts
+	Measurement    adapter.EventEvidence
 }
 
 type retentionRecord struct {
@@ -153,17 +166,22 @@ func Prepare(root string, options Options) (prepared Prepared, resultErr error) 
 		return Prepared{}, err
 	}
 
-	prepared = Prepared{Resolution: resolution, Action: action, Override: options.Override, Direct: resolution.Kind == "integration", Plan: session}
+	prepared = Prepared{Resolution: resolution, Action: action, Override: options.Override, Direct: resolution.Kind == "integration", Plan: session, PredecessorInvocationID: options.PredecessorInvocationID}
 	if session != nil {
 		prepared.Prompt, err = session.Render()
+		if err == nil {
+			prepared.Composition.Append("task-planning-session", "planning.Session.Render", prompt.InclusionFull, prepared.Prompt)
+		}
 	} else if !prepared.Direct {
-		prepared.Prompt, err = prompt.Render(root, prompt.Request{Command: resolution.PromptCommand})
+		prepared.Composition, err = prompt.RenderComposition(root, prompt.Request{Command: resolution.PromptCommand})
 		if err != nil {
 			return Prepared{}, err
 		}
+		prepared.Prompt = prepared.Composition.Bytes()
 	}
 	if err == nil && !prepared.Direct && resolution.Kind != "product-owner-next" {
-		prepared.Prompt = append(prepared.Prompt, []byte(supervisionAppendix)...)
+		prepared.Composition.Append("executable-supervision", "built-in:supervision-appendix", prompt.InclusionFull, []byte(supervisionAppendix))
+		prepared.Prompt = prepared.Composition.Bytes()
 	}
 	spec, ok := adapter.Find(firstNonEmpty(options.Override.Adapter, "codex"))
 	if !ok && options.Override.Adapter != "" {
@@ -220,7 +238,11 @@ func Prepare(root string, options Options) (prepared Prepared, resultErr error) 
 	if err != nil {
 		return Prepared{}, err
 	}
-	reserved := int64(len(prepared.Prompt)+len(prepared.Schema)) + 2*prepared.Settings.Retention.MaxLogBytes + 128*1024
+	compositionBytes, marshalErr := json.Marshal(prepared.Composition)
+	if marshalErr != nil {
+		return Prepared{}, marshalErr
+	}
+	reserved := int64(len(prepared.Prompt)+len(prepared.Schema)+len(compositionBytes)) + 2*prepared.Settings.Retention.MaxLogBytes + 128*1024
 	if reserved > prepared.Settings.Retention.MaxTotal {
 		return Prepared{}, fmt.Errorf("resolved prompt and bounded invocation record require %d bytes, exceeding max-total-bytes %d", reserved, prepared.Settings.Retention.MaxTotal)
 	}
@@ -298,7 +320,7 @@ func run(ctx context.Context, root string, options Options, input io.Reader, pro
 			runErr = orchestration.WriteAtomicResult(filepath.Join(record, "result.json"), outcome)
 		}
 	} else {
-		disposition, runErr = runAdapter(ctx, record, prepared, progress)
+		disposition, result.Measurement, runErr = runAdapter(ctx, record, prepared, progress)
 		if disposition == "startup-failed" && prepared.Plan != nil {
 			_ = prepared.Plan.Rollback()
 		}
@@ -362,27 +384,32 @@ func runDirect(ctx context.Context, root, record string, prepared Prepared, loca
 	return "completed", nil
 }
 
-func runAdapter(ctx context.Context, record string, prepared Prepared, progress io.Writer) (string, error) {
-	stdoutFile, err := privateFile(filepath.Join(record, "stdout.log"))
+func runAdapter(ctx context.Context, record string, prepared Prepared, progress io.Writer) (string, adapter.EventEvidence, error) {
+	eventsFile, err := privateFile(filepath.Join(record, "stdout.log"))
 	if err != nil {
-		return "startup-failed", err
+		return "startup-failed", adapter.EventEvidence{}, err
 	}
-	defer stdoutFile.Close()
+	defer eventsFile.Close()
 	stderrFile, err := privateFile(filepath.Join(record, "stderr.log"))
 	if err != nil {
-		return "startup-failed", err
+		return "startup-failed", adapter.EventEvidence{}, err
 	}
 	defer stderrFile.Close()
 	max := prepared.Settings.Retention.MaxLogBytes
 	safeProgress := &lockedWriter{writer: progress}
-	stdout := newBoundedRedactedWriter(stdoutFile, safeProgress, max)
+	stdout := newStructuredCapture(eventsFile, safeProgress, max)
 	stderr := newBoundedRedactedWriter(stderrFile, safeProgress, max)
+	if version, err := adapter.Version(prepared.Invocation.Executable); err == nil {
+		if err := updateMetadataVersion(filepath.Join(record, "metadata.json"), version); err != nil {
+			return "startup-failed", stdout.close(), err
+		}
+	}
 
 	cmd := exec.Command(prepared.Invocation.Executable, prepared.Invocation.Args...)
 	cmd.Dir, cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = prepared.Invocation.Root, prepared.Invocation.Environment, bytes.NewReader(prepared.Prompt), stdout, stderr
 	configureProcess(cmd)
 	if err := cmd.Start(); err != nil {
-		return "startup-failed", fmt.Errorf("start %s adapter: %w", prepared.Invocation.Adapter, err)
+		return "startup-failed", stdout.close(), fmt.Errorf("start %s adapter: %w", prepared.Invocation.Adapter, err)
 	}
 	wait := make(chan error, 1)
 	go func() { wait <- cmd.Wait() }()
@@ -390,10 +417,10 @@ func runAdapter(ctx context.Context, record string, prepared Prepared, progress 
 	defer cancel()
 	select {
 	case err := <-wait:
-		stdout.finish()
+		measurement := stdout.close()
 		stderr.finish()
 		if err != nil {
-			return "nonzero-exit", fmt.Errorf("%s adapter exited unsuccessfully: %w", prepared.Invocation.Adapter, err)
+			return "nonzero-exit", measurement, fmt.Errorf("%s adapter exited unsuccessfully: %w", prepared.Invocation.Adapter, err)
 		}
 	case <-timerCtx.Done():
 		disposition := "cancelled"
@@ -407,29 +434,149 @@ func runAdapter(ctx context.Context, record string, prepared Prepared, progress 
 			killProcess(cmd)
 			<-wait
 		}
-		stdout.finish()
+		measurement := stdout.close()
 		stderr.finish()
-		return disposition, fmt.Errorf("%s adapter %s", prepared.Invocation.Adapter, strings.ReplaceAll(disposition, "-", " "))
+		return disposition, measurement, fmt.Errorf("%s adapter %s", prepared.Invocation.Adapter, strings.ReplaceAll(disposition, "-", " "))
 	}
+	measurement := stdout.close()
 	candidate := filepath.Join(record, "adapter-result.json")
 	info, statErr := os.Lstat(candidate)
 	if statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
-		return "malformed-result", fmt.Errorf("adapter result must be a regular non-symlink file")
+		return "malformed-result", measurement, fmt.Errorf("adapter result must be a regular non-symlink file")
 	}
 	if statErr != nil && !os.IsNotExist(statErr) {
-		return "malformed-result", statErr
+		return "malformed-result", measurement, statErr
 	}
 	if err := os.Chmod(candidate, 0o600); err != nil && !os.IsNotExist(err) {
-		return "malformed-result", fmt.Errorf("secure adapter result: %w", err)
+		return "malformed-result", measurement, fmt.Errorf("secure adapter result: %w", err)
 	}
 	outcome, err := readCandidate(candidate)
 	if err != nil {
-		return "missing-or-malformed-result", err
+		return "missing-or-malformed-result", measurement, err
 	}
 	if err := orchestration.WriteAtomicResult(filepath.Join(record, "result.json"), outcome); err != nil {
-		return "duplicate-result", err
+		return "duplicate-result", measurement, err
 	}
-	return "completed", nil
+	return "completed", measurement, nil
+}
+
+// structuredCapture independently bounds retained raw JSONL while keeping the
+// decoder fed with every byte.  Display history is deliberately not a parser
+// input: a long stream may truncate retained/displayed progress without losing
+// a later terminal usage event or result reconciliation.
+type structuredCapture struct {
+	mu                sync.Mutex
+	raw               io.Writer
+	progress          io.Writer
+	max               int64
+	written           int64
+	truncated         bool
+	pending           []byte
+	decoder           adapter.StreamDecoder
+	displayed         int
+	progressWritten   int64
+	progressTruncated bool
+	closed            bool
+}
+
+func newStructuredCapture(raw, progress io.Writer, max int64) *structuredCapture {
+	return &structuredCapture{raw: raw, progress: progress, max: max, decoder: adapter.NewStreamDecoder(max)}
+}
+
+func (c *structuredCapture) Write(data []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return 0, io.ErrClosedPipe
+	}
+	if _, err := c.decoder.Write(data); err != nil {
+		return 0, err
+	}
+	c.pending = append(c.pending, data...)
+	for {
+		index := bytes.IndexByte(c.pending, '\n')
+		if index < 0 {
+			break
+		}
+		if err := c.writeRaw(c.pending[:index+1]); err != nil {
+			return 0, err
+		}
+		c.pending = c.pending[index+1:]
+	}
+	if int64(len(c.pending)) >= c.max {
+		if err := c.writeRaw(c.pending); err != nil {
+			return 0, err
+		}
+		c.pending = nil
+	}
+	evidence := c.decoder.Evidence()
+	for c.displayed < len(evidence.Progress) {
+		c.writeProgress(evidence.Progress[c.displayed])
+		c.displayed++
+	}
+	return len(data), nil
+}
+
+func (c *structuredCapture) writeRaw(data []byte) error {
+	remaining := c.max - c.written
+	if remaining <= 0 {
+		c.truncated = true
+		return nil
+	}
+	clean := []byte(redact(string(data)))
+	if int64(len(clean)) > remaining {
+		clean = clean[:remaining]
+		c.truncated = true
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	n, err := c.raw.Write(clean)
+	c.written += int64(n)
+	return err
+}
+
+func (c *structuredCapture) close() adapter.EventEvidence {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return c.decoder.Close()
+	}
+	c.closed = true
+	if len(c.pending) > 0 {
+		_ = c.writeRaw(c.pending)
+		c.pending = nil
+	}
+	evidence := c.decoder.Close()
+	if c.truncated {
+		c.decoder.AddDiagnostic("raw structured event retention truncated")
+		evidence = c.decoder.Close()
+		_, _ = c.raw.Write([]byte("\n[concoct: structured event log truncated]\n"))
+	}
+	for c.displayed < len(evidence.Progress) {
+		c.writeProgress(evidence.Progress[c.displayed])
+		c.displayed++
+	}
+	if c.progressTruncated && c.progress != nil {
+		_, _ = c.progress.Write([]byte("[concoct: structured progress truncated]\n"))
+	}
+	return evidence
+}
+
+// writeProgress applies the same redaction boundary as logs and independently
+// bounds terminal display. It never influences event decoding or retained
+// measurement, so later usage/result evidence survives display truncation.
+func (c *structuredCapture) writeProgress(value string) {
+	if c.progress == nil {
+		return
+	}
+	data := []byte(redact(value + "\n"))
+	if c.progressWritten+int64(len(data)) > c.max {
+		c.progressTruncated = true
+		return
+	}
+	_, _ = c.progress.Write(data)
+	c.progressWritten += int64(len(data))
 }
 
 func readCandidate(path string) (orchestration.Outcome, error) {
@@ -488,6 +635,17 @@ func reconcile(root, record string, prepared Prepared, disposition string, runEr
 	}
 	current, _, snapshotErr := orchestration.Snapshot(root)
 	reconciliation.RetrySafe = snapshotErr == nil && current.Digest == prepared.Action.Evidence.Digest
+	if !prepared.Direct {
+		// Measurements are supplied by the live stream decoder.  Retained event
+		// bytes are intentionally only diagnostic evidence, so their independent
+		// bound must never redefine what was observed.
+		if err := writeJSON(filepath.Join(record, "measurement.json"), target.Measurement); err != nil {
+			return err
+		}
+	}
+	if err := updateMetadataTiming(filepath.Join(record, "metadata.json"), reconciliation.FinishedAt); err != nil {
+		return err
+	}
 	if err := writeJSON(filepath.Join(record, "reconciliation.json"), reconciliation); err != nil {
 		return err
 	}
@@ -505,6 +663,137 @@ func reconcile(root, record string, prepared Prepared, disposition string, runEr
 		return fmt.Errorf("execution produced no accepted structured result")
 	}
 	return nil
+}
+
+// Metrics returns the privacy-preserving record intended for comparison. It
+// never reads prompt bytes or raw adapter output.
+func Metrics(root, id string) ([]byte, error) {
+	base := filepath.Join(root, ".concoct", "runtime", "invocations")
+	record, err := selectRecord(base, id)
+	if err != nil {
+		return nil, err
+	}
+	type metricRecord struct {
+		Metadata       json.RawMessage `json:"metadata,omitempty"`
+		Composition    json.RawMessage `json:"prompt_composition,omitempty"`
+		Measurement    json.RawMessage `json:"measurement,omitempty"`
+		Reconciliation json.RawMessage `json:"reconciliation,omitempty"`
+	}
+	var out metricRecord
+	for _, item := range []struct {
+		name string
+		dst  *json.RawMessage
+	}{
+		{"metadata.json", &out.Metadata}, {"prompt-composition.json", &out.Composition}, {"measurement.json", &out.Measurement}, {"reconciliation.json", &out.Reconciliation},
+	} {
+		data, readErr := os.ReadFile(filepath.Join(record, item.name))
+		if os.IsNotExist(readErr) {
+			continue
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+		if !json.Valid(data) {
+			return nil, fmt.Errorf("retained %s is not valid JSON", item.name)
+		}
+		if item.name == "measurement.json" {
+			data, readErr = compactMeasurement(data)
+			if readErr != nil {
+				return nil, readErr
+			}
+		}
+		*item.dst = append((*item.dst)[:0], data...)
+	}
+	return json.MarshalIndent(out, "", "  ")
+}
+
+// compactMeasurement removes progress and diagnostic text from the
+// metrics-first surfaces. New measurements contain only selected lifecycle
+// labels, but this also prevents older retained records from leaking arbitrary
+// adapter payloads through default inspection or comparison export.
+func compactMeasurement(data []byte) ([]byte, error) {
+	var evidence adapter.EventEvidence
+	if err := json.Unmarshal(data, &evidence); err != nil {
+		return nil, fmt.Errorf("decode retained measurement: %w", err)
+	}
+	evidence.Progress = nil
+	evidence.Diagnostics = nil
+	return json.MarshalIndent(evidence, "", "  ")
+}
+
+func updateMetadataTiming(path, finished string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("metadata is not a regular non-symlink file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var metadata Metadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return err
+	}
+	start, err := time.Parse(time.RFC3339Nano, metadata.StartedAt)
+	if err != nil {
+		return err
+	}
+	end, err := time.Parse(time.RFC3339Nano, finished)
+	if err != nil {
+		return err
+	}
+	metadata.FinishedAt, metadata.Duration = finished, end.Sub(start).String()
+	data, err = json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func updateMetadataVersion(path, version string) error {
+	if version == "" {
+		return nil
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("metadata is not a regular non-symlink file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var metadata Metadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return err
+	}
+	metadata.AdapterVersion = version
+	data, err = json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func validateSupervisedEffects(root string, prepared Prepared) error {
@@ -683,13 +972,16 @@ func createRecord(root string, prepared Prepared) (string, error) {
 		if err := writePrivate(filepath.Join(record, "outcome-schema.json"), prepared.Schema); err != nil {
 			return "", err
 		}
+		if err := writeJSON(filepath.Join(record, "prompt-composition.json"), prepared.Composition); err != nil {
+			return "", err
+		}
 	}
 	metadata := Metadata{
-		InvocationID: prepared.Action.Correlation.InvocationID, Action: prepared.Action.Kind, Role: prepared.Resolution.Role,
-		Adapter: prepared.Settings.Adapter.Value, Model: prepared.Settings.Model.Value, ModelSource: prepared.Settings.Model.Source,
+		InvocationID: prepared.Action.Correlation.InvocationID, PredecessorInvocationID: prepared.PredecessorInvocationID, Action: prepared.Action.Kind, Role: prepared.Resolution.Role,
+		Adapter: prepared.Settings.Adapter.Value, AdapterVersion: prepared.Invocation.AdapterVersion, Model: prepared.Settings.Model.Value, ModelSource: prepared.Settings.Model.Source,
 		Reasoning: prepared.Settings.Reasoning.Value, ReasoningSource: prepared.Settings.Reasoning.Source,
 		Timeout: prepared.Settings.Timeout.String(), TimeoutSource: prepared.Settings.TimeoutSource,
-		StartedAt: time.Now().UTC().Format(time.RFC3339Nano), PromptFile: "prompt.md", ConfigDigest: prepared.ConfigDigest,
+		StartedAt: time.Now().UTC().Format(time.RFC3339Nano), PromptFile: "prompt.md", PromptBytes: len(prepared.Prompt), CompositionFile: "prompt-composition.json", ConfigDigest: prepared.ConfigDigest,
 	}
 	if prepared.Direct {
 		metadata.Adapter, metadata.Safety, metadata.Command, metadata.PromptFile = "direct", "existing executable integration authority", "concoct integrate", ""
@@ -702,7 +994,7 @@ func createRecord(root string, prepared Prepared) (string, error) {
 	return record, nil
 }
 
-func Inspect(root, id string) (string, error) {
+func Inspect(root, id string, fullRaw ...bool) (string, error) {
 	base := filepath.Join(root, ".concoct", "runtime", "invocations")
 	record, err := selectRecord(base, id)
 	if err != nil {
@@ -710,7 +1002,11 @@ func Inspect(root, id string) (string, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Invocation: %s\n", filepath.Base(record))
-	for _, item := range []struct{ name, heading string }{{"metadata.json", "Metadata"}, {"action.json", "Action"}, {"prompt.md", "Prompt"}, {"result.json", "Result"}, {"stdout.log", "Stdout"}, {"stderr.log", "Stderr"}, {"reconciliation.json", "Reconciliation"}} {
+	items := []struct{ name, heading string }{{"metadata.json", "Metadata"}, {"action.json", "Action"}, {"prompt-composition.json", "Prompt composition"}, {"result.json", "Result"}, {"measurement.json", "Measurement"}, {"reconciliation.json", "Reconciliation"}}
+	if len(fullRaw) > 0 && fullRaw[0] {
+		items = append(items, struct{ name, heading string }{"prompt.md", "Prompt"}, struct{ name, heading string }{"stdout.log", "Structured events"}, struct{ name, heading string }{"stderr.log", "Stderr diagnostics"})
+	}
+	for _, item := range items {
 		fmt.Fprintf(&b, "\n## %s\n", item.heading)
 		path := filepath.Join(record, item.name)
 		info, statErr := os.Lstat(path)
@@ -724,6 +1020,12 @@ func Inspect(root, id string) (string, error) {
 		}
 		if readErr != nil {
 			return "", readErr
+		}
+		if item.name == "measurement.json" && !(len(fullRaw) > 0 && fullRaw[0]) {
+			data, readErr = compactMeasurement(data)
+			if readErr != nil {
+				return "", readErr
+			}
 		}
 		b.Write(data)
 		if len(data) == 0 || data[len(data)-1] != '\n' {

@@ -2,6 +2,8 @@ package prompt
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +15,76 @@ import (
 	"github.com/gopher-launch/concoct/internal/instruction"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
+
+// Inclusion describes how a component enters a rendered prompt.  Components
+// are recorded while the prompt is built; consumers must not infer boundaries
+// by splitting the final byte stream.
+type Inclusion string
+
+const (
+	InclusionFull       Inclusion = "full"
+	InclusionSelected   Inclusion = "selected"
+	InclusionSummarized Inclusion = "summarized"
+	InclusionAbsent     Inclusion = "absent"
+)
+
+// Component is one ordered, byte-accounted prompt contribution. Digest is an
+// exact-content identifier; NormalizedDigest ignores Markdown whitespace so
+// reports can identify repeated instructions without retaining their text.
+type Component struct {
+	Category              string    `json:"category"`
+	Source                string    `json:"source"`
+	Inclusion             Inclusion `json:"inclusion"`
+	Bytes                 int       `json:"bytes"`
+	Digest                string    `json:"digest"`
+	NormalizedDigest      string    `json:"normalized_digest"`
+	ExactDuplicateOf      int       `json:"exact_duplicate_of,omitempty"`
+	NormalizedDuplicateOf int       `json:"normalized_duplicate_of,omitempty"`
+}
+
+// Composition preserves the exact rendered prompt alongside its evidence.
+// The renderer currently has one compatibility component; callers can append
+// an explicit supervised-only component without changing the manual bytes.
+type Composition struct {
+	Prompt     []byte      `json:"-"`
+	Components []Component `json:"components"`
+}
+
+func (c Composition) Bytes() []byte { return append([]byte(nil), c.Prompt...) }
+
+func (c Composition) ByteCount() int { return len(c.Prompt) }
+
+func (c Composition) ConservesBytes() bool {
+	n := 0
+	for _, component := range c.Components {
+		n += component.Bytes
+	}
+	return n == len(c.Prompt)
+}
+
+func (c *Composition) Append(category, source string, inclusion Inclusion, data []byte) {
+	copyData := append([]byte(nil), data...)
+	c.Prompt = append(c.Prompt, copyData...)
+	sum := sha256.Sum256(copyData)
+	normalized := []byte(strings.Join(strings.Fields(string(copyData)), " "))
+	normalizedSum := sha256.Sum256(normalized)
+	component := Component{Category: category, Source: source, Inclusion: inclusion, Bytes: len(copyData), Digest: hex.EncodeToString(sum[:]), NormalizedDigest: hex.EncodeToString(normalizedSum[:])}
+	for i, previous := range c.Components {
+		if component.ExactDuplicateOf == 0 && previous.Digest == component.Digest {
+			component.ExactDuplicateOf = i + 1
+		}
+		if component.NormalizedDuplicateOf == 0 && previous.NormalizedDigest == component.NormalizedDigest {
+			component.NormalizedDuplicateOf = i + 1
+		}
+	}
+	c.Components = append(c.Components, component)
+}
+
+// RenderComposition is the measurement-aware rendering surface. Render is
+// retained for callers that only need the established byte-oriented API.
+func RenderComposition(root string, request Request) (Composition, error) {
+	return renderComposition(root, request)
+}
 
 type Request struct {
 	Command                          string
@@ -26,24 +98,54 @@ type roleSpec struct {
 }
 
 func Render(root string, request Request) ([]byte, error) {
-	effective, err := instruction.Compose(root)
+	composition, err := RenderComposition(root, request)
 	if err != nil {
 		return nil, err
+	}
+	return composition.Bytes(), nil
+}
+
+// componentWriter lets the existing deterministic formatting operations record
+// their semantic origin at the moment bytes are emitted.
+type componentWriter struct {
+	composition *Composition
+	category    string
+	source      string
+}
+
+func (w *componentWriter) set(category, source string) {
+	w.category, w.source = category, source
+}
+
+func (w *componentWriter) Write(data []byte) (int, error) {
+	w.composition.Append(w.category, w.source, InclusionFull, data)
+	return len(data), nil
+}
+
+func (w *componentWriter) WriteByte(value byte) error {
+	_, err := w.Write([]byte{value})
+	return err
+}
+
+func renderComposition(root string, request Request) (Composition, error) {
+	effective, err := instruction.Compose(root)
+	if err != nil {
+		return Composition{}, err
 	}
 	context, err := workflow.InspectPromptContext(root)
 	if err != nil {
-		return nil, err
+		return Composition{}, err
 	}
 	spec, err := selectRole(root, request, context, effective.Policy)
 	if err != nil {
-		return nil, err
+		return Composition{}, err
 	}
 	var eligibility workflow.PlanEligibility
 	var nextEvidence workflow.NextActionEvidence
 	if request.Command == "plan" {
 		eligibility, err = workflow.InspectPlanEligibility(root, request.RoadmapID)
 		if err != nil {
-			return nil, err
+			return Composition{}, err
 		}
 		for _, prerequisite := range eligibility.Prerequisites {
 			spec.reads = append(spec.reads, prerequisite.Archives...)
@@ -51,7 +153,7 @@ func Render(root string, request Request) ([]byte, error) {
 	} else if request.Command == "next" {
 		nextEvidence, err = workflow.InspectNextActionEvidence(root)
 		if err != nil {
-			return nil, err
+			return Composition{}, err
 		}
 		for _, capability := range nextEvidence.Capabilities {
 			spec.reads = append(spec.reads, capability.Archives...)
@@ -64,22 +166,23 @@ func Render(root string, request Request) ([]byte, error) {
 	}
 	archives, err := archiveInputs(root, request.RoadmapID, spec.reads)
 	if err != nil {
-		return nil, err
+		return Composition{}, err
 	}
 	spec.reads = append(spec.reads, archives...)
 	spec.reads = uniqueSorted(spec.reads)
 	spec.writes = uniqueSorted(spec.writes)
 	source, err := defaults.Read(spec.resource, "prompt rendering")
 	if err != nil {
-		return nil, fmt.Errorf("read prompt asset %s: %w", spec.source, err)
+		return Composition{}, fmt.Errorf("read prompt asset %s: %w", spec.source, err)
 	}
 	personaResource := "persona-" + spec.persona
 	persona, err := defaults.Read(personaResource, "prompt rendering")
 	if err != nil {
-		return nil, fmt.Errorf("read selected persona %s: %w", spec.persona, err)
+		return Composition{}, fmt.Errorf("read selected persona %s: %w", spec.persona, err)
 	}
 
-	var b bytes.Buffer
+	var composition Composition
+	b := componentWriter{composition: &composition, category: "generated-context", source: "prompt.Render"}
 	fmt.Fprintf(&b, "# Concoct %s prompt\n\n", strings.Title(request.Command)) //nolint:staticcheck
 	fmt.Fprintf(&b, "- Persona: `%s`\n- Workflow state: `%s`\n- Mode: `%s`\n", spec.persona, context.Report.State, spec.mode)
 	if request.RoadmapID != "" {
@@ -95,6 +198,7 @@ func Render(root string, request Request) ([]byte, error) {
 		fmt.Fprintf(&b, "- Next review artifact: `%s`\n", context.NextReview)
 	}
 	if !effective.Policy.IsDefault() && request.Command != "next" && request.Command != "roadmap" {
+		b.set("policy-disposition", instruction.PolicyPath)
 		fmt.Fprintln(&b, "\n## Policy activity dispositions")
 		for _, activity := range context.Report.PolicyActivities {
 			fmt.Fprintf(&b, "\n- `%s`: `%s` (%s; source `%s`)", activity.Activity, activity.Disposition, activity.Reason, activity.Source)
@@ -105,6 +209,7 @@ func Render(root string, request Request) ([]byte, error) {
 		}
 	}
 	if request.Command == "plan" {
+		b.set("capability-prerequisites", ".concoct/capabilities.md")
 		fmt.Fprintln(&b, "\n## Accepted capability prerequisites")
 		if len(eligibility.Prerequisites) == 0 {
 			fmt.Fprintln(&b, "\n- None declared.")
@@ -120,6 +225,7 @@ func Render(root string, request Request) ([]byte, error) {
 		fmt.Fprintln(&b, "\n\nIdentity and accepted status were validated structurally. The Task Planner must inspect each referenced capability record and decide whether its documented limitations are compatible with the selected outcome.")
 	}
 	if request.Command == "next" {
+		b.set("roadmap-evidence", ".concoct/roadmap.md")
 		fmt.Fprintln(&b, "\n## Authoritative next-action evidence")
 		fmt.Fprintln(&b, "\n### Roadmap items")
 		if len(nextEvidence.RoadmapItems) == 0 {
@@ -135,6 +241,7 @@ func Render(root string, request Request) ([]byte, error) {
 				fmt.Fprintf(&b, "; archive provenance: `%s`", item.Archive)
 			}
 		}
+		b.set("capability-evidence", ".concoct/capabilities.md")
 		fmt.Fprintln(&b, "\n\n### Accepted capability truth")
 		if len(nextEvidence.Capabilities) == 0 {
 			fmt.Fprintln(&b, "\n- None recorded.")
@@ -142,29 +249,35 @@ func Render(root string, request Request) ([]byte, error) {
 		for _, capability := range nextEvidence.Capabilities {
 			fmt.Fprintf(&b, "\n- `%s` — status `%s`; limitations: `%s`; archive provenance: %s", capability.ID, capability.Status, valueOrNone(capability.Limitations), listOrNone(capability.Archives))
 		}
+		b.set("generated-context", "prompt.Render")
 		fmt.Fprintln(&b, "\n\n### Supported work origins")
 		for _, origin := range nextEvidence.SupportedOrigins {
 			fmt.Fprintf(&b, "\n- %s", origin)
 		}
 		fmt.Fprintln(&b, "\n\nOrdering is deterministic presentation only. The CLI has not selected work; priority and semantic limitation compatibility remain Product Owner judgment.")
 	}
+	b.set("persona", "built-in:"+personaResource)
 	fmt.Fprintf(&b, "\n## Selected built-in persona\n\nSource: `built-in:%s` (executable-owned; repository-local persona files are not inputs).\n\n", personaResource)
 	b.Write(bytes.TrimSpace(persona))
 	b.WriteByte('\n')
+	b.set("instruction-provenance", "instruction.Compose")
 	fmt.Fprintln(&b, "\n## Effective instruction sources")
 	for _, source := range effective.Sources {
 		fmt.Fprintf(&b, "\n- Layer `%s`; source `%s`", source.Layer, source.Path)
 	}
 	fmt.Fprintf(&b, "\n- Layer `persona`; source `built-in:%s`", personaResource)
 	fmt.Fprintln(&b, "\n- Layer `task-context`; sources selected below for the active command")
+	b.set("input-reference", "prompt.Render")
 	fmt.Fprintln(&b, "\n## Exact inputs to read")
 	for _, path := range spec.reads {
 		fmt.Fprintf(&b, "\n- `%s`", path)
 	}
+	b.set("authorized-update", "prompt.Render")
 	fmt.Fprintln(&b, "\n\n## Authorized updates")
 	for _, path := range spec.writes {
 		fmt.Fprintf(&b, "\n- `%s`", path)
 	}
+	b.set("completion-contract", "prompt.Render")
 	if request.Command == "plan" && request.GitTaskBranch != "" {
 		fmt.Fprintln(&b, "\n\nThe command created and checked out the recorded task branch after validating the clean source trunk and base. Persist these exact values in task-plan Git metadata. It made no workflow-artifact updates.")
 	} else {
@@ -172,9 +285,10 @@ func Render(root string, request Request) ([]byte, error) {
 	}
 	fmt.Fprintf(&b, "\n## Expected outcome\n\n%s\n\n## Validation and completion\n\nValidate repository assumptions before writing, stay within the selected persona's ownership, run relevant documented checks, preserve durable decisions and results, and provide a complete outgoing handoff. Rendered output is guidance only and does not establish completed role work or change workflow state.\n", spec.outcome)
 	fmt.Fprintf(&b, "\n## Recommended next transition\n\n%s\n\n## Canonical handoff instructions\n\n", spec.next)
+	b.set("handoff", spec.source)
 	b.Write(bytes.TrimSpace(source))
 	b.WriteByte('\n')
-	return b.Bytes(), nil
+	return composition, nil
 }
 
 func selectRole(root string, request Request, c workflow.PromptContext, policy instruction.Policy) (roleSpec, error) {

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/gopher-launch/concoct/internal/adapter"
 	"github.com/gopher-launch/concoct/internal/config"
 	"github.com/gopher-launch/concoct/internal/contract"
 	"github.com/gopher-launch/concoct/internal/execution"
@@ -30,6 +32,8 @@ type actionRunner func(context.Context, string, execution.Options, io.Reader, io
 
 type Step struct {
 	Action, Role, Outcome, State, Invocation, Progress string
+	PromptBytes                                        int
+	Measurement                                        adapter.EventEvidence
 }
 
 type Summary struct {
@@ -53,10 +57,26 @@ func (s Summary) String() string {
 		if step.Progress != "" {
 			fmt.Fprintf(&b, " {%s}", step.Progress)
 		}
+		if step.PromptBytes > 0 {
+			fmt.Fprintf(&b, " {prompt-bytes=%d; %s}", step.PromptBytes, step.Measurement.UsageSummary())
+		} else if step.Action == "integration" {
+			fmt.Fprint(&b, " {no-agent mechanical action}")
+		}
 		b.WriteByte('\n')
 	}
 	if len(s.Steps) == 0 {
 		fmt.Fprintln(&b, "  No actions attempted.")
+	}
+	if aggregates := s.usageAggregates(); len(aggregates) > 0 {
+		fmt.Fprintln(&b, "Agent usage aggregates (native fields; reported attempts only):")
+		keys := make([]string, 0, len(aggregates))
+		for key := range aggregates {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fmt.Fprintf(&b, "  %s: %s\n", key, aggregates[key].String())
+		}
 	}
 	fmt.Fprintf(&b, "Bounds: actions %d/%d (remaining %d); review cycles %d/%d (remaining %d)\n", s.Actions, s.ActionLimit, max(0, s.ActionLimit-s.Actions), s.Cycles, s.CycleLimit, max(0, s.CycleLimit-s.Cycles))
 	fmt.Fprintf(&b, "Workflow state: %s\n", s.State)
@@ -73,6 +93,52 @@ func (s Summary) String() string {
 		fmt.Fprintf(&b, "Next: %s\n", s.Recommendation)
 	}
 	return b.String()
+}
+
+type usageAggregate struct {
+	attempts int
+	fields   [5]usageField
+}
+
+type usageField struct {
+	total    int64
+	reported int
+}
+
+func (a *usageAggregate) add(usage adapter.Usage) {
+	a.attempts++
+	for index, value := range []*int64{usage.Input, usage.CachedInput, usage.Output, usage.ReasoningOutput, usage.Total} {
+		if value != nil {
+			a.fields[index].total += *value
+			a.fields[index].reported++
+		}
+	}
+}
+
+func (a usageAggregate) String() string {
+	names := []string{"input", "cached-input", "output", "reasoning-output", "total"}
+	var values []string
+	for index, field := range a.fields {
+		if field.reported > 0 {
+			values = append(values, fmt.Sprintf("%s=%d (%d/%d attempts)", names[index], field.total, field.reported, a.attempts))
+		}
+	}
+	return strings.Join(values, " ")
+}
+
+func (s Summary) usageAggregates() map[string]usageAggregate {
+	out := map[string]usageAggregate{}
+	for _, step := range s.Steps {
+		if step.PromptBytes == 0 || !step.Measurement.HasUsage() {
+			continue
+		}
+		for _, key := range []string{"role=" + step.Role, "action=" + step.Action} {
+			aggregate := out[key]
+			aggregate.add(step.Measurement.Usage)
+			out[key] = aggregate
+		}
+	}
+	return out
 }
 
 // Run re-detects and re-authorizes every action. Expected gates and accepted
@@ -102,6 +168,7 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 	summary := Summary{ActionLimit: policy.MaxActions, CycleLimit: policy.MaxCycles}
 	consumedNext := false
 	nextAttempt := ""
+	nextPredecessor := ""
 	satisfied := map[string]bool{}
 
 	var approval *runstate.Gate
@@ -198,6 +265,7 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 			}
 			consumedNext = true
 			nextAttempt = approval.AttemptID
+			nextPredecessor = approval.InvocationID
 			selectedPlan = approval.Selection
 			approval = nil
 		}
@@ -241,6 +309,7 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 					return summary, err
 				}
 				nextAttempt = approval.AttemptID
+				nextPredecessor = approval.InvocationID
 				satisfied[gateName] = true
 				approval = nil
 				continue
@@ -283,9 +352,10 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 		}
 		seen[fingerprint] = true
 
-		execOptions := execution.Options{Override: options.Execution, SelectedPlan: selectedPlan, LocalIntegration: resolution.Kind == "integration"}
+		execOptions := execution.Options{Override: options.Execution, SelectedPlan: selectedPlan, LocalIntegration: resolution.Kind == "integration", PredecessorInvocationID: nextPredecessor}
 		execOptions.AttemptID = nextAttempt
 		nextAttempt = ""
+		nextPredecessor = ""
 		// Every satisfied gate protects only this action occurrence. Recurring
 		// Developer or Reviewer actions must stop for fresh approval.
 		satisfied = map[string]bool{}
@@ -300,7 +370,7 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 		if after, _, snapshotErr := orchestration.Snapshot(root); snapshotErr == nil {
 			progressEvidence += " -> " + shortDigest(after.Digest)
 		}
-		summary.Steps = append(summary.Steps, Step{Action: resolution.Kind, Role: resolution.Role, Outcome: outcome, State: string(result.Reconciliation.ObservedState), Invocation: result.Prepared.Action.Correlation.InvocationID, Progress: progressEvidence})
+		summary.Steps = append(summary.Steps, Step{Action: resolution.Kind, Role: resolution.Role, Outcome: outcome, State: string(result.Reconciliation.ObservedState), Invocation: result.Prepared.Action.Correlation.InvocationID, Progress: progressEvidence, PromptBytes: result.Prepared.Composition.ByteCount(), Measurement: result.Measurement})
 		if resolution.Kind == "independent-review" && result.Reconciliation.ResultAccepted && result.Facts.Class == orchestration.Completed {
 			summary.Cycles++
 		}

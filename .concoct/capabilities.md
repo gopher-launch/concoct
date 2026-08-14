@@ -952,3 +952,50 @@ remote push authority.
 - `CAP-012` supplies the structured action and outcome contract.
 - `CAP-013` supplies the one-shot execution primitive composed by `run`.
 - `CAP-007` supplies Git integration authority.
+
+## CAP-015 — Agent invocation cost attribution and bounded measurement
+
+- Status: `active`
+- Audience: `project maintainers, developers, and coding agents`
+- Added by: `.concoct/archive/2026-08-14-CON-037-measure-and-reduce-agent-invocation-cost/summary.md`
+- Documentation: `doc/command-reference.md`, `doc/workflow.md`, `.concoct/reports/con-037-agent-cost-baseline.md`
+
+### Capability
+
+Concoct measures supported Codex-backed agent invocations with exact prompt
+composition, semantic component attribution, adapter identity, timing,
+predecessor linkage, and adapter-reported usage when available. It retains
+bounded private structured evidence, provides payload-free metrics-first
+inspection and run aggregation, and supports reproducible six-role baselines.
+The accepted implementation includes a verified 44.2% reduction in fixed
+Developer prompt bytes while preserving workflow authority, structured-result
+validation, and role independence.
+
+### User value
+
+Maintainers can identify dominant prompt costs, compare controlled role
+baselines, and inspect invocation usage without exposing full prompts or
+unbounded adapter output by default.
+
+### Limitations
+
+- Codex JSONL event and usage semantics are version-sensitive; live compatibility
+  for the installed CLI was not exercised in the accepted offline verification.
+- Usage fields remain optional adapter observations, and events larger than the
+  configured evidence ceiling are reported as bounded degraded evidence.
+
+### Verification evidence
+
+- `.concoct/reports/con-037-agent-cost-baseline.md` records the six-role
+  baselines and the 44.2% Developer prompt-byte reduction.
+- `internal/prompt`, `internal/adapter`, `internal/execution`, and
+  `internal/runloop` tests cover composition, bounded evidence, reconciliation,
+  privacy, aggregation, and failure behavior.
+- `.concoct/archive/2026-08-14-CON-037-measure-and-reduce-agent-invocation-cost/review-03.md`
+  records independent approval after resolving all prior findings.
+
+### Related capabilities
+
+- `CAP-006` supplies prompt rendering and semantic parity.
+- `CAP-013` supplies one-shot execution.
+- `CAP-014` consumes per-action measurements in bounded lifecycle runs.

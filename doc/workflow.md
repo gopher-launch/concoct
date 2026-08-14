@@ -96,6 +96,31 @@ adapter's claim. Private bounded records under
 `.concoct/runtime/invocations/` support `concoct exec inspect`; they are ignored
 by Git and are not workflow artifacts.
 
+For Codex-backed actions the record also contains exact rendered prompt bytes,
+byte-accounted prompt composition, adapter-native optional usage, duration, and
+the self-reported adapter version when available. Codex JSONL is decoded as it
+arrives; bounded progress display and raw retention never stop later event
+decoding. Progress stores only bounded allowlisted lifecycle labels, never
+adapter event payload text. Diagnostic evidence and an unterminated JSONL event
+have independent count/byte ceilings; oversized input is discarded through the
+next line boundary and decoding resumes with explicit truncation/degradation
+evidence. The usage line reports only fields supplied by Codex—input, cached
+input, output, reasoning output, and native total—and never converts missing
+fields to zero or reconstructs a total. `concoct exec inspect` is
+privacy-preserving by default; use `--full-raw` only for local recovery, or
+`--json` for the metrics-only comparison export.
+Where a consumed gate identifies a prior invocation, metadata records it as a
+non-authoritative predecessor link. A terminal `turn.*` event followed by later
+events is retained as partial evidence and marked `degraded`, rather than being
+silently counted as a complete ordered transcript.
+
+Composition is recorded as bytes are rendered, never reconstructed by parsing
+the final prompt. It attributes generated context, policy/roadmap/capability
+evidence, the embedded persona, instruction provenance, input references,
+authorized updates, completion contract, and handoff. Exact and
+whitespace-normalized duplicate links use digests rather than retaining content
+in the comparison export.
+
 Each role has reusable executable-owned guidance. A task prompt selects and
 embeds the appropriate persona after composing the attributed protocol, policy,
 repository guidance, and active task context described in

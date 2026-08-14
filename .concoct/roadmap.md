@@ -727,11 +727,12 @@ requires intervention.
 
 ## CON-037 — Measure and reduce agent invocation cost
 
-- Status: `planned`
+- Status: `active`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-005, CAP-006, CAP-010, CAP-013, CAP-014
 - Capability impact: makes agent execution cost observable and establishes evidence-backed reductions required for practical daily orchestration
+- Archive: `.concoct/archive/2026-08-14-CON-037-measure-and-reduce-agent-invocation-cost/` — pending-integration on the recorded task branch
 
 ### Outcome
 

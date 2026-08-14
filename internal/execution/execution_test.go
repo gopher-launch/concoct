@@ -3,6 +3,8 @@ package execution
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,6 +105,7 @@ done
 value() {
   awk -v key="\"$1\"" '$0 ~ key { found=1 } found && /"const":/ { line=$0; sub(/^.*"const": "/, "", line); sub(/".*$/, "", line); print line; exit }' "$schema"
 }
+
 invocation=$(value invocation_id)
 action=$(value action_id)
 task=$(value task_id)
@@ -138,6 +141,22 @@ printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id"
 	}
 	if !strings.Contains(inspection, "## Prompt") || !strings.Contains(inspection, "no actionable work") {
 		t.Fatal("inspection did not use retained attempt material")
+	}
+}
+
+func TestInvocationMetadataRecordsKnownPredecessorOnly(t *testing.T) {
+	root := readyFixture(t)
+	installFakeCodex(t, "exit 7")
+	result, err := Run(context.Background(), root, Options{PredecessorInvocationID: "prior-invocation"}, strings.NewReader(""), io.Discard)
+	if err == nil {
+		t.Fatal("failed adapter unexpectedly succeeded")
+	}
+	data, err := os.ReadFile(filepath.Join(result.RecordPath, "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"predecessor_invocation_id": "prior-invocation"`) {
+		t.Fatalf("metadata lacks predecessor: %s", data)
 	}
 }
 
@@ -501,6 +520,48 @@ func TestInspectToleratesPartialRecordWithoutRegeneration(t *testing.T) {
 	}
 }
 
+func TestMetricsExportExcludesPromptAndRawEvents(t *testing.T) {
+	root := t.TempDir()
+	id := strings.Repeat("b", 36)
+	record := filepath.Join(root, ".concoct/runtime/invocations", id)
+	if err := os.MkdirAll(record, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"metadata.json":           `{"prompt_bytes":12}`,
+		"prompt-composition.json": `{"components":[{"category":"persona","bytes":12}]}`,
+		"measurement.json":        `{"usage":{"total_tokens":3},"progress":["OPENAI_API_KEY=sk-secret repository content"],"diagnostics":["repository content"]}`,
+		"reconciliation.json":     `{"invocation_disposition":"completed"}`,
+		"prompt.md":               "private prompt",
+		"stdout.log":              "private event",
+	} {
+		if err := os.WriteFile(filepath.Join(record, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := Metrics(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"private prompt", "private event", "prompt.md", "stdout.log", "sk-secret", "repository content"} {
+		if strings.Contains(string(data), forbidden) {
+			t.Fatalf("metrics export leaked %q: %s", forbidden, data)
+		}
+	}
+	if !strings.Contains(string(data), `"prompt_bytes": 12`) || !strings.Contains(string(data), `"total_tokens": 3`) {
+		t.Fatalf("metrics export omitted evidence: %s", data)
+	}
+	inspection, err := Inspect(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"sk-secret", "repository content"} {
+		if strings.Contains(inspection, forbidden) {
+			t.Fatalf("metrics-first inspection leaked %q: %s", forbidden, inspection)
+		}
+	}
+}
+
 func TestRedactionSpansWriterChunksAndLogBoundIsFinite(t *testing.T) {
 	var retained, displayed strings.Builder
 	w := newBoundedRedactedWriter(&retained, &displayed, 64)
@@ -519,6 +580,92 @@ func TestRedactionSpansWriterChunksAndLogBoundIsFinite(t *testing.T) {
 	}
 	if retained.String() != displayed.String() {
 		t.Fatal("displayed and retained sanitized streams differ")
+	}
+}
+
+func TestStructuredCaptureDecodesIncrementallyAndRedactsRawEvents(t *testing.T) {
+	var retained, displayed strings.Builder
+	capture := newStructuredCapture(&retained, &displayed, 128)
+	if _, err := capture.Write([]byte(`{"type":"item.started","message":"OPENAI_API_KEY=sk-super`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capture.Write([]byte("secret123456789\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capture.Write([]byte(`{"type":"item.completed","usage":{"total_tokens":9}}`)); err != nil {
+		t.Fatal(err)
+	}
+	evidence := capture.close()
+	if evidence.Usage.Total == nil || *evidence.Usage.Total != 9 {
+		t.Fatalf("late evidence = %#v", evidence)
+	}
+	if strings.Contains(retained.String(), "supersecret") || !strings.Contains(retained.String(), "[REDACTED]") {
+		t.Fatalf("structured record = %q", retained.String())
+	}
+	if strings.Contains(displayed.String(), "supersecret") || strings.Contains(displayed.String(), "OPENAI_API_KEY") || !strings.Contains(displayed.String(), "item.started") {
+		t.Fatalf("unsafe structured progress = %q", displayed.String())
+	}
+	if len(displayed.String()) > 96 {
+		t.Fatalf("unbounded structured progress = %d bytes", len(displayed.String()))
+	}
+}
+
+func TestStructuredCaptureBoundsManyProgressEventsWithoutLosingUsage(t *testing.T) {
+	var retained, displayed strings.Builder
+	capture := newStructuredCapture(&retained, &displayed, 96)
+	for i := 0; i < 100; i++ {
+		if _, err := capture.Write([]byte(`{"type":"item.started","message":"very long repository content OPENAI_API_KEY=sk-secret"}` + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := capture.Write([]byte(`{"type":"turn.completed","usage":{"total_tokens":12}}`)); err != nil {
+		t.Fatal(err)
+	}
+	evidence := capture.close()
+	measurement, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Usage.Total == nil || *evidence.Usage.Total != 12 || !evidence.ProgressTruncated {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+	if strings.Contains(string(measurement), "sk-secret") || strings.Contains(string(measurement), "repository content") || len(measurement) > 2048 {
+		t.Fatalf("unsafe or unbounded measurement = %q", measurement)
+	}
+	if strings.Contains(displayed.String(), "sk-secret") || len(displayed.String()) > 128 {
+		t.Fatalf("unsafe or unbounded display = %q", displayed.String())
+	}
+}
+
+func TestStructuredCaptureBoundsMalformedAndOversizedEvidence(t *testing.T) {
+	var retained, displayed strings.Builder
+	capture := newStructuredCapture(&retained, &displayed, 128)
+	for i := 0; i < 100; i++ {
+		if _, err := capture.Write([]byte("not-json\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := capture.Write([]byte(strings.Repeat("x", 32))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := capture.Write([]byte("\n" + `{"type":"turn.completed","usage":{"total_tokens":29}}`)); err != nil {
+		t.Fatal(err)
+	}
+	evidence := capture.close()
+	measurement, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Usage.Total == nil || *evidence.Usage.Total != 29 || !evidence.DiagnosticsTruncated || !evidence.EventTruncated {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+	if len(measurement) > 1024 {
+		t.Fatalf("measurement = %d bytes: %s", len(measurement), measurement)
+	}
+	if len(retained.String()) > 192 {
+		t.Fatalf("retained raw evidence = %d bytes", len(retained.String()))
 	}
 }
 
@@ -681,7 +828,8 @@ func installFakeCodex(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "codex")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nset -eu\n"+body+"\n"), 0o755); err != nil {
+	script := "#!/bin/sh\nset -eu\nif [ \"${1:-}\" = \"--version\" ]; then\n  printf 'codex test adapter 0.0.0\\n'\n  exit 0\nfi\n" + body + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

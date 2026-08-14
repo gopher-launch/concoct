@@ -45,6 +45,17 @@ func TestRenderRolesAndModesDeterministically(t *testing.T) {
 			if string(first) != string(second) {
 				t.Fatal("rendering changed without repository changes")
 			}
+			composition, err := RenderComposition(root, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !composition.ConservesBytes() || !bytes.Equal(composition.Bytes(), first) {
+				t.Fatalf("composition changed %s prompt: %#v", tt.name, composition.Components)
+			}
+			t.Logf("controlled baseline %s: %d prompt bytes", tt.name, composition.ByteCount())
+			if !hasComponent(composition, "persona") || !hasComponent(composition, "handoff") || !hasComponent(composition, "input-reference") {
+				t.Fatalf("composition is missing required semantic categories for %s: %#v", tt.name, composition.Components)
+			}
 			goldenPath := filepath.Join("testdata", tt.golden)
 			golden, err := os.ReadFile(goldenPath)
 			if err != nil {
@@ -62,6 +73,69 @@ func TestRenderRolesAndModesDeterministically(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func hasComponent(composition Composition, category string) bool {
+	for _, component := range composition.Components {
+		if component.Category == category {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRenderCompositionConservesExactPromptBytes(t *testing.T) {
+	root := fixture(t, "planned", "", "")
+	composition, err := RenderComposition(root, Request{Command: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := Render(root, Request{Command: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !composition.ConservesBytes() || !bytes.Equal(composition.Bytes(), plain) {
+		t.Fatalf("composition does not preserve render: bytes=%d components=%#v", len(composition.Bytes()), composition.Components)
+	}
+	if len(composition.Components) < 6 {
+		t.Fatalf("component provenance = %#v", composition.Components)
+	}
+	want := map[string]string{
+		"generated-context":      "prompt.Render",
+		"persona":                "built-in:persona-developer",
+		"instruction-provenance": "instruction.Compose",
+		"input-reference":        "prompt.Render",
+		"authorized-update":      "prompt.Render",
+		"completion-contract":    "prompt.Render",
+		"handoff":                "built-in:handoff-task-planner-to-developer",
+	}
+	seen := map[string]bool{}
+	for _, component := range composition.Components {
+		if component.Digest == "" || component.NormalizedDigest == "" {
+			t.Fatalf("component lacks digest: %#v", component)
+		}
+		if source, ok := want[component.Category]; ok && component.Source == source {
+			seen[component.Category] = true
+		}
+	}
+	for category := range want {
+		if !seen[category] {
+			t.Errorf("missing %s component with expected provenance", category)
+		}
+	}
+}
+
+func TestCompositionIdentifiesExactAndNormalizedDuplicates(t *testing.T) {
+	var composition Composition
+	composition.Append("first", "fixture", InclusionFull, []byte("same\n"))
+	composition.Append("exact", "fixture", InclusionFull, []byte("same\n"))
+	composition.Append("normalized", "fixture", InclusionFull, []byte("same   \n"))
+	if got := composition.Components[1].ExactDuplicateOf; got != 1 {
+		t.Fatalf("exact duplicate = %d, want 1", got)
+	}
+	if got := composition.Components[2].NormalizedDuplicateOf; got != 1 {
+		t.Fatalf("normalized duplicate = %d, want 1", got)
 	}
 }
 

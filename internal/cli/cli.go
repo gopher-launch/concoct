@@ -30,7 +30,7 @@ const usage = `Usage:
   concoct defaults show <logical-id>
   concoct status
   concoct exec [--dry-run] [--adapter <name>] [--model <model>] [--reasoning <level>] [--timeout <duration>]
-  concoct exec inspect [<invocation-id>]
+  concoct exec inspect [--full-raw|--json] [<invocation-id>]
   concoct run [--approve <gate>] [--gate <gate>] [--max-actions <count>] [--max-cycles <count>]
               [--adapter <name>] [--model <model>] [--reasoning <level>] [--timeout <duration>]
   concoct next [--output <path>]
@@ -236,20 +236,36 @@ func runExec(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if len(args) > 0 && args[0] == "inspect" {
-		if len(args) > 2 {
+		args = args[1:]
+		fullRaw := false
+		metricsJSON := false
+		if len(args) > 0 && (args[0] == "--full-raw" || args[0] == "--json") {
+			fullRaw, metricsJSON, args = args[0] == "--full-raw", args[0] == "--json", args[1:]
+		}
+		if len(args) > 1 {
 			fmt.Fprint(stderr, usage)
-			return fmt.Errorf("exec inspect accepts at most one invocation id")
+			return fmt.Errorf("exec inspect accepts --full-raw or --json and at most one invocation id")
 		}
 		if _, err := contract.CheckRead(root); err != nil {
 			return err
 		}
 		id := ""
-		if len(args) == 2 {
-			id = args[1]
+		if len(args) == 1 {
+			id = args[0]
 		}
-		content, err := execution.Inspect(root, id)
-		if err != nil {
-			return err
+		var content string
+		if metricsJSON {
+			data, err := execution.Metrics(root, id)
+			if err != nil {
+				return err
+			}
+			content = string(data) + "\n"
+		} else {
+			var err error
+			content, err = execution.Inspect(root, id, fullRaw)
+			if err != nil {
+				return err
+			}
 		}
 		_, err = io.WriteString(stdout, content)
 		return err
@@ -309,6 +325,11 @@ func runExec(args []string, stdout, stderr io.Writer) error {
 	}
 	if result.Reconciliation.FinishedAt != "" {
 		fmt.Fprintf(stdout, "Adapter disposition: %s\nResult accepted: %t\nObserved phase: %s\nNext: %s\nRetry safe from original evidence: %t\n", result.Reconciliation.InvocationDisposition, result.Reconciliation.ResultAccepted, result.Reconciliation.ObservedState, result.Reconciliation.ObservedNext, result.Reconciliation.RetrySafe)
+		if result.Prepared.Direct {
+			fmt.Fprintln(stdout, "Agent usage: no-agent mechanical action")
+		} else {
+			fmt.Fprintf(stdout, "Prompt bytes: %d\nAgent usage: %s\n", result.Prepared.Composition.ByteCount(), result.Measurement.UsageSummary())
+		}
 	}
 	return runErr
 }

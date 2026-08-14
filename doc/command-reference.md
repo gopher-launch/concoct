@@ -284,9 +284,43 @@ days, 256 KiB per log, and 20 MiB total retained bytes. Existing
 
 Every launched attempt creates a mode-0700 directory below the Git-ignored
 `.concoct/runtime/invocations/`. Mode-0600 files retain the exact prompt,
-action, schema, sanitized resolved metadata, bounded redacted stdout/stderr,
-normalized result when present, and final reconciliation. Runtime records do
-not establish lifecycle completion.
+action, schema, sanitized resolved metadata (including the adapter's
+self-reported version when its post-authorization probe succeeds), bounded
+redacted structured stdout, bounded redacted stderr, normalized result when present,
+prompt composition, native usage evidence, and final reconciliation. Runtime
+records do not establish lifecycle completion.
+When an action was authorized through a gate created by a prior invocation, its
+metadata also records that predecessor invocation ID. This is observational
+linkage only; it grants no replay or retry authority.
+
+Prompt composition is an ordered, byte-conserving manifest: every emitted byte
+belongs to a generated-context, policy disposition, capability or roadmap
+evidence, persona, instruction-provenance, input-reference, authorized-update,
+completion-contract, or handoff component. Each component names its source,
+inclusion mode, exact byte count, and bounded exact/whitespace-normalized
+duplicate group when applicable. A path reference is recorded as an input
+reference; it does not claim that the file's contents were embedded.
+
+The Codex adapter requests JSONL events. Structured events are decoded while
+the process runs, independently of retained-output and display limits: a late
+terminal usage event remains attributable even when earlier progress has
+exhausted the retained structured-event budget. Progress is an allowlisted,
+bounded lifecycle-label representation; event payload text is never copied to
+progress display or measurement. `input_tokens`,
+`cached_input_tokens`, `output_tokens`, `reasoning_output_tokens`, and
+`total_tokens` are adapter-reported optional native fields. Reported zero is
+distinct from unavailable; cached input remains separate; Concoct never
+constructs a total or treats display text as usage authority. Diagnostic count
+and bytes are independently capped. An unterminated event is capped at the
+same configured evidence-byte ceiling; an oversized event is discarded until
+the next JSONL boundary, with `event_truncated`, `diagnostics_truncated`, and
+`degraded` evidence recording loss where applicable. Parsing then resumes, so
+later valid usage remains observable. Malformed, duplicate, contradictory,
+missing, or out-of-order usage events become measurement diagnostics. Events
+after a terminal `turn.*` event mark
+the measurement `status` as `degraded`; valid usage seen before that point is
+preserved as partial observation and does not change structured workflow-result
+acceptance.
 
 Cancellation and timeout terminate the adapter process group with bounded
 grace before force. They also interrupt direct integration Git work and push
@@ -298,11 +332,17 @@ stale correlation, evidence drift, and postcondition mismatch all stop the
 one-shot invocation and report adapter disposition separately from observed
 state. A retry always authorizes a fresh envelope from current evidence.
 
-`concoct exec inspect [<invocation-id>]` reads only retained bytes. With no ID it
-selects the most recent attempt; an explicit ID selects only that record.
-Missing pieces are reported as partial rather than regenerated from current
-configuration or workflow state. The ordinary manual command reported by
-`status` remains the fallback.
+`concoct exec inspect [<invocation-id>]` is metrics-first: it shows metadata,
+component evidence, normalized native usage, result, and reconciliation but
+not the prompt or raw logs. `--full-raw` explicitly includes the private prompt
+and retained structured-event/stderr diagnostics for recovery. `--json` emits a
+stable metrics-only JSON comparison record; it excludes prompt bytes, raw
+events, diagnostics, and progress text. With no ID inspection selects the most recent attempt;
+missing pieces are reported as partial rather than regenerated. Prompt bytes
+are deterministic local attribution. Native token fields are only values
+reported by Codex: cached input is never subtracted and missing totals are not
+manufactured. The concise one-shot and run output reports the same distinction;
+direct integration is identified as a no-agent mechanical action.
 
 ## `concoct run`
 

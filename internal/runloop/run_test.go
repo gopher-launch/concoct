@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gopher-launch/concoct/internal/adapter"
 	"github.com/gopher-launch/concoct/internal/config"
 	"github.com/gopher-launch/concoct/internal/execution"
 	"github.com/gopher-launch/concoct/internal/orchestration"
@@ -17,6 +19,24 @@ import (
 	"github.com/gopher-launch/concoct/internal/runstate"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
+
+func TestSummaryUsageAggregatesRepeatedPartialAndMechanicalActions(t *testing.T) {
+	value := func(n int64) *int64 { return &n }
+	summary := Summary{Steps: []Step{
+		{Action: "development", Role: "developer", PromptBytes: 10, Measurement: adapter.EventEvidence{Usage: adapter.Usage{Input: value(4), Total: value(6)}}},
+		{Action: "development", Role: "developer", PromptBytes: 11, Measurement: adapter.EventEvidence{Usage: adapter.Usage{Input: value(5)}}},
+		{Action: "integration", Role: "integrator"},
+	}}
+	text := summary.String()
+	for _, want := range []string{"role=developer: input=9 (2/2 attempts)", "total=6 (1/2 attempts)", "action=development: input=9 (2/2 attempts)", "no-agent mechanical action"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("summary missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "action=integration") {
+		t.Fatalf("mechanical action was aggregated as agent usage:\n%s", text)
+	}
+}
 
 func TestReadyRunPersistsProposalAndRejectsDriftedApproval(t *testing.T) {
 	parent := t.TempDir()
@@ -344,6 +364,36 @@ func TestCoordinatorStopsOnRepeatedActionAndEvidenceFingerprint(t *testing.T) {
 	}
 }
 
+func TestConsumedGatePassesKnownPredecessorToInvocation(t *testing.T) {
+	root := nonGitPlannedFixture(t)
+	evidence, _, err := orchestration.Snapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := config.EvidenceDigest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate, err := runstate.New("plan", "development", "APP-001", "", evidence, orchestration.Correlation{AttemptID: "attempt", InvocationID: "prior-invocation"}, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstate.Create(root, gate); err != nil {
+		t.Fatal(err)
+	}
+	var options execution.Options
+	runner := func(_ context.Context, _ string, got execution.Options, _ io.Reader, _ io.Writer) (execution.Result, error) {
+		options = got
+		return execution.Result{Prepared: execution.Prepared{Resolution: orchestration.Resolution{Kind: "development", Role: "developer"}, Action: orchestration.Action{Correlation: orchestration.Correlation{InvocationID: "current-invocation"}}}, Reconciliation: execution.Reconciliation{ResultAccepted: true, OutcomeClass: "completed", ObservedState: workflow.Planned}, Facts: orchestration.DurableFacts{Class: orchestration.Completed}}, nil
+	}
+	if _, err := run(context.Background(), root, Options{Approve: "plan"}, runner); err != nil {
+		t.Fatal(err)
+	}
+	if options.PredecessorInvocationID != "prior-invocation" || options.AttemptID != "attempt" {
+		t.Fatalf("execution options = %#v", options)
+	}
+}
+
 func TestCoordinatorRoutesPolicySatisfiedReviewDirectlyToArchive(t *testing.T) {
 	for _, disposition := range []string{"not-required", "externally-satisfied"} {
 		t.Run(disposition, func(t *testing.T) {
@@ -465,6 +515,7 @@ func TestIntegrationConflictStopsInRecoveryWithExactContinuation(t *testing.T) {
 
 func gitPlannedRunFixture(t *testing.T) (string, string) {
 	t.Helper()
+	date := time.Now().Format("2006-01-02")
 	parent := t.TempDir()
 	if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
@@ -473,17 +524,17 @@ func gitPlannedRunFixture(t *testing.T) (string, string) {
 	gitOutput(t, root, "config", "user.email", "test@example.com")
 	gitOutput(t, root, "config", "user.name", "Test")
 	roadmap := filepath.Join(root, ".concoct", "roadmap.md")
-	if err := os.WriteFile(roadmap, []byte("---\nversion: 1\nproject: demo\nupdated: 2026-08-12\n---\n# Roadmap\n\n## APP-001 — Demo\n\n- Status: `planned`\n- Depends on: `none`\n"), 0o644); err != nil {
+	if err := os.WriteFile(roadmap, []byte("---\nversion: 1\nproject: demo\nupdated: "+date+"\n---\n# Roadmap\n\n## APP-001 — Demo\n\n- Status: `planned`\n- Depends on: `none`\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gitOutput(t, root, "add", "-A")
 	gitOutput(t, root, "commit", "-qm", "base")
 	base := gitOutput(t, root, "rev-parse", "HEAD")
 	gitOutput(t, root, "checkout", "-qb", "concoct/app-001-demo")
-	if err := os.WriteFile(roadmap, []byte("---\nversion: 1\nproject: demo\nupdated: 2026-08-12\n---\n# Roadmap\n\n## APP-001 — Demo\n\n- Status: `active`\n- Depends on: `none`\n"), 0o644); err != nil {
+	if err := os.WriteFile(roadmap, []byte("---\nversion: 1\nproject: demo\nupdated: "+date+"\n---\n# Roadmap\n\n## APP-001 — Demo\n\n- Status: `active`\n- Depends on: `none`\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	plan := "---\nid: APP-001\ntitle: Demo\nroadmap-id: APP-001\nstatus: planned\ncreated: 2026-08-12\nupdated: 2026-08-12\ngit:\n  enabled: true\n  trunk: main\n  task-branch: concoct/app-001-demo\n  base: " + base + "\n  status: active\ncapability-impact:\n  type: none\n  rationale: No capability impact.\n---\n# Task Plan\n"
+	plan := "---\nid: APP-001\ntitle: Demo\nroadmap-id: APP-001\nstatus: planned\ncreated: " + date + "\nupdated: " + date + "\ngit:\n  enabled: true\n  trunk: main\n  task-branch: concoct/app-001-demo\n  base: " + base + "\n  status: active\ncapability-impact:\n  type: none\n  rationale: No capability impact.\n---\n# Task Plan\n"
 	if err := os.WriteFile(filepath.Join(root, ".concoct", "current", "task-plan.md"), []byte(plan), 0o644); err != nil {
 		t.Fatal(err)
 	}
