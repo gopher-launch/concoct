@@ -63,7 +63,8 @@ are reconciled. Their identifiers remain reserved and must not be reused.
 
 Reserved historical identifiers: `CON-003`, `CON-004`, `CON-005`, `CON-006`,
 `CON-007`, `CON-008`, `CON-009`, `CON-015`, `CON-018`, `CON-028`, `CON-029`,
-`CON-010`, `CON-030`, `CON-031`, `CON-032`, `CON-035`, `CON-036`, `CON-037`.
+`CON-010`, `CON-030`, `CON-031`, `CON-032`, `CON-035`, `CON-036`, `CON-037`,
+`CON-038`.
 Accepted delivery evidence is preserved by the corresponding capability records
 and archives; CON-004 was cancelled as redundant and has no delivery archive.
 
@@ -676,6 +677,8 @@ explicit bug provenance.
   clearly without partially mutating bug, task, roadmap, or capability state.
 
 ---
+
+## CON-034 — Make lifecycle runs durable and resumable
 
 - Status: `candidate`
 - Priority: `high`

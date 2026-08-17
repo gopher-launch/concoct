@@ -579,3 +579,73 @@ does not tell the operator whether Codex is reading, editing, testing, retrying,
 ## Codex model-cache errors are resolved environmental noise
 
 Repeated `base_instructions` model-cache errors were caused by incompatible Codex CLI and VS Code extension versions sharing the cache. Updating the CLI resolved them. No evidence connects the errors to Concoct’s measured inference usage.
+
+# Post CON-038 Assessment and Recommended Sequencing
+
+## Cost viability has materially improved
+
+CON-037 made agent cost attributable and CON-038 reduced fixed prompt content,
+added semantic activity evidence and enforceable live-observable bounds, retained
+measurement across rejected outcomes, and exercised Codex CLI 0.147.0 mapping.
+The second approved CON-038 run observed 345,092 aggregate input tokens versus
+2,575,638 across the originating production actions. The workloads were not
+equivalent, so the 86.6 percent difference is directional rather than a causal
+reduction claim.
+
+After rebuilding from the CON-038 feature branch, the operator also observed
+approximately one percent or less weekly allocation consumption per role
+invocation compared with approximately three to five percent previously. The
+account meter is coarse and the workloads are uncontrolled, but the observation
+is consistent with the retained input-token evidence. Normal project use should
+provide further evidence without a dedicated billable benchmark.
+
+## Highest-priority remaining defect
+
+The next critical work should make supervised Developer, Reviewer, and Archivist
+completion transactional and recoverable. An agent-authored candidate must either
+complete its durable transition or remain available through a supported,
+diagnosable recovery path without repeating the full invocation or requiring
+manual Git and artifact surgery.
+
+The coherent scope includes:
+
+- executable-owned Reviewer reservation before invocation and preservation of
+  reservation provenance through completion;
+- supported inspection, repair, and continuation of retained dirty candidates;
+- explicit separation of agent outcome, finalization result, durable transition,
+  and resulting workflow state;
+- actionable finalization diagnostics identifying the failed invariant, location,
+  expected evidence, and safe recovery action;
+- complete Developer status and remediation diagnostics; and
+- review-cycle accounting that remains meaningful across separate `run`
+  invocations.
+
+This work is narrower than CON-011's general-purpose diagnostics and recovery
+commands. It repairs the ordinary supervised execution path and should precede
+CON-034, because durable orchestration must not persist or resume ambiguous action
+boundaries.
+
+## Recommended order after boundary repair
+
+1. Complete ready-to-ready lifecycle reconciliation, including candidate selection,
+   delivered-roadmap removal, and accurate post-integration reporting.
+2. Deliver CON-034 durable and resumable lifecycle runs once individual action
+   boundaries are trustworthy.
+3. Deliver CON-019 multiple task origins as the next major feature expansion; it
+   unlocks CON-023, CON-024, CON-026, and CON-027.
+4. Deliver CON-027 product bug tracking after non-roadmap task provenance exists.
+
+CON-014 overlays, CON-016 brownfield adoption, and CON-020 selectable Git strategy
+remain valuable but broaden the product before improving the reliability of its
+primary active workflow.
+
+## Document reconciliation findings
+
+The 2026-08-17 document review found and corrected these ledger inconsistencies in
+the accompanying roadmap and capability documents:
+
+- restored the missing CON-034 heading around the existing durable-run item;
+- reserved the delivered CON-038 identifier;
+- advanced the capability-ledger update date to 2026-08-17; and
+- reconciled CAP-015's stale live-compatibility limitation with the accepted
+  CON-038 evidence while preserving the restriction against causal workload claims.

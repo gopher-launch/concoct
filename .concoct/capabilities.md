@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-08-11
+updated: 2026-08-17
 ---
 
 # Capabilities
@@ -979,9 +979,13 @@ bounded private structured evidence, provides payload-free metrics-first
 inspection and run aggregation, supports conservative activity and repetition
 evidence, live-observable warnings, configured enforceable hard budgets, and
 stopped/rejected-cost accounting, and supports reproducible six-role baselines.
-The accepted implementation includes a verified 44.2% reduction in fixed
-Developer prompt bytes while preserving workflow authority, structured-result
-validation, and role independence.
+The accepted implementation includes verified reductions of 44.2% in fixed
+Developer continuation prompt bytes and 54.1% in the Archivist persona while
+preserving workflow authority, structured-result validation, and role
+independence. Live Codex CLI 0.147.0 observations demonstrated supported
+usage/activity mapping and materially lower processed input for deliberately
+smaller workloads; they are directional observations rather than a controlled
+causal reduction claim.
 
 ### User value
 
@@ -991,8 +995,10 @@ unbounded adapter output by default.
 
 ### Limitations
 
-- Codex JSONL event and usage semantics are version-sensitive; live compatibility
-  for the installed CLI was not exercised in the accepted offline verification.
+- Codex JSONL event and usage semantics are version-sensitive. Live compatibility
+  and measurement retention were exercised with Codex CLI 0.147.0, but successful
+  live lifecycle finalization was not demonstrated; all completed candidates in
+  the retained comparison were rejected at deterministic finalization boundaries.
 - Usage fields remain optional adapter observations, and events larger than the
   configured evidence ceiling are reported as bounded degraded evidence.
 - Codex event shapes are version-sensitive; command classification is
