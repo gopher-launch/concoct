@@ -727,7 +727,7 @@ requires intervention.
 
 ## CON-038 — Reduce agent context amplification and bound invocation cost
 
-- Status: `active`
+- Status: `delivered`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-005, CAP-013, CAP-014, CAP-015
