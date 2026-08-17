@@ -31,9 +31,10 @@ type Options struct {
 type actionRunner func(context.Context, string, execution.Options, io.Reader, io.Writer) (execution.Result, error)
 
 type Step struct {
-	Action, Role, Outcome, State, Invocation, Progress string
-	PromptBytes                                        int
-	Measurement                                        adapter.EventEvidence
+	Action, Role, Outcome, State, Invocation, Progress, Disposition string
+	PromptBytes                                                     int
+	Measurement                                                     adapter.EventEvidence
+	Accepted                                                        bool
 }
 
 type Summary struct {
@@ -58,7 +59,11 @@ func (s Summary) String() string {
 			fmt.Fprintf(&b, " {%s}", step.Progress)
 		}
 		if step.PromptBytes > 0 {
-			fmt.Fprintf(&b, " {prompt-bytes=%d; %s}", step.PromptBytes, step.Measurement.UsageSummary())
+			cost := "wasted"
+			if step.Accepted {
+				cost = "accepted"
+			}
+			fmt.Fprintf(&b, " {prompt-bytes=%d; cost=%s; disposition=%s; activity=%d; command-output-bytes=%d; %s}", step.PromptBytes, cost, step.Disposition, step.Measurement.ActivityEvents, step.Measurement.Commands.OutputBytes, step.Measurement.UsageSummary())
 		} else if step.Action == "integration" {
 			fmt.Fprint(&b, " {no-agent mechanical action}")
 		}
@@ -132,7 +137,11 @@ func (s Summary) usageAggregates() map[string]usageAggregate {
 		if step.PromptBytes == 0 || !step.Measurement.HasUsage() {
 			continue
 		}
-		for _, key := range []string{"role=" + step.Role, "action=" + step.Action} {
+		cost := "wasted"
+		if step.Accepted {
+			cost = "accepted"
+		}
+		for _, key := range []string{"role=" + step.Role, "action=" + step.Action, "cost=" + cost} {
 			aggregate := out[key]
 			aggregate.add(step.Measurement.Usage)
 			out[key] = aggregate
@@ -370,7 +379,7 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 		if after, _, snapshotErr := orchestration.Snapshot(root); snapshotErr == nil {
 			progressEvidence += " -> " + shortDigest(after.Digest)
 		}
-		summary.Steps = append(summary.Steps, Step{Action: resolution.Kind, Role: resolution.Role, Outcome: outcome, State: string(result.Reconciliation.ObservedState), Invocation: result.Prepared.Action.Correlation.InvocationID, Progress: progressEvidence, PromptBytes: result.Prepared.Composition.ByteCount(), Measurement: result.Measurement})
+		summary.Steps = append(summary.Steps, Step{Action: resolution.Kind, Role: resolution.Role, Outcome: outcome, State: string(result.Reconciliation.ObservedState), Invocation: result.Prepared.Action.Correlation.InvocationID, Progress: progressEvidence, Disposition: result.Reconciliation.InvocationDisposition, PromptBytes: result.Prepared.Composition.ByteCount(), Measurement: result.Measurement, Accepted: result.Reconciliation.ResultAccepted})
 		if resolution.Kind == "independent-review" && result.Reconciliation.ResultAccepted && result.Facts.Class == orchestration.Completed {
 			summary.Cycles++
 		}

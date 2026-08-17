@@ -53,6 +53,12 @@ Before handoff, confirm the goal/criteria, inspect the diff, remove temporary
 files, update plan/notes, state unresolved work, and keep capability impact
 accurate without editing its ledger.
 
+For a completed implementation, set the active task plan front matter to
+exactly `status: implementation-complete` before returning a structured
+`completed` outcome. A completed structured result does not substitute for
+that durable workflow transition. If the implementation cannot honestly reach
+that status, return the appropriate non-completion outcome and explain why.
+
 Add a fresh `## Handoff to reviewer` to notes with these headings:
 
 ```md

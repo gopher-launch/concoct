@@ -181,11 +181,19 @@ exec:
       # model: configured-model-name
       reasoning: high
       timeout: 30m
+      budget:
+        # Warnings are observational; hard elapsed/activity/output bounds stop live.
+        warn-activity: 120
+        hard-activity: 240
+        warn-command-output-bytes: 4194304
+        hard-command-output-bytes: 8388608
   retention:
     max-completed: 20
     max-age: 336h
     max-log-bytes: 262144
     max-total-bytes: 20971520
+    # Private bounded JSONL is opt-in; normalized metrics remain available.
+    raw-events: false
 
 run:
   # Added to the built-in plan and integration gates.

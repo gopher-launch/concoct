@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,5 +170,64 @@ func TestDecodeCodexJSONLDiagnosesDegradedAndPartialStreams(t *testing.T) {
 				t.Fatalf("diagnostics = %#v", evidence.Diagnostics)
 			}
 		})
+	}
+}
+
+func TestDecodeCodexJSONLNormalizesPayloadSafeActivity(t *testing.T) {
+	secret := "OPENAI_API_KEY=sk-secret"
+	stream := strings.Join([]string{
+		`{"type":"item.completed","item":{"type":"command_execution","command":"sed -n '1,20p' secret.txt","aggregated_output":"` + secret + `"}}`,
+		`{"type":"item.completed","item":{"type":"command_execution","command":"sed -n '1,20p' secret.txt","aggregated_output":"more"}}`,
+		`{"type":"item.completed","item":{"type":"command_execution","command":"rg token . | head","aggregated_output":"combined"}}`,
+		`{"type":"item.completed","item":{"type":"file_change"}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":12,"output_tokens":4,"total_tokens":24}}`,
+	}, "\n") + "\n"
+	evidence := DecodeCodexJSONL([]byte(stream))
+	encoded := fmt.Sprintf("%#v", evidence)
+	if strings.Contains(encoded, secret) || strings.Contains(encoded, "secret.txt") {
+		t.Fatalf("payload leaked into normalized evidence: %s", encoded)
+	}
+	if evidence.Commands.Count != 3 || evidence.Commands.OutputBytes != int64(len(secret)+len("more")+len("combined")) {
+		t.Fatalf("commands = %#v", evidence.Commands)
+	}
+	if len(evidence.Repeated) != 1 || evidence.Repeated[0].Category != "file-read" || evidence.Repeated[0].Count != 2 || len(evidence.Repeated[0].Fingerprint) != 16 {
+		t.Fatalf("repeated = %#v", evidence.Repeated)
+	}
+	if evidence.Availability["exchange-usage"].Availability != "unavailable" || evidence.Availability["usage"].Availability != "available" {
+		t.Fatalf("availability = %#v", evidence.Availability)
+	}
+}
+
+func TestClassifyCommandRequiresAffirmativeCheckEvidence(t *testing.T) {
+	tests := []struct {
+		command, want string
+	}{
+		{"go test ./...", "test-check"},
+		{"go vet ./...", "test-check"},
+		{"npm run lint", "test-check"},
+		{"cargo check", "test-check"},
+		{"make verify", "test-check"},
+		{"go env", "command-other"},
+		{"bash migration.sh", "command-other"},
+		{"sh read-data.sh", "command-other"},
+		{"npm publish", "command-other"},
+		{"make release", "command-other"},
+		{"go test ./... | tee result", "command-other"},
+	}
+	for _, test := range tests {
+		if got := classifyCommand(test.command); got != test.want {
+			t.Errorf("classifyCommand(%q) = %q, want %q", test.command, got, test.want)
+		}
+	}
+}
+
+func TestDecodeCodexJSONLRetainsBoundedUsageSnapshots(t *testing.T) {
+	var stream strings.Builder
+	for i := 1; i <= maxUsageSnapshots+5; i++ {
+		fmt.Fprintf(&stream, `{"type":"item.completed","usage":{"total_tokens":%d}}`+"\n", i)
+	}
+	evidence := DecodeCodexJSONL([]byte(stream.String()))
+	if len(evidence.UsageSnapshots) != maxUsageSnapshots || !evidence.UsageSnapshotsTruncated || evidence.Usage.Total == nil || *evidence.Usage.Total != maxUsageSnapshots+5 {
+		t.Fatalf("usage snapshots = %#v latest=%#v", evidence.UsageSnapshots, evidence.Usage)
 	}
 }

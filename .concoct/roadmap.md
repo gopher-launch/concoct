@@ -727,11 +727,12 @@ requires intervention.
 
 ## CON-038 — Reduce agent context amplification and bound invocation cost
 
-- Status: `planned`
+- Status: `active`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-005, CAP-013, CAP-014, CAP-015
 - Capability impact: reduces cumulative agent context processing, bounds runaway invocation cost, and preserves recoverable evidence when an execution exceeds its budget
+- Archive: `.concoct/archive/2026-08-17-CON-038-reduce-agent-context-amplification-and-bound-invocation-cost/`
 
 ### Outcome
 

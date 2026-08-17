@@ -2,9 +2,11 @@ package adapter
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -18,15 +20,67 @@ type Usage struct {
 	Total           *int64 `json:"total_tokens,omitempty"`
 }
 
+// EvidenceValue describes where a normalized measurement came from. Values
+// are intentionally finite so metrics consumers do not confuse native Codex
+// fields, host observations, conservative classification, and absence.
+type EvidenceValue struct {
+	Availability string `json:"availability"`
+	Provenance   string `json:"provenance"`
+}
+
+type ActivityCount struct {
+	Category   string `json:"category"`
+	Count      int    `json:"count"`
+	Provenance string `json:"provenance"`
+}
+
+type RepetitionGroup struct {
+	Category    string `json:"category"`
+	Fingerprint string `json:"fingerprint"`
+	Count       int    `json:"count"`
+}
+
+type CommandEvidence struct {
+	Count       int64 `json:"count"`
+	OutputBytes int64 `json:"output_bytes"`
+}
+
+type UsageSnapshot struct {
+	Sequence   int    `json:"sequence"`
+	Semantics  string `json:"semantics"`
+	Provenance string `json:"provenance"`
+	Usage      Usage  `json:"usage"`
+}
+
+type BudgetEvent struct {
+	Dimension   string `json:"dimension"`
+	Kind        string `json:"kind"`
+	Limit       int64  `json:"limit"`
+	Observed    int64  `json:"observed"`
+	Unit        string `json:"unit"`
+	Source      string `json:"source"`
+	Evaluation  string `json:"evaluation"`
+	Enforceable bool   `json:"enforceable"`
+}
+
 // EventEvidence is compact, adapter-neutral evidence extracted from Codex JSONL.
 type EventEvidence struct {
-	Usage                Usage    `json:"usage"`
-	Progress             []string `json:"progress,omitempty"`
-	ProgressTruncated    bool     `json:"progress_truncated,omitempty"`
-	Diagnostics          []string `json:"diagnostics,omitempty"`
-	DiagnosticsTruncated bool     `json:"diagnostics_truncated,omitempty"`
-	EventTruncated       bool     `json:"event_truncated,omitempty"`
-	Events               int      `json:"events"`
+	Usage                   Usage                    `json:"usage"`
+	Progress                []string                 `json:"progress,omitempty"`
+	ProgressTruncated       bool                     `json:"progress_truncated,omitempty"`
+	Diagnostics             []string                 `json:"diagnostics,omitempty"`
+	DiagnosticsTruncated    bool                     `json:"diagnostics_truncated,omitempty"`
+	EventTruncated          bool                     `json:"event_truncated,omitempty"`
+	Events                  int                      `json:"events"`
+	Activity                []ActivityCount          `json:"activity,omitempty"`
+	Repeated                []RepetitionGroup        `json:"repeated,omitempty"`
+	Commands                CommandEvidence          `json:"commands"`
+	UsageSnapshots          []UsageSnapshot          `json:"usage_snapshots,omitempty"`
+	UsageSnapshotsTruncated bool                     `json:"usage_snapshots_truncated,omitempty"`
+	Availability            map[string]EvidenceValue `json:"availability,omitempty"`
+	CurrentActivity         string                   `json:"current_activity,omitempty"`
+	ActivityEvents          int64                    `json:"activity_events"`
+	Budgets                 []BudgetEvent            `json:"budget_events,omitempty"`
 	// Status is supported unless the stream contains an event sequence the
 	// adapter cannot interpret as a complete, ordered Codex JSONL transcript.
 	// Usage collected before degradation remains observational evidence.
@@ -48,12 +102,16 @@ type StreamDecoder struct {
 	diagnosticBytes    int
 	maxEventBytes      int
 	discardingEvent    bool
+	activity           map[string]int
+	repeated           map[string]map[string]int
 }
 
 const (
 	defaultMaxProgressBytes = 2 * 1024
 	maxProgressEntries      = 64
 	maxDiagnosticEntries    = 64
+	maxUsageSnapshots       = 32
+	maxRepetitionGroups     = 64
 )
 
 // NewStreamDecoder creates a decoder whose selected progress, diagnostics, and
@@ -68,6 +126,8 @@ func NewStreamDecoder(maxEvidenceBytes int64) StreamDecoder {
 		maxProgressBytes:   bound,
 		maxDiagnosticBytes: bound,
 		maxEventBytes:      bound,
+		activity:           map[string]int{},
+		repeated:           map[string]map[string]int{},
 	}
 }
 
@@ -124,8 +184,37 @@ func (d *StreamDecoder) Close() EventEvidence {
 		d.consume(d.buffer)
 	}
 	d.buffer = nil
+	d.materializeAggregates()
 	d.evidence = normalizedEvidence(d.evidence)
 	return d.evidence
+}
+
+func (d *StreamDecoder) materializeAggregates() {
+	d.evidence.Activity = d.evidence.Activity[:0]
+	keys := make([]string, 0, len(d.activity))
+	for key := range d.activity {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		d.evidence.Activity = append(d.evidence.Activity, ActivityCount{Category: key, Count: d.activity[key], Provenance: "conservatively-classified:codex-jsonl"})
+	}
+	d.evidence.Repeated = d.evidence.Repeated[:0]
+	for _, category := range keys {
+		fingerprints := make([]string, 0, len(d.repeated[category]))
+		for fingerprint, count := range d.repeated[category] {
+			if count > 1 {
+				fingerprints = append(fingerprints, fingerprint)
+			}
+		}
+		sort.Strings(fingerprints)
+		for _, fingerprint := range fingerprints {
+			if len(d.evidence.Repeated) == maxRepetitionGroups {
+				return
+			}
+			d.evidence.Repeated = append(d.evidence.Repeated, RepetitionGroup{Category: category, Fingerprint: fingerprint, Count: d.repeated[category][fingerprint]})
+		}
+	}
 }
 
 func (d *StreamDecoder) consume(data []byte) {
@@ -153,6 +242,7 @@ func (d *StreamDecoder) consume(data []byte) {
 		d.terminal = true
 	}
 	d.appendProgress(kind)
+	d.consumeActivity(kind, raw)
 	usageRaw := raw["usage"]
 	if len(usageRaw) == 0 {
 		if item, ok := raw["item"]; ok {
@@ -170,15 +260,124 @@ func (d *StreamDecoder) consume(data []byte) {
 		d.appendDiagnostic(fmt.Sprintf("event line %d has malformed usage", d.line))
 		return
 	}
-	if hasUsage(d.evidence.Usage) {
-		if !sameUsage(d.evidence.Usage, usage) {
-			d.appendDiagnostic("contradictory duplicate usage event")
-		} else {
-			d.appendDiagnostic("duplicate usage event")
-		}
-		return
+	if len(d.evidence.UsageSnapshots) >= maxUsageSnapshots {
+		d.evidence.UsageSnapshotsTruncated = true
+	} else {
+		d.evidence.UsageSnapshots = append(d.evidence.UsageSnapshots, UsageSnapshot{Sequence: d.evidence.Events, Semantics: "cumulative-or-terminal-unconfirmed", Provenance: "native:codex-jsonl", Usage: usage})
 	}
+	if hasUsage(d.evidence.Usage) {
+		if sameUsage(d.evidence.Usage, usage) {
+			d.appendDiagnostic("duplicate usage snapshot")
+			return
+		}
+		d.appendDiagnostic("contradictory duplicate usage event retained as an unconfirmed snapshot")
+	}
+	// Codex usage objects are snapshots, not additive deltas. Preserve the
+	// latest native observation while retaining the bounded timeline above.
 	d.evidence.Usage = usage
+}
+
+func (d *StreamDecoder) consumeActivity(kind string, raw map[string]json.RawMessage) {
+	if d.activity == nil {
+		d.activity = map[string]int{}
+	}
+	if d.repeated == nil {
+		d.repeated = map[string]map[string]int{}
+	}
+	category := "unknown"
+	fingerprint := ""
+	switch kind {
+	case "thread.started", "turn.started":
+		return
+	case "turn.completed", "turn.failed", "turn.cancelled":
+		category = "completion"
+	case "item.started", "item.completed":
+		var item map[string]json.RawMessage
+		if json.Unmarshal(raw["item"], &item) != nil {
+			break
+		}
+		var itemType string
+		_ = json.Unmarshal(item["type"], &itemType)
+		switch itemType {
+		case "agent_message", "reasoning":
+			category = "model-message"
+		case "file_change":
+			category = "edit"
+		case "compaction":
+			category = "compaction"
+		case "command_execution":
+			if kind == "item.started" {
+				return
+			}
+			var command, output string
+			_ = json.Unmarshal(item["command"], &command)
+			_ = json.Unmarshal(item["aggregated_output"], &output)
+			category = classifyCommand(command)
+			d.evidence.Commands.Count++
+			d.evidence.Commands.OutputBytes += int64(len(output))
+			fingerprint = boundedFingerprint(category, command)
+		}
+	}
+	d.activity[category]++
+	d.evidence.ActivityEvents++
+	d.evidence.CurrentActivity = category
+	if fingerprint != "" {
+		if d.repeated[category] == nil {
+			d.repeated[category] = map[string]int{}
+		}
+		d.repeated[category][fingerprint]++
+	}
+}
+
+func classifyCommand(command string) string {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" || strings.ContainsAny(trimmed, "|;&`\n") {
+		return "command-other"
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return "command-other"
+	}
+	switch fields[0] {
+	case "cat", "sed", "head", "tail":
+		return "file-read"
+	case "rg", "grep", "find":
+		return "search"
+	default:
+		if isCheckCommand(fields) {
+			return "test-check"
+		}
+		return "command-other"
+	}
+}
+
+// isCheckCommand recognizes only command forms whose arguments themselves
+// affirm a test or verification action. General-purpose runners remain other:
+// their executable name alone is not evidence that a check occurred.
+func isCheckCommand(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	switch fields[0] {
+	case "go":
+		return fields[1] == "test" || fields[1] == "vet"
+	case "npm":
+		return fields[1] == "test" || fields[1] == "run" && len(fields) > 2 && (fields[2] == "test" || fields[2] == "check" || fields[2] == "lint")
+	case "cargo":
+		return fields[1] == "test" || fields[1] == "check" || fields[1] == "clippy"
+	case "make":
+		for _, target := range fields[1:] {
+			if target == "test" || target == "check" || target == "lint" || target == "verify" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func boundedFingerprint(category, command string) string {
+	sum := sha256.Sum256([]byte("concoct-activity-v1\x00" + category + "\x00" + strings.TrimSpace(command)))
+	return fmt.Sprintf("%x", sum[:8])
 }
 
 func (d *StreamDecoder) degrade(message string) {
@@ -242,6 +441,19 @@ func (d *StreamDecoder) appendProgress(kind string) {
 func normalizedEvidence(e EventEvidence) EventEvidence {
 	if e.Status == "" {
 		e.Status = "supported"
+	}
+	if e.Availability == nil {
+		e.Availability = map[string]EvidenceValue{
+			"activity":             {Availability: "available", Provenance: "conservatively-classified:codex-jsonl"},
+			"command-output-bytes": {Availability: "available", Provenance: "host-observed:utf8-json-field-bytes"},
+			"usage":                {Availability: "unavailable", Provenance: "native:codex-jsonl"},
+			"exchange-usage":       {Availability: "unavailable", Provenance: "native:codex-jsonl"},
+			"compaction":           {Availability: "unavailable", Provenance: "native:codex-jsonl"},
+			"item-duration":        {Availability: "unavailable", Provenance: "native:codex-jsonl"},
+		}
+		if hasUsage(e.Usage) {
+			e.Availability["usage"] = EvidenceValue{Availability: "available", Provenance: "native:codex-jsonl"}
+		}
 	}
 	return e
 }

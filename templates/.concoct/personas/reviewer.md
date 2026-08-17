@@ -247,7 +247,7 @@ Suggested format:
 ---
 task-id: CON-XXX
 review: 1
-status: approved | changes-requested | blocked
+status: approved
 created: YYYY-MM-DD
 persona: reviewer
 ---
@@ -255,6 +255,8 @@ persona: reviewer
 # Review NN
 
 ## Outcome
+
+`approved`
 
 ## Summary
 
@@ -284,6 +286,11 @@ persona: reviewer
 
 ## Handoff
 ```
+
+Replace `approved` in both front matter and the backticked body value with
+exactly one of `approved`, `changes-requested`, or `blocked`. The two values
+must match. The `## Outcome` section must contain exactly one such backticked
+value; prose elsewhere does not establish the machine-readable outcome.
 
 Do not include empty sections when they add no value.
 

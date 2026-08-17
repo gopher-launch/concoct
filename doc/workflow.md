@@ -114,6 +114,15 @@ non-authoritative predecessor link. A terminal `turn.*` event followed by later
 events is retained as partial evidence and marked `degraded`, rather than being
 silently counted as a complete ordered transcript.
 
+Normalized measurement adds payload-free semantic activity, repeated-operation
+fingerprints, command-output byte totals, bounded native usage snapshots, and
+explicit availability/provenance. Raw JSONL retention is disabled by default
+and remains an explicit private diagnostic. Per-role warnings may be live or
+terminal-only; only elapsed, activity, and command-output dimensions support
+hard live enforcement. A `budget-exhausted` stop terminates the process group,
+preserves partial evidence, rejects late results, and leaves workflow state
+unadvanced. Run summaries separate accepted from wasted reported usage.
+
 Composition is recorded as bytes are rendered, never reconstructed by parsing
 the final prompt. It attributes generated context, policy/roadmap/capability
 evidence, the embedded persona, instruction provenance, input references,

@@ -856,6 +856,7 @@ as proof that a workflow transition occurred.
 - Status: `active`
 - Audience: `developers and coding agents`
 - Added by: `.concoct/archive/2026-08-11-CON-010-execute-one-recommended-action-through-an-agent-adapter/summary.md`
+- Updated by: `.concoct/archive/2026-08-17-CON-038-reduce-agent-context-amplification-and-bound-invocation-cost/summary.md`
 - Documentation: `README.md`, `doc/command-reference.md`, `doc/workflow.md`
 
 ### Capability
@@ -873,7 +874,11 @@ observed-state precedence.
 
 ### Outputs and effects
 
-The action runs at most once and produces bounded private invocation evidence:
+The action runs at most once and produces bounded private invocation evidence,
+including conservative semantic activity, repetition, warning, and budget
+observations. Configured live-observable hard stops terminate safely, preserve
+partial evidence, reject late candidates, and do not advance workflow state.
+Finalization reports distinguish accepted from stopped or rejected cost:
 prompt, sanitized command/profile metadata, structured result, diagnostics,
 reconciliation, and observed state. Dry-run launches nothing; failures,
 cancellation, timeout, stale authorization, malformed results, and postcondition
@@ -885,6 +890,8 @@ evidence without regenerating it.
 - Execution is one-shot and has no looping, resumable sessions, shared locking,
   or durable multi-invocation recovery.
 - Codex is the initial built-in adapter; manual prompts remain supported.
+- Activity classification is intentionally conservative, and terminal-only
+  usage cannot be enforced as a live hard budget.
 
 ### Verification evidence
 
@@ -946,6 +953,8 @@ remote push authority.
   recovery, and local-only integration boundaries.
 - `.concoct/archive/2026-08-12-CON-033-orchestrate-the-task-lifecycle-with-configurable-gates/review-03.md`
   records independent approval after remediation.
+- `.concoct/archive/2026-08-17-CON-038-reduce-agent-context-amplification-and-bound-invocation-cost/summary.md`
+  records independent approval of semantic attribution and bounded execution.
 
 ### Related capabilities
 
@@ -958,7 +967,8 @@ remote push authority.
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
 - Added by: `.concoct/archive/2026-08-14-CON-037-measure-and-reduce-agent-invocation-cost/summary.md`
-- Documentation: `doc/command-reference.md`, `doc/workflow.md`, `.concoct/reports/con-037-agent-cost-baseline.md`
+- Documentation: `doc/command-reference.md`, `doc/workflow.md`, `.concoct/reports/con-037-baseline-and-reduction.md`
+- Updated by: `.concoct/archive/2026-08-17-CON-038-reduce-agent-context-amplification-and-bound-invocation-cost/summary.md`
 
 ### Capability
 
@@ -966,7 +976,9 @@ Concoct measures supported Codex-backed agent invocations with exact prompt
 composition, semantic component attribution, adapter identity, timing,
 predecessor linkage, and adapter-reported usage when available. It retains
 bounded private structured evidence, provides payload-free metrics-first
-inspection and run aggregation, and supports reproducible six-role baselines.
+inspection and run aggregation, supports conservative activity and repetition
+evidence, live-observable warnings, configured enforceable hard budgets, and
+stopped/rejected-cost accounting, and supports reproducible six-role baselines.
 The accepted implementation includes a verified 44.2% reduction in fixed
 Developer prompt bytes while preserving workflow authority, structured-result
 validation, and role independence.
@@ -983,16 +995,21 @@ unbounded adapter output by default.
   for the installed CLI was not exercised in the accepted offline verification.
 - Usage fields remain optional adapter observations, and events larger than the
   configured evidence ceiling are reported as bounded degraded evidence.
+- Codex event shapes are version-sensitive; command classification is
+  conservative, and command-output enforcement covers only decoded bounded
+  events. No causal live workload reduction is claimed from the offline report.
 
 ### Verification evidence
 
-- `.concoct/reports/con-037-agent-cost-baseline.md` records the six-role
+- `.concoct/reports/con-037-baseline-and-reduction.md` records the six-role
   baselines and the 44.2% Developer prompt-byte reduction.
 - `internal/prompt`, `internal/adapter`, `internal/execution`, and
   `internal/runloop` tests cover composition, bounded evidence, reconciliation,
   privacy, aggregation, and failure behavior.
 - `.concoct/archive/2026-08-14-CON-037-measure-and-reduce-agent-invocation-cost/review-03.md`
   records independent approval after resolving all prior findings.
+- `.concoct/archive/2026-08-17-CON-038-reduce-agent-context-amplification-and-bound-invocation-cost/summary.md`
+  records the approved extensions to attribution, budgets, and bounded role execution.
 
 ### Related capabilities
 

@@ -274,10 +274,21 @@ Project configuration is `.concoct/config.yaml`. User configuration is
 `concoct/config.yaml` below the platform user-configuration directory. Both use
 strict YAML; unknown fields, roles, adapters, reasoning values, unsafe model
 values, invalid durations, and invalid retention bounds fail before launch.
-The `exec.roles.<role>` mapping accepts `adapter`, `model`, `reasoning`, and
-`timeout`. `exec.retention` accepts `max-completed`, `max-age`,
-`max-log-bytes`, and `max-total-bytes`. Defaults are 20 completed attempts, 14
-days, 256 KiB per log, and 20 MiB total retained bytes. Existing
+The `exec.roles.<role>` mapping accepts `adapter`, `model`, `reasoning`,
+`timeout`, and a strict `budget` mapping. Warning keys are `warn-elapsed`,
+`warn-activity`, `warn-command-output-bytes`, `warn-input-tokens`, and
+`warn-output-tokens`; live-enforceable hard keys are `hard-elapsed`,
+`hard-activity`, and `hard-command-output-bytes`. Negative values,
+warning-above-hard pairs, and hard elapsed at or above timeout are rejected.
+Token totals are terminal-only in the supported Codex stream, so token hard
+bounds are deliberately unsupported. Developer, Reviewer, and Archivist
+warning defaults are derived from retained CON-037 observations; dry-run shows
+their values and provenance. Hard budgets are opt-in.
+
+`exec.retention` accepts `max-completed`, `max-age`, `max-log-bytes`,
+`max-total-bytes`, and `raw-events`. Defaults are 20 completed attempts, 14
+days, 256 KiB per log, 20 MiB total retained bytes, and raw events disabled.
+Explicit raw retention remains private, redacted, bounded, and Git-ignored. Existing
 `git.auto-push` behavior remains supported.
 
 ### Runtime records, failure, and inspection
@@ -286,7 +297,7 @@ Every launched attempt creates a mode-0700 directory below the Git-ignored
 `.concoct/runtime/invocations/`. Mode-0600 files retain the exact prompt,
 action, schema, sanitized resolved metadata (including the adapter's
 self-reported version when its post-authorization probe succeeds), bounded
-redacted structured stdout, bounded redacted stderr, normalized result when present,
+optional bounded redacted structured stdout, bounded redacted stderr, normalized result when present,
 prompt composition, native usage evidence, and final reconciliation. Runtime
 records do not establish lifecycle completion.
 When an action was authorized through a gate created by a prior invocation, its
@@ -322,11 +333,23 @@ the measurement `status` as `degraded`; valid usage seen before that point is
 preserved as partial observation and does not change structured workflow-result
 acceptance.
 
-Cancellation and timeout terminate the adapter process group with bounded
+Payload-safe metrics classify model messages, file reads, searches, edits,
+checks, compaction, completion, and conservative command-other/unknown
+activity; ambiguous pipelines are never forced into a narrower category.
+Bounded fingerprints expose only repeated-operation groups, never commands,
+paths, or output. Command-output bytes are host observations. Usage snapshots
+retain native values with unconfirmed cumulative/terminal semantics rather
+than summing them. Unsupported exchange usage, compaction, or item duration is
+explicitly unavailable with provenance.
+
+Cancellation, timeout, and an enforceable hard-budget stop terminate the adapter process group with bounded
 grace before force. They also interrupt direct integration Git work and push
 confirmation while preserving the existing recovery record at a safe local
 transaction boundary. Both paths close result acceptance and still reconcile
-actual state.
+actual state. A hard stop has disposition `budget-exhausted`, preserves partial
+measurement, rejects any late result, and cannot advance workflow state.
+Warnings record the limit, source, observation, unit, and live versus
+terminal-only evaluation without becoming completion authority.
 Startup failure, nonzero exit, missing or malformed output, duplicate delivery,
 stale correlation, evidence drift, and postcondition mismatch all stop the
 one-shot invocation and report adapter disposition separately from observed

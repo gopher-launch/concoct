@@ -103,14 +103,18 @@ type Metadata struct {
 }
 
 type Reconciliation struct {
-	InvocationDisposition string         `json:"invocation_disposition"`
-	ResultAccepted        bool           `json:"result_accepted"`
-	OutcomeClass          string         `json:"outcome_class,omitempty"`
-	ResultError           string         `json:"result_error,omitempty"`
-	ObservedState         workflow.State `json:"observed_state"`
-	ObservedNext          string         `json:"observed_next"`
-	RetrySafe             bool           `json:"retry_safe"`
-	FinishedAt            string         `json:"finished_at"`
+	InvocationDisposition string            `json:"invocation_disposition"`
+	ResultAccepted        bool              `json:"result_accepted"`
+	OutcomeClass          string            `json:"outcome_class,omitempty"`
+	ResultError           string            `json:"result_error,omitempty"`
+	ObservedState         workflow.State    `json:"observed_state"`
+	ObservedNext          string            `json:"observed_next"`
+	RetrySafe             bool              `json:"retry_safe"`
+	FinishedAt            string            `json:"finished_at"`
+	CostDisposition       string            `json:"cost_disposition"`
+	FailedInvariant       string            `json:"failed_invariant,omitempty"`
+	ArtifactReusability   map[string]string `json:"artifact_reusability,omitempty"`
+	Recovery              string            `json:"recovery,omitempty"`
 }
 
 type Result struct {
@@ -266,6 +270,12 @@ func Describe(prepared Prepared) string {
 	fmt.Fprintf(&b, "Model: %s (%s)\n", displayDefault(prepared.Settings.Model.Value), prepared.Settings.Model.Source)
 	fmt.Fprintf(&b, "Reasoning: %s (%s)\n", prepared.Settings.Reasoning.Value, prepared.Settings.Reasoning.Source)
 	fmt.Fprintf(&b, "Timeout: %s (%s)\n", prepared.Settings.Timeout, prepared.Settings.TimeoutSource)
+	if budget := prepared.Settings.Budget; budget.WarnElapsed > 0 {
+		fmt.Fprintf(&b, "Warning budgets: elapsed=%s activity=%d command-output-bytes=%d input-tokens=%d output-tokens=%d (%s)\n", budget.WarnElapsed, budget.WarnActivity.Value, budget.WarnCommandOutput.Value, budget.WarnInputTokens.Value, budget.WarnOutputTokens.Value, budget.WarnElapsedSource)
+	}
+	if budget := prepared.Settings.Budget; budget.HardElapsed > 0 || budget.HardActivity.Value > 0 || budget.HardCommandOutput.Value > 0 {
+		fmt.Fprintf(&b, "Hard budgets (live enforceable): elapsed=%s activity=%d command-output-bytes=%d\n", budget.HardElapsed, budget.HardActivity.Value, budget.HardCommandOutput.Value)
+	}
 	fmt.Fprintf(&b, "Safety posture: %s\nCommand: %s\nPrompt: stdin (%d exact rendered bytes)\n", prepared.Invocation.Safety, adapter.DisplayCommand(prepared.Invocation), len(prepared.Prompt))
 	return b.String()
 }
@@ -390,6 +400,10 @@ func runAdapter(ctx context.Context, record string, prepared Prepared, progress 
 		return "startup-failed", adapter.EventEvidence{}, err
 	}
 	defer eventsFile.Close()
+	var rawEvents io.Writer = io.Discard
+	if prepared.Settings.Retention.RawEvents {
+		rawEvents = eventsFile
+	}
 	stderrFile, err := privateFile(filepath.Join(record, "stderr.log"))
 	if err != nil {
 		return "startup-failed", adapter.EventEvidence{}, err
@@ -397,7 +411,7 @@ func runAdapter(ctx context.Context, record string, prepared Prepared, progress 
 	defer stderrFile.Close()
 	max := prepared.Settings.Retention.MaxLogBytes
 	safeProgress := &lockedWriter{writer: progress}
-	stdout := newStructuredCapture(eventsFile, safeProgress, max)
+	stdout := newStructuredCapture(rawEvents, safeProgress, max)
 	stderr := newBoundedRedactedWriter(stderrFile, safeProgress, max)
 	if version, err := adapter.Version(prepared.Invocation.Executable); err == nil {
 		if err := updateMetadataVersion(filepath.Join(record, "metadata.json"), version); err != nil {
@@ -415,9 +429,33 @@ func runAdapter(ctx context.Context, record string, prepared Prepared, progress 
 	go func() { wait <- cmd.Wait() }()
 	timerCtx, cancel := context.WithTimeout(ctx, prepared.Settings.Timeout)
 	defer cancel()
+	budgetTicker := time.NewTicker(25 * time.Millisecond)
+	defer budgetTicker.Stop()
+	started := time.Now()
+	warnings := warningTracker{}
+	closeMeasurement := func() adapter.EventEvidence {
+		measurement := stdout.close()
+		warnings.observe(measurement, prepared.Settings.Budget, time.Since(started))
+		warnings.appendTo(&measurement)
+		appendTerminalTokenWarnings(&measurement, prepared.Settings.Budget)
+		return measurement
+	}
+	stopForBudget := func(event adapter.BudgetEvent) (string, adapter.EventEvidence, error) {
+		terminateProcess(cmd)
+		select {
+		case <-wait:
+		case <-time.After(terminationGrace):
+			killProcess(cmd)
+			<-wait
+		}
+		measurement := closeMeasurement()
+		measurement.Budgets = append(measurement.Budgets, event)
+		stderr.finish()
+		return "budget-exhausted", measurement, fmt.Errorf("%s adapter exhausted hard %s budget: observed %d %s (limit %d)", prepared.Invocation.Adapter, event.Dimension, event.Observed, event.Unit, event.Limit)
+	}
 	select {
 	case err := <-wait:
-		measurement := stdout.close()
+		measurement := closeMeasurement()
 		stderr.finish()
 		if err != nil {
 			return "nonzero-exit", measurement, fmt.Errorf("%s adapter exited unsuccessfully: %w", prepared.Invocation.Adapter, err)
@@ -434,11 +472,56 @@ func runAdapter(ctx context.Context, record string, prepared Prepared, progress 
 			killProcess(cmd)
 			<-wait
 		}
-		measurement := stdout.close()
+		measurement := closeMeasurement()
 		stderr.finish()
 		return disposition, measurement, fmt.Errorf("%s adapter %s", prepared.Invocation.Adapter, strings.ReplaceAll(disposition, "-", " "))
+	case <-budgetTicker.C:
+		for {
+			observed := stdout.evidence()
+			elapsed := time.Since(started)
+			warnings.observe(observed, prepared.Settings.Budget, elapsed)
+			if limit := prepared.Settings.Budget.HardElapsed; limit > 0 && elapsed >= limit {
+				return stopForBudget(adapter.BudgetEvent{Dimension: "elapsed", Kind: "hard", Limit: limit.Milliseconds(), Observed: elapsed.Milliseconds(), Unit: "milliseconds", Source: prepared.Settings.Budget.HardElapsedSource, Evaluation: "live", Enforceable: true})
+			}
+			if limit := prepared.Settings.Budget.HardActivity; limit.Value > 0 && observed.ActivityEvents >= limit.Value {
+				return stopForBudget(adapter.BudgetEvent{Dimension: "activity", Kind: "hard", Limit: limit.Value, Observed: observed.ActivityEvents, Unit: "events", Source: limit.Source, Evaluation: "live", Enforceable: true})
+			}
+			if limit := prepared.Settings.Budget.HardCommandOutput; limit.Value > 0 && observed.Commands.OutputBytes >= limit.Value {
+				return stopForBudget(adapter.BudgetEvent{Dimension: "command-output", Kind: "hard", Limit: limit.Value, Observed: observed.Commands.OutputBytes, Unit: "bytes", Source: limit.Source, Evaluation: "live", Enforceable: true})
+			}
+			select {
+			case err := <-wait:
+				measurement := closeMeasurement()
+				stderr.finish()
+				if err != nil {
+					return "nonzero-exit", measurement, fmt.Errorf("%s adapter exited unsuccessfully: %w", prepared.Invocation.Adapter, err)
+				}
+				goto completed
+			case <-timerCtx.Done():
+				terminateProcess(cmd)
+				select {
+				case <-wait:
+				case <-time.After(terminationGrace):
+					killProcess(cmd)
+					<-wait
+				}
+				measurement := closeMeasurement()
+				stderr.finish()
+				disposition := "cancelled"
+				if errors.Is(timerCtx.Err(), context.DeadlineExceeded) {
+					disposition = "timed-out"
+				}
+				return disposition, measurement, fmt.Errorf("%s adapter %s", prepared.Invocation.Adapter, strings.ReplaceAll(disposition, "-", " "))
+			case <-budgetTicker.C:
+			}
+		}
 	}
-	measurement := stdout.close()
+completed:
+	measurement := closeMeasurement()
+	if event := exceededHardBudget(measurement, prepared.Settings.Budget, time.Since(started)); event != nil {
+		measurement.Budgets = append(measurement.Budgets, *event)
+		return "budget-exhausted", measurement, fmt.Errorf("%s adapter exhausted hard %s budget: observed %d %s (limit %d)", prepared.Invocation.Adapter, event.Dimension, event.Observed, event.Unit, event.Limit)
+	}
 	candidate := filepath.Join(record, "adapter-result.json")
 	info, statErr := os.Lstat(candidate)
 	if statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
@@ -460,6 +543,66 @@ func runAdapter(ctx context.Context, record string, prepared Prepared, progress 
 	return "completed", measurement, nil
 }
 
+func exceededHardBudget(measurement adapter.EventEvidence, budget config.Budget, elapsed time.Duration) *adapter.BudgetEvent {
+	if limit := budget.HardElapsed; limit > 0 && elapsed >= limit {
+		return &adapter.BudgetEvent{Dimension: "elapsed", Kind: "hard", Limit: limit.Milliseconds(), Observed: elapsed.Milliseconds(), Unit: "milliseconds", Source: budget.HardElapsedSource, Evaluation: "live", Enforceable: true}
+	}
+	if limit := budget.HardActivity; limit.Value > 0 && measurement.ActivityEvents >= limit.Value {
+		return &adapter.BudgetEvent{Dimension: "activity", Kind: "hard", Limit: limit.Value, Observed: measurement.ActivityEvents, Unit: "events", Source: limit.Source, Evaluation: "live", Enforceable: true}
+	}
+	if limit := budget.HardCommandOutput; limit.Value > 0 && measurement.Commands.OutputBytes >= limit.Value {
+		return &adapter.BudgetEvent{Dimension: "command-output", Kind: "hard", Limit: limit.Value, Observed: measurement.Commands.OutputBytes, Unit: "bytes", Source: limit.Source, Evaluation: "live", Enforceable: true}
+	}
+	return nil
+}
+
+// warningTracker records each live-observable threshold once. It is deliberately
+// kept outside the decoder so warnings survive adapter failure, cancellation,
+// timeout, and hard-budget termination just as decoded activity does.
+type warningTracker struct {
+	events map[string]adapter.BudgetEvent
+}
+
+func (w *warningTracker) observe(measurement adapter.EventEvidence, budget config.Budget, elapsed time.Duration) {
+	w.append("elapsed", budget.WarnElapsed.Milliseconds(), elapsed.Milliseconds(), "milliseconds", budget.WarnElapsedSource, true)
+	w.append("activity", budget.WarnActivity.Value, measurement.ActivityEvents, "events", budget.WarnActivity.Source, true)
+	w.append("command-output", budget.WarnCommandOutput.Value, measurement.Commands.OutputBytes, "bytes", budget.WarnCommandOutput.Source, true)
+}
+
+func (w *warningTracker) append(dimension string, limit, observed int64, unit, source string, enforceable bool) {
+	if limit <= 0 || observed < limit {
+		return
+	}
+	if w.events == nil {
+		w.events = map[string]adapter.BudgetEvent{}
+	}
+	if _, exists := w.events[dimension]; !exists {
+		w.events[dimension] = adapter.BudgetEvent{Dimension: dimension, Kind: "warning", Limit: limit, Observed: observed, Unit: unit, Source: source, Evaluation: "live", Enforceable: enforceable}
+	}
+}
+
+func (w *warningTracker) appendTo(measurement *adapter.EventEvidence) {
+	for _, dimension := range []string{"elapsed", "activity", "command-output"} {
+		if event, exists := w.events[dimension]; exists {
+			measurement.Budgets = append(measurement.Budgets, event)
+		}
+	}
+}
+
+func appendTerminalTokenWarnings(measurement *adapter.EventEvidence, budget config.Budget) {
+	appendWarning := func(dimension string, limit, observed int64, unit, source string) {
+		if limit > 0 && observed >= limit {
+			measurement.Budgets = append(measurement.Budgets, adapter.BudgetEvent{Dimension: dimension, Kind: "warning", Limit: limit, Observed: observed, Unit: unit, Source: source, Evaluation: "terminal-only", Enforceable: false})
+		}
+	}
+	if measurement.Usage.Input != nil {
+		appendWarning("input", budget.WarnInputTokens.Value, *measurement.Usage.Input, "tokens", budget.WarnInputTokens.Source)
+	}
+	if measurement.Usage.Output != nil {
+		appendWarning("output", budget.WarnOutputTokens.Value, *measurement.Usage.Output, "tokens", budget.WarnOutputTokens.Source)
+	}
+}
+
 // structuredCapture independently bounds retained raw JSONL while keeping the
 // decoder fed with every byte.  Display history is deliberately not a parser
 // input: a long stream may truncate retained/displayed progress without losing
@@ -473,7 +616,7 @@ type structuredCapture struct {
 	truncated         bool
 	pending           []byte
 	decoder           adapter.StreamDecoder
-	displayed         int
+	lastActivity      string
 	progressWritten   int64
 	progressTruncated bool
 	closed            bool
@@ -510,11 +653,17 @@ func (c *structuredCapture) Write(data []byte) (int, error) {
 		c.pending = nil
 	}
 	evidence := c.decoder.Evidence()
-	for c.displayed < len(evidence.Progress) {
-		c.writeProgress(evidence.Progress[c.displayed])
-		c.displayed++
+	if evidence.CurrentActivity != "" && evidence.CurrentActivity != c.lastActivity {
+		c.writeProgress("activity=" + evidence.CurrentActivity)
+		c.lastActivity = evidence.CurrentActivity
 	}
 	return len(data), nil
+}
+
+func (c *structuredCapture) evidence() adapter.EventEvidence {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.decoder.Evidence()
 }
 
 func (c *structuredCapture) writeRaw(data []byte) error {
@@ -553,12 +702,8 @@ func (c *structuredCapture) close() adapter.EventEvidence {
 		evidence = c.decoder.Close()
 		_, _ = c.raw.Write([]byte("\n[concoct: structured event log truncated]\n"))
 	}
-	for c.displayed < len(evidence.Progress) {
-		c.writeProgress(evidence.Progress[c.displayed])
-		c.displayed++
-	}
 	if c.progressTruncated && c.progress != nil {
-		_, _ = c.progress.Write([]byte("[concoct: structured progress truncated]\n"))
+		_, _ = c.progress.Write([]byte("[concoct: structured progress truncated; latest activity=" + redact(evidence.CurrentActivity) + "]\n"))
 	}
 	return evidence
 }
@@ -632,6 +777,19 @@ func reconcile(root, record string, prepared Prepared, disposition string, runEr
 	}
 	if runErr != nil && reconciliation.ResultError == "" {
 		reconciliation.ResultError = runErr.Error()
+	}
+	if reconciliation.ResultAccepted {
+		reconciliation.CostDisposition = "accepted"
+	} else {
+		reconciliation.CostDisposition = "wasted"
+	}
+	if disposition == "finalization-failed" {
+		reconciliation.FailedInvariant = reconciliation.ResultError
+		reconciliation.ArtifactReusability = map[string]string{"role-owned-candidate": "preserved; inspect and repair the named invariant", "structured-outcome": "not reusable after repository evidence changes"}
+		reconciliation.Recovery = "repair the preserved candidate manually, run the role's completion command, then authorize a fresh workflow action only if semantic work remains"
+	} else if disposition == "budget-exhausted" {
+		reconciliation.ArtifactReusability = map[string]string{"partial-measurement": "reusable", "late-structured-outcome": "rejected", "role-owned-candidate": "inspect before reuse; completeness is not established"}
+		reconciliation.Recovery = "inspect preserved evidence and current workflow state before choosing a fresh retry or manual completion"
 	}
 	current, _, snapshotErr := orchestration.Snapshot(root)
 	reconciliation.RetrySafe = snapshotErr == nil && current.Digest == prepared.Action.Evidence.Digest

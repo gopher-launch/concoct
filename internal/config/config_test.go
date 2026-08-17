@@ -37,6 +37,26 @@ func TestResolveProfilePrecedenceAndProvenance(t *testing.T) {
 	}
 }
 
+func TestResolveStrictBudgetsAndRawRetention(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".concoct"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	writeConfig(t, filepath.Join(root, ".concoct", "config.yaml"), "exec:\n  roles:\n    developer:\n      budget:\n        warn-elapsed: 2m\n        hard-elapsed: 3m\n        warn-activity: 10\n        hard-activity: 20\n        warn-command-output-bytes: 1000\n        hard-command-output-bytes: 2000\n  retention:\n    raw-events: true\n")
+	resolved, err := Resolve(root, "developer", Overrides{}, Defaults{Adapter: "codex", Reasoning: "high", Timeout: 10 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved.Retention.RawEvents || resolved.Budget.HardActivity.Value != 20 || resolved.Budget.HardElapsed != 3*time.Minute || resolved.Budget.HardActivity.Source != "project role configuration" {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+	writeConfig(t, filepath.Join(root, ".concoct", "config.yaml"), "exec:\n  roles:\n    developer:\n      budget:\n        warn-activity: 20\n        hard-activity: 10\n")
+	if _, err := Resolve(root, "developer", Overrides{}, Defaults{Adapter: "codex", Reasoning: "high", Timeout: 10 * time.Minute}); err == nil || !strings.Contains(err.Error(), "cannot exceed") {
+		t.Fatalf("contradictory budget error = %v", err)
+	}
+}
+
 func TestResolveRejectsUnknownAndInvalidConfiguration(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".concoct"), 0o755); err != nil {

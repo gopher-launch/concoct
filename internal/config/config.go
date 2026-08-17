@@ -25,10 +25,22 @@ const (
 )
 
 type profile struct {
-	Adapter   string `yaml:"adapter"`
-	Model     string `yaml:"model"`
-	Reasoning string `yaml:"reasoning"`
-	Timeout   string `yaml:"timeout"`
+	Adapter   string       `yaml:"adapter"`
+	Model     string       `yaml:"model"`
+	Reasoning string       `yaml:"reasoning"`
+	Timeout   string       `yaml:"timeout"`
+	Budget    budgetConfig `yaml:"budget"`
+}
+
+type budgetConfig struct {
+	WarnElapsed       string `yaml:"warn-elapsed"`
+	HardElapsed       string `yaml:"hard-elapsed"`
+	WarnActivity      int64  `yaml:"warn-activity"`
+	HardActivity      int64  `yaml:"hard-activity"`
+	WarnCommandOutput int64  `yaml:"warn-command-output-bytes"`
+	HardCommandOutput int64  `yaml:"hard-command-output-bytes"`
+	WarnInputTokens   int64  `yaml:"warn-input-tokens"`
+	WarnOutputTokens  int64  `yaml:"warn-output-tokens"`
 }
 
 type fileConfig struct {
@@ -43,6 +55,7 @@ type fileConfig struct {
 			MaxAge       string `yaml:"max-age"`
 			MaxLogBytes  int64  `yaml:"max-log-bytes"`
 			MaxTotal     int64  `yaml:"max-total-bytes"`
+			RawEvents    *bool  `yaml:"raw-events"`
 		} `yaml:"retention"`
 	} `yaml:"exec"`
 	Run struct {
@@ -68,6 +81,7 @@ type Retention struct {
 	MaxAge       time.Duration
 	MaxLogBytes  int64
 	MaxTotal     int64
+	RawEvents    bool
 }
 type Resolved struct {
 	Adapter, Model, Reasoning Value
@@ -75,6 +89,19 @@ type Resolved struct {
 	TimeoutSource             string
 	Retention                 Retention
 	RetentionSource           map[string]string
+	Budget                    Budget
+}
+
+type BudgetValue struct {
+	Value  int64
+	Source string
+}
+type Budget struct {
+	WarnElapsed, HardElapsed             time.Duration
+	WarnElapsedSource, HardElapsedSource string
+	WarnActivity, HardActivity           BudgetValue
+	WarnCommandOutput, HardCommandOutput BudgetValue
+	WarnInputTokens, WarnOutputTokens    BudgetValue
 }
 
 // RunOverrides are invocation-only restrictions. They can add approval gates
@@ -185,12 +212,13 @@ func Resolve(root, role string, override Overrides, defaults Defaults) (Resolved
 		Model:     Value{defaults.Model, "adapter general default"},
 		Reasoning: Value{defaults.Reasoning, "adapter general default"},
 		Timeout:   defaults.Timeout, TimeoutSource: "adapter general default",
-		Retention:       Retention{DefaultMaxCompleted, DefaultMaxAge, DefaultMaxLogBytes, DefaultMaxTotal},
-		RetentionSource: map[string]string{"max-completed": "built-in default", "max-age": "built-in default", "max-log-bytes": "built-in default", "max-total-bytes": "built-in default"},
+		Retention:       Retention{MaxCompleted: DefaultMaxCompleted, MaxAge: DefaultMaxAge, MaxLogBytes: DefaultMaxLogBytes, MaxTotal: DefaultMaxTotal, RawEvents: false},
+		RetentionSource: map[string]string{"max-completed": "built-in default", "max-age": "built-in default", "max-log-bytes": "built-in default", "max-total-bytes": "built-in default", "raw-events": "built-in default (disabled)"},
 	}
 	if roleDefault, ok := defaults.Roles[role]; ok {
 		applyDefaults(&resolved, roleDefault, "adapter role default")
 	}
+	applyBuiltInRoleBudget(&resolved.Budget, role)
 	if userExists {
 		if user.Exec.Adapter != "" {
 			resolved.Adapter = Value{user.Exec.Adapter, "user configuration"}
@@ -230,7 +258,37 @@ func Resolve(root, role string, override Overrides, defaults Defaults) (Resolved
 	if resolved.Retention.MaxCompleted < 1 || resolved.Retention.MaxAge < time.Hour || resolved.Retention.MaxLogBytes < 1024 || resolved.Retention.MaxTotal < resolved.Retention.MaxLogBytes {
 		return Resolved{}, fmt.Errorf("retention requires max-completed >= 1, max-age >= 1h, max-log-bytes >= 1024, and max-total-bytes >= max-log-bytes")
 	}
+	if resolved.Budget.HardElapsed > 0 && resolved.Budget.HardElapsed >= resolved.Timeout {
+		return Resolved{}, fmt.Errorf("hard-elapsed budget must be lower than timeout")
+	}
+	if err := validateResolvedBudget(resolved.Budget); err != nil {
+		return Resolved{}, err
+	}
 	return resolved, nil
+}
+
+func applyBuiltInRoleBudget(b *Budget, role string) {
+	// Warning-only defaults are deliberately above the retained CON-037
+	// production observations. They surface amplification without terminating
+	// an invocation. Hard bounds remain explicit project/user choices because
+	// terminal token totals are not live-enforceable Codex evidence.
+	values := map[string]struct {
+		elapsed                            time.Duration
+		activity, output, input, generated int64
+	}{
+		"developer": {25 * time.Minute, 120, 4 * 1024 * 1024, 2_000_000, 25_000},
+		"reviewer":  {20 * time.Minute, 80, 2 * 1024 * 1024, 750_000, 15_000},
+		"archivist": {15 * time.Minute, 50, 1024 * 1024, 500_000, 12_000},
+	}
+	v, ok := values[role]
+	if !ok {
+		return
+	}
+	b.WarnElapsed, b.WarnElapsedSource = v.elapsed, "built-in retained-evidence default"
+	b.WarnActivity = BudgetValue{v.activity, "built-in retained-evidence default"}
+	b.WarnCommandOutput = BudgetValue{v.output, "built-in retained-evidence default"}
+	b.WarnInputTokens = BudgetValue{v.input, "built-in retained-evidence default"}
+	b.WarnOutputTokens = BudgetValue{v.generated, "built-in retained-evidence default"}
 }
 
 func UserPath() (string, error) {
@@ -319,6 +377,9 @@ func validateFile(c fileConfig, exists bool, source string) error {
 				return fmt.Errorf("%s: role %s: %w", source, role, err)
 			}
 		}
+		if err := validateBudget(c.Exec.Roles[role].Budget); err != nil {
+			return fmt.Errorf("%s: role %s: %w", source, role, err)
+		}
 	}
 	if value := c.Exec.Retention.MaxAge; value != "" {
 		if _, err := parseDuration("retention max-age", value); err != nil {
@@ -388,6 +449,58 @@ func applyRole(r *Resolved, p profile, source string) {
 			r.Timeout, r.TimeoutSource = d, source
 		}
 	}
+	applyBudget(&r.Budget, p.Budget, source)
+}
+
+func validateBudget(b budgetConfig) error {
+	for name, value := range map[string]string{"warn-elapsed": b.WarnElapsed, "hard-elapsed": b.HardElapsed} {
+		if value != "" {
+			d, err := parseDuration(name, value)
+			if err != nil || d <= 0 {
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("%s must be positive", name)
+			}
+		}
+	}
+	for name, value := range map[string]int64{"warn-activity": b.WarnActivity, "hard-activity": b.HardActivity, "warn-command-output-bytes": b.WarnCommandOutput, "hard-command-output-bytes": b.HardCommandOutput, "warn-input-tokens": b.WarnInputTokens, "warn-output-tokens": b.WarnOutputTokens} {
+		if value < 0 {
+			return fmt.Errorf("%s cannot be negative", name)
+		}
+	}
+	return nil
+}
+
+func applyBudget(dst *Budget, src budgetConfig, source string) {
+	if src.WarnElapsed != "" {
+		dst.WarnElapsed, _ = time.ParseDuration(src.WarnElapsed)
+		dst.WarnElapsedSource = source
+	}
+	if src.HardElapsed != "" {
+		dst.HardElapsed, _ = time.ParseDuration(src.HardElapsed)
+		dst.HardElapsedSource = source
+	}
+	for _, item := range []struct {
+		value  int64
+		target *BudgetValue
+	}{{src.WarnActivity, &dst.WarnActivity}, {src.HardActivity, &dst.HardActivity}, {src.WarnCommandOutput, &dst.WarnCommandOutput}, {src.HardCommandOutput, &dst.HardCommandOutput}, {src.WarnInputTokens, &dst.WarnInputTokens}, {src.WarnOutputTokens, &dst.WarnOutputTokens}} {
+		if item.value > 0 {
+			*item.target = BudgetValue{Value: item.value, Source: source}
+		}
+	}
+}
+
+func validateResolvedBudget(b Budget) error {
+	if b.WarnElapsed > 0 && b.HardElapsed > 0 && b.WarnElapsed > b.HardElapsed {
+		return fmt.Errorf("warn-elapsed budget cannot exceed hard-elapsed")
+	}
+	for name, pair := range map[string][2]int64{"activity": {b.WarnActivity.Value, b.HardActivity.Value}, "command-output-bytes": {b.WarnCommandOutput.Value, b.HardCommandOutput.Value}} {
+		if pair[0] > 0 && pair[1] > 0 && pair[0] > pair[1] {
+			return fmt.Errorf("warning %s budget cannot exceed hard budget", name)
+		}
+	}
+	return nil
 }
 func applyRetention(r *Resolved, c fileConfig, source string) {
 	x := c.Exec.Retention
@@ -404,6 +517,9 @@ func applyRetention(r *Resolved, c fileConfig, source string) {
 	}
 	if x.MaxTotal != 0 {
 		r.Retention.MaxTotal, r.RetentionSource["max-total-bytes"] = x.MaxTotal, source
+	}
+	if x.RawEvents != nil {
+		r.Retention.RawEvents, r.RetentionSource["raw-events"] = *x.RawEvents, source
 	}
 }
 func parseDuration(name, value string) (time.Duration, error) {

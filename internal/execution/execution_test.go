@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gopher-launch/concoct/internal/adapter"
 	"github.com/gopher-launch/concoct/internal/config"
+	"github.com/gopher-launch/concoct/internal/defaults"
 	"github.com/gopher-launch/concoct/internal/prompt"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
@@ -56,9 +58,7 @@ func TestEverySupervisedRoleReceivesExactManualPromptPlusFixedAppendix(t *testin
 	})
 
 	for _, test := range []struct {
-		name    string
-		state   string
-		command string
+		name, state, command string
 	}{
 		{name: "developer", state: "planned", command: "code"},
 		{name: "reviewer", state: "implementation-complete", command: "review"},
@@ -75,6 +75,171 @@ func TestEverySupervisedRoleReceivesExactManualPromptPlusFixedAppendix(t *testin
 				t.Fatal(err)
 			}
 			assertSupervisedPrompt(t, prepared.Prompt, manual)
+		})
+	}
+}
+
+func TestLiveRoleBenchmarkContractsAreConcrete(t *testing.T) {
+	root := supervisedPromptFixture(t, "planned")
+	plan, err := os.ReadFile(filepath.Join(root, ".concoct/current/task-plan.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(plan, []byte("benchmark-result.txt")) || !bytes.Contains(plan, []byte("## Acceptance criteria")) {
+		t.Fatalf("Developer benchmark task is not concrete: %s", plan)
+	}
+	for _, test := range []struct{ resource, contract string }{
+		{"persona-reviewer", "must match. The `## Outcome` section"},
+		{"persona-archivist", "The parser resolves that directory to `summary.md`"},
+	} {
+		body, err := defaults.Read(test.resource, "benchmark contract test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(body, []byte(test.contract)) {
+			t.Fatalf("%s lacks completion contract %q", test.resource, test.contract)
+		}
+	}
+}
+
+func TestLiveRoleBenchmarkFixturesReachCompletionOffline(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     string
+		wantState workflow.State
+		mutations string
+	}{
+		{
+			name:      "developer",
+			state:     "planned",
+			wantState: workflow.Complete,
+			mutations: `
+printf 'benchmark-complete\n' > benchmark-result.txt
+sed -i '0,/status: planned/s//status: implementation-complete/' .concoct/current/task-plan.md
+cat >> .concoct/current/notes.md <<'EOF'
+
+## Handoff to reviewer
+
+### Implemented
+
+Created the exact benchmark result.
+
+### Verification
+
+Exact content checked.
+
+### Known risks
+
+None.
+
+### Capability impact
+
+None.
+
+### Suggested review focus
+
+Exact file content and scope.
+EOF
+`,
+		},
+		{
+			name:      "reviewer",
+			state:     "implementation-complete",
+			wantState: workflow.Approved,
+			mutations: `
+cat > .concoct/current/review-01.md <<'EOF'
+---
+task-id: APP-001
+review: 1
+status: approved
+created: 2026-08-14
+persona: reviewer
+---
+# Review 01
+
+<!-- Replace status: reserved with exactly one supported outcome and complete the review. -->
+
+## Outcome
+
+` + "`approved`" + `
+
+## Summary
+
+The exact fixture result and scope satisfy the task.
+EOF
+`,
+		},
+		{
+			name:      "archivist",
+			state:     "approved",
+			wantState: workflow.Archived,
+			mutations: `
+archive=".concoct/archive/$(date +%F)-APP-001-demo"
+mkdir -p "$archive"
+cp .concoct/current/task-plan.md "$archive/task-plan.md"
+cp .concoct/current/notes.md "$archive/notes.md"
+cp .concoct/current/review-01.md "$archive/review-01.md"
+cat > "$archive/summary.md" <<EOF
+---
+task-id: APP-001
+roadmap-id: APP-001
+status: archived
+archived: $(date +%F)
+review: review-01.md
+delivery: pending-integration
+capability-impact:
+  type: none
+---
+# Summary
+
+## Delivered outcome
+
+Created the exact benchmark result.
+
+## Key decisions
+
+Kept the fixture deliberately narrow.
+
+## Files and areas changed
+
+Benchmark result and workflow evidence.
+
+## Verification
+
+Exact content checked.
+
+## Review outcome
+
+Approved by review-01.md.
+
+## Capability changes
+
+None.
+
+## Skipped work
+
+None.
+
+## Follow-up work
+
+None.
+EOF
+awk -v archive="$archive" '{print; if ($0 == "- Status: ` + "`active`" + `") print "- Archive: ` + "`" + `" archive "/` + "`" + `"}' .concoct/roadmap.md > .concoct/roadmap.md.tmp
+mv .concoct/roadmap.md.tmp .concoct/roadmap.md
+`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := supervisedPromptFixture(t, test.state)
+			installFakeCodex(t, supervisedOutcomeScript(test.mutations, "completed", "", ""))
+			result, err := Run(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
+			if err != nil {
+				t.Fatalf("offline fixture did not complete: %v", err)
+			}
+			if !result.Reconciliation.ResultAccepted || result.Reconciliation.ObservedState != test.wantState {
+				t.Fatalf("reconciliation = %#v, want accepted state %s", result.Reconciliation, test.wantState)
+			}
 		})
 	}
 }
@@ -233,6 +398,180 @@ func TestTimeoutAndConfigurationDriftAreRejected(t *testing.T) {
 			t.Fatal("changed user configuration remained authorized")
 		}
 	})
+}
+
+func TestHardElapsedBudgetStopsWithDistinctDisposition(t *testing.T) {
+	root := readyFixture(t)
+	if err := os.WriteFile(filepath.Join(root, ".concoct", "config.yaml"), []byte("exec:\n  roles:\n    product-owner:\n      budget:\n        hard-elapsed: 40ms\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installFakeCodex(t, "sleep 10")
+	result, err := Run(context.Background(), root, Options{Override: config.Overrides{Timeout: "2s"}}, strings.NewReader(""), &strings.Builder{})
+	if err == nil || result.Reconciliation.InvocationDisposition != "budget-exhausted" || result.Reconciliation.ResultAccepted {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if len(result.Measurement.Budgets) == 0 || result.Measurement.Budgets[0].Dimension != "elapsed" || !result.Measurement.Budgets[0].Enforceable {
+		t.Fatalf("budget evidence = %#v", result.Measurement.Budgets)
+	}
+}
+
+func TestEventDrivenHardBudgetsRejectLateCandidateAndPreserveMeasurement(t *testing.T) {
+	// The candidate is deliberately written after the threshold event but before
+	// the adapter is stopped. This exercises the stop-decision precedence that
+	// prevents a racing structured result from advancing workflow state.
+	tests := []struct {
+		name, budget, event, dimension, unit string
+	}{
+		{
+			name:      "activity",
+			budget:    "hard-activity: 1",
+			event:     `{"type":"item.completed","item":{"type":"command_execution","command":"go test ./...","aggregated_output":"ok"}}`,
+			dimension: "activity",
+			unit:      "events",
+		},
+		{
+			name:      "command output",
+			budget:    "hard-command-output-bytes: 1",
+			event:     `{"type":"item.completed","item":{"type":"command_execution","command":"go test ./...","aggregated_output":"output"}}`,
+			dimension: "command-output",
+			unit:      "bytes",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := readyFixture(t)
+			if err := os.WriteFile(filepath.Join(root, ".concoct", "config.yaml"), []byte("exec:\n  roles:\n    product-owner:\n      budget:\n        "+test.budget+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			installFakeCodex(t, lateCandidateAfterEventScript(test.event))
+
+			result, err := Run(context.Background(), root, Options{Override: config.Overrides{Timeout: "2s"}}, strings.NewReader(""), &strings.Builder{})
+			if err == nil {
+				t.Fatal("expected hard budget exhaustion")
+			}
+			if result.Reconciliation.InvocationDisposition != "budget-exhausted" || result.Reconciliation.ResultAccepted {
+				t.Fatalf("reconciliation=%#v err=%v", result.Reconciliation, err)
+			}
+			if result.Reconciliation.ArtifactReusability["late-structured-outcome"] != "rejected" {
+				t.Fatalf("late candidate reuse guidance = %#v", result.Reconciliation.ArtifactReusability)
+			}
+			if _, err := os.Stat(filepath.Join(result.RecordPath, "adapter-result.json")); err != nil {
+				t.Fatalf("late candidate was not preserved: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(result.RecordPath, "result.json")); !os.IsNotExist(err) {
+				t.Fatalf("late candidate was accepted into result evidence: %v", err)
+			}
+			report := workflow.Detect(root)
+			if report.State != workflow.Ready {
+				t.Fatalf("workflow state advanced to %s: %#v", report.State, report)
+			}
+			if result.Measurement.ActivityEvents == 0 || result.Measurement.Commands.OutputBytes == 0 {
+				t.Fatalf("partial measurement was not preserved: %#v", result.Measurement)
+			}
+			var event *adapter.BudgetEvent
+			for index := range result.Measurement.Budgets {
+				candidate := &result.Measurement.Budgets[index]
+				if candidate.Kind == "hard" && candidate.Dimension == test.dimension {
+					event = candidate
+					break
+				}
+			}
+			if event == nil || event.Source != "project role configuration" || event.Observed < event.Limit || event.Unit != test.unit || event.Evaluation != "live" || !event.Enforceable {
+				t.Fatalf("hard budget evidence = %#v", result.Measurement.Budgets)
+			}
+		})
+	}
+}
+
+func lateCandidateAfterEventScript(event string) string {
+	return `output=""
+schema=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-schema) schema="$2"; shift 2 ;;
+    --output-last-message) output="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+value() {
+  awk -v key="\"$1\"" '$0 ~ key { found=1 } found && /"const":/ { line=$0; sub(/^.*"const": "/, "", line); sub(/".*$/, "", line); print line; exit }' "$schema"
+}
+printf '%s\n' '` + event + `'
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"no-action","command":"","reason":"no eligible work"}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"
+sleep 10`
+}
+
+func TestWarningBudgetsAreRecordedOnceAcrossTerminalDispositions(t *testing.T) {
+	tests := []struct {
+		name, budget, body, disposition string
+	}{
+		{
+			name:   "completed",
+			budget: "warn-elapsed: 1ms\n        warn-activity: 1\n        warn-command-output-bytes: 1",
+			body: `output=""
+	schema=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+	    --output-schema) schema="$2"; shift 2 ;;
+    --output-last-message) output="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+value() {
+  awk -v key="\"$1\"" '$0 ~ key { found=1 } found && /"const":/ { line=$0; sub(/^.*"const": "/, "", line); sub(/".*$/, "", line); print line; exit }' "$schema"
+}
+printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution","command":"go test ./...","aggregated_output":"ok"}}'
+sleep 0.04
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"no-action","command":"","reason":"no eligible work"}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"`,
+			disposition: "completed",
+		},
+		{
+			name:        "nonzero exit",
+			budget:      "warn-elapsed: 1ms\n        warn-activity: 1\n        warn-command-output-bytes: 1",
+			body:        "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"go test ./...\",\"aggregated_output\":\"ok\"}}'\nsleep 0.04\nexit 1",
+			disposition: "nonzero-exit",
+		},
+		{
+			name:        "hard stopped",
+			budget:      "warn-elapsed: 1ms\n        warn-activity: 1\n        warn-command-output-bytes: 1\n        hard-elapsed: 40ms",
+			body:        "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"go test ./...\",\"aggregated_output\":\"ok\"}}'\nsleep 10",
+			disposition: "budget-exhausted",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := readyFixture(t)
+			if err := os.WriteFile(filepath.Join(root, ".concoct", "config.yaml"), []byte("exec:\n  roles:\n    product-owner:\n      budget:\n        "+test.budget+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			installFakeCodex(t, test.body)
+			result, err := Run(context.Background(), root, Options{Override: config.Overrides{Timeout: "2s"}}, strings.NewReader(""), &strings.Builder{})
+			if test.disposition == "completed" && err != nil {
+				t.Fatal(err)
+			}
+			if test.disposition != "completed" && err == nil {
+				t.Fatal("expected execution failure")
+			}
+			if result.Reconciliation.InvocationDisposition != test.disposition {
+				t.Fatalf("disposition=%q err=%v", result.Reconciliation.InvocationDisposition, err)
+			}
+			seen := map[string]adapter.BudgetEvent{}
+			for _, event := range result.Measurement.Budgets {
+				if event.Kind == "warning" {
+					if _, duplicate := seen[event.Dimension]; duplicate {
+						t.Fatalf("duplicate warning events: %#v", result.Measurement.Budgets)
+					}
+					seen[event.Dimension] = event
+				}
+			}
+			for _, dimension := range []string{"elapsed", "activity", "command-output"} {
+				event, ok := seen[dimension]
+				if !ok || event.Evaluation != "live" || !event.Enforceable {
+					t.Fatalf("%s warning=%#v all=%#v", dimension, event, result.Measurement.Budgets)
+				}
+			}
+		})
+	}
 }
 
 func TestRepositoryDriftAfterPreparePreventsAdapterLaunch(t *testing.T) {
@@ -396,7 +735,7 @@ func plannedGitFixture(t *testing.T) string {
 	base := executionGit(t, root, "rev-parse", "HEAD")
 	executionGit(t, root, "checkout", "-qb", "concoct/app-001-demo")
 	write(".concoct/roadmap.md", "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n## APP-001 — Demo\n- Status: `active`\n- Depends on: `none`\n")
-	write(".concoct/current/task-plan.md", "---\nid: APP-001\ntitle: Demo\nroadmap-id: APP-001\nstatus: planned\ncreated: 2026-01-01\nupdated: 2026-01-01\ngit:\n  enabled: true\n  trunk: main\n  task-branch: concoct/app-001-demo\n  base: "+base+"\n  status: active\ncapability-impact:\n  type: none\n  rationale: No impact.\n---\n# Task Plan\n")
+	write(".concoct/current/task-plan.md", "---\nid: APP-001\ntitle: Demo\nroadmap-id: APP-001\nstatus: planned\ncreated: 2026-01-01\nupdated: 2026-01-01\ngit:\n  enabled: true\n  trunk: main\n  task-branch: concoct/app-001-demo\n  base: "+base+"\n  status: active\ncapability-impact:\n  type: none\n  rationale: This fixture exercises workflow completion without changing product capability truth.\n---\n# Task Plan\n\n## Goal\n\nCreate `benchmark-result.txt` containing exactly `benchmark-complete` followed by a newline.\n\n## Constraints\n\nDo not change any other product file. Workflow evidence changes required by the Developer contract are allowed.\n\n## Acceptance criteria\n\n- `benchmark-result.txt` exists at the repository root.\n- Its complete byte content is `benchmark-complete\\n`.\n\n## Verification\n\nRun `test \"$(cat benchmark-result.txt)\" = benchmark-complete`.\n")
 	write(".concoct/current/notes.md", "# Notes\n\nPlanned.\n")
 	executionGit(t, root, "add", "-A")
 	executionGit(t, root, "commit", "-qm", "concoct: plan APP-001")
@@ -433,8 +772,37 @@ cat > /dev/null
 value() {
   awk -v key="\"$1\"" '$0 ~ key { found=1 } found && /"const":/ { line=$0; sub(/^.*"const": "/, "", line); sub(/".*$/, "", line); print line; exit }' "$schema"
 }
+
 ` + mutations + `
 printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"%s","summary":"candidate","artifacts":[],"intervention":{"kind":"%s","next":"%s"},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" ` + shellQuote(class) + ` ` + shellQuote(intervention) + ` ` + shellQuote(next) + ` > "$output"`
+}
+
+func TestLiveBenchmarkMetricsSurviveRejectedOutcome(t *testing.T) {
+	root := plannedGitFixture(t)
+	installFakeCodex(t, supervisedOutcomeScript(`
+printf '{"type":"item.completed","item":{"type":"command_execution","command":"go test ./...","aggregated_output":"failed","exit_code":1,"status":"failed"}}\n'
+printf '{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":80,"output_tokens":9,"total_tokens":129}}\n'
+`, "failed-recoverable", "developer-remediation", "Developer resolves implementation evidence or escalates scope"))
+	result, runErr := Run(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
+	if runErr == nil || !strings.Contains(runErr.Error(), "accepted non-completion outcome") {
+		t.Fatalf("expected rejected completion outcome, got %v", runErr)
+	}
+	evidenceDir := t.TempDir()
+	metrics, err := retainLiveBenchmarkMetrics(evidenceDir, "developer", root, result)
+	if err != nil {
+		t.Fatalf("retain rejected benchmark metrics: %v", err)
+	}
+	for _, want := range []string{`"input_tokens": 120`, `"activity_events": 2`, `"result_accepted": true`, `"outcome_class": "failed-recoverable"`} {
+		if !bytes.Contains(metrics, []byte(want)) {
+			t.Fatalf("retained metrics lack %s: %s", want, metrics)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(evidenceDir, "developer-metrics.json")); err != nil {
+		t.Fatalf("rejected benchmark metrics were not durably exported: %v", err)
+	}
+	if _, err := retainLiveBenchmarkMetrics(evidenceDir, "developer", root, result); err == nil || !strings.Contains(err.Error(), "without overwriting") {
+		t.Fatalf("expected create-only evidence protection, got %v", err)
+	}
 }
 
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
@@ -602,7 +970,7 @@ func TestStructuredCaptureDecodesIncrementallyAndRedactsRawEvents(t *testing.T) 
 	if strings.Contains(retained.String(), "supersecret") || !strings.Contains(retained.String(), "[REDACTED]") {
 		t.Fatalf("structured record = %q", retained.String())
 	}
-	if strings.Contains(displayed.String(), "supersecret") || strings.Contains(displayed.String(), "OPENAI_API_KEY") || !strings.Contains(displayed.String(), "item.started") {
+	if strings.Contains(displayed.String(), "supersecret") || strings.Contains(displayed.String(), "OPENAI_API_KEY") || !strings.Contains(displayed.String(), "activity=unknown") {
 		t.Fatalf("unsafe structured progress = %q", displayed.String())
 	}
 	if len(displayed.String()) > 96 {
@@ -661,11 +1029,32 @@ func TestStructuredCaptureBoundsMalformedAndOversizedEvidence(t *testing.T) {
 	if evidence.Usage.Total == nil || *evidence.Usage.Total != 29 || !evidence.DiagnosticsTruncated || !evidence.EventTruncated {
 		t.Fatalf("evidence = %#v", evidence)
 	}
-	if len(measurement) > 1024 {
+	if len(measurement) > 2048 {
 		t.Fatalf("measurement = %d bytes: %s", len(measurement), measurement)
 	}
 	if len(retained.String()) > 192 {
 		t.Fatalf("retained raw evidence = %d bytes", len(retained.String()))
+	}
+}
+
+func TestStructuredProgressReportsLatestSemanticActivityAfterRollover(t *testing.T) {
+	var retained, displayed strings.Builder
+	capture := newStructuredCapture(&retained, &displayed, 96)
+	for i := 0; i < 30; i++ {
+		item := "agent_message"
+		if i%2 == 1 {
+			item = "file_change"
+		}
+		if _, err := capture.Write([]byte(`{"type":"item.completed","item":{"type":"` + item + `"}}` + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evidence := capture.close()
+	if !strings.Contains(displayed.String(), "structured progress truncated; latest activity=edit") || evidence.CurrentActivity != "edit" {
+		t.Fatalf("display=%q evidence=%#v", displayed.String(), evidence)
+	}
+	if strings.Contains(displayed.String(), "item.completed") {
+		t.Fatalf("generic lifecycle label leaked into semantic display: %q", displayed.String())
 	}
 }
 
@@ -807,8 +1196,17 @@ func supervisedPromptFixture(t *testing.T, state string) string {
 	if err := os.WriteFile(notesPath, append(notes, []byte(handoff)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "benchmark-result.txt"), []byte("benchmark-complete\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	executionGit(t, root, "add", "-A")
 	executionGit(t, root, "commit", "-qm", "concoct: complete APP-001 implementation")
+	reservation := "---\ntask-id: APP-001\nreview: 1\nstatus: reserved\ncreated: 2026-08-14\npersona: reviewer\n---\n\n# Review 01\n\n<!-- Replace status: reserved with exactly one supported outcome and complete the review. -->\n"
+	if err := os.WriteFile(filepath.Join(root, ".concoct", "current", "review-01.md"), []byte(reservation), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	executionGit(t, root, "add", "-A")
+	executionGit(t, root, "commit", "-qm", "benchmark review reservation")
 	if state == "implementation-complete" {
 		return root
 	}
