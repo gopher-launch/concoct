@@ -725,3 +725,192 @@ requires intervention.
 - Stale outcomes and externally invalidated recommendations cannot be applied.
 - Resolved gates, blockers, and decisions can continue the same run with retained context.
 - A user can inspect and safely abandon an incomplete run without corrupting task state.
+
+## CON-039 — Make supervised role completion transactional and recoverable
+
+- Status: `planned`
+- Priority: `critical`
+- Depends on: None
+- Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-010, CAP-011, CAP-012, CAP-013, CAP-014, CAP-015
+- Capability impact: makes supervised Developer, Reviewer, and Archivist completion reliable and recoverable without repeating usable agent work
+
+### Outcome
+
+Make every supervised Developer, Reviewer, and Archivist action cross a clear
+transactional boundary: Concoct either accepts the candidate and completes the
+durable workflow transition, or preserves the rejected candidate with an exact
+diagnosis and a supported path to repair, continue, or deliberately abandon it.
+
+Successful agent work must not become stranded merely because deterministic
+finalization rejects incomplete, malformed, or incorrectly attributed evidence.
+
+### Rationale
+
+The first real `concoct run` and the CON-037/CON-038 live exercises repeatedly
+produced substantively useful candidates that failed deterministic finalization.
+Examples included missing Developer completion metadata, Reviewer evidence without
+executable-owned reservation provenance, Archivist ordering and archive-reference
+errors, and unsupported roadmap fields.
+
+Concoct preserved many of these changes physically, but normal commands could not
+resume them because the retained candidate left the worktree dirty or lacked
+executable-owned transition evidence. Recovery required expert knowledge, custom
+prompts, or manual movement and reconstruction of artifacts. Repeating a full role
+invocation would waste model allocation and could overwrite or diverge from usable
+work.
+
+Protective validation is correct and must remain strict. The defect is that
+preparation, finalization, reporting, and recovery do not yet form one supported
+transactional protocol.
+
+### Requirements
+
+#### Prepared supervised boundaries
+
+- Before invoking a role, establish every executable-owned prerequisite that can
+  be established deterministically, including the exact next Reviewer reservation.
+- Render the role prompt against the prepared evidence and identify the exact
+  artifacts and transition the candidate is authorized to complete.
+- Record enough bounded local attempt identity and baseline evidence to distinguish
+  the supervised candidate from unrelated or subsequently introduced worktree
+  changes.
+- Do not ask an agent to manufacture executable-owned provenance or transition
+  evidence that Concoct can prepare itself.
+
+#### Atomic finalization
+
+- Treat the agent's structured outcome as a candidate declaration, not proof that
+  the durable workflow transition completed.
+- Validate the declared outcome, authorized file set, artifact schemas, workflow
+  invariants, Git state, and role-specific completion boundary before accepting the
+  transition.
+- Commit or otherwise finalize accepted role evidence only through the existing
+  executable-owned authority.
+- Never report a candidate outcome as a completed durable transition when
+  finalization was rejected.
+- Preserve strict validation; do not silently repair semantic evidence, infer an
+  approving outcome, weaken independent review, or accept unauthorized changes.
+
+#### Recoverable rejected candidates
+
+- Preserve a rejected or interrupted supervised candidate when it can be retained
+  safely, and identify it as belonging to the exact role attempt and baseline.
+- Allow the applicable role command or `concoct run` continuation to inspect and
+  resume an eligible retained candidate without requiring a clean worktree and
+  without replaying the completed agent work.
+- Distinguish authorized retained changes from unrelated user changes, stale
+  results, superseded attempts, and drift from the recorded baseline.
+- Refuse automatic continuation when provenance or ownership is ambiguous, while
+  preserving all work and reporting the decision required from the operator.
+- Support deliberate abandonment of the retained attempt without silently deleting
+  source changes or durable workflow evidence. General project diagnosis and
+  archaeology remain within CON-011 rather than this item.
+- A corrective continuation may invoke an agent only when judgment or substantive
+  editing is still required; deterministic repair or finalization must not trigger
+  an unnecessary billable invocation.
+
+#### Actionable diagnostics and truthful reporting
+
+- On rejection, report the candidate outcome, finalization disposition, unchanged
+  durable workflow state, and exact safe continuation command separately.
+- Identify the failed invariant, affected artifact and location where known,
+  observed value or state, required value or state, and whether deterministic
+  repair, agent continuation, operator decision, or abandonment is appropriate.
+- Developer completion failures must report task status, expected status, latest
+  review, required `remediates-review` relationship, missing finding dispositions,
+  and current next action as applicable.
+- Reviewer completion must validate exactly the executable-reserved artifact and
+  preserve reservation provenance without requiring reservation marker surgery.
+- Archivist completion must diagnose the exact invalid section, provenance record,
+  archive-reference form, or byte-identity requirement rather than reporting only
+  a broad ledger mutation failure.
+- Run summaries must distinguish at least: agent candidate outcome, finalization
+  result, accepted durable transition, resulting workflow state, retained-candidate
+  disposition, and cost classified as accepted or wasted.
+
+#### Review-cycle integrity
+
+- Derive completed review/remediation cycles from durable task and sequential review
+  evidence so the configured cycle limit remains meaningful across separate
+  `concoct run` processes.
+- Rejected or unaccepted review candidates must not increment the durable cycle
+  count, while accepted changes-requested reviews and their remediation must not be
+  forgotten when execution resumes.
+- A workflow must not evade its configured review-cycle bound merely because each
+  action is attempted by a new process.
+
+#### Verification and compatibility
+
+- Cover initial development, review remediation, independent review, and archival
+  candidates across accepted, rejected, blocked, interrupted, stale, ambiguous, and
+  safely resumable outcomes.
+- Include regressions for the observed missing Developer status, missing
+  `remediates-review`, unreserved Reviewer artifact, dirty-worktree deadlock,
+  unsupported Archivist field, incorrect archive reference, wrong capability
+  provenance, notes-order mismatch, and empty completion diagnostic failures.
+- Preserve source/template parity, prompt-only/manual command behavior, policy
+  enforcement, task-branch isolation, independent review, cost measurement, privacy
+  bounds, and supported Codex adapter behavior.
+- Verify full tests, race tests, vet/static checks, native and Windows builds, fresh
+  initialization, shell checks, and focused diff inspection.
+
+### Product decisions before planning
+
+- Persist a bounded, Git-ignored manifest for each supervised action attempt.
+  It records baseline authority, prepared evidence, authorized mutations, captured
+  candidate identity, invocation linkage, diagnostic state, and terminal disposition,
+  but no multi-action run coordination.
+- Derive inspect, deterministic-finalize, role-continue, and abandon operations from
+  retained evidence. Deterministic finalization may proceed under existing authority;
+  another agent invocation and abandonment require explicit operator action.
+- Reconcile the pre-invocation baseline, captured post-invocation candidate, and
+  current state. Preserve later changes automatically only when their ownership and
+  non-interference are provable; ambiguous overlap or authority drift requires
+  intervention.
+- Permit automatic correction only for executable-owned bookkeeping and uniquely
+  derivable mechanical projections. Semantic evidence remains the responsibility of
+  the role that owns it.
+- Retain unresolved attempts until resolution. Retain bounded terminal manifests for
+  30 days and at least the most recent 100 records; never prune source changes, durable
+  workflow evidence, or CAP-015 measurements.
+
+### Scope boundaries
+
+- This item repairs ordinary supervised action preparation, finalization, and
+  immediate candidate recovery. It does not add general-purpose `doctor`, project
+  reconstruction, or historical recovery commands from CON-011.
+- It does not make a multi-action run crash-resumable across environment restart or
+  add permanent run history; those remain CON-034 responsibilities.
+- It does not complete candidate-to-planned selection, delivered-roadmap removal,
+  or ready-state integration reporting; those belong to ready-to-ready lifecycle
+  reconciliation.
+- It does not weaken artifact schemas, role ownership, independent review, Git
+  isolation, or integration approval to make finalization appear successful.
+
+### Acceptance criteria
+
+- `concoct run` prepares and commits the exact next Reviewer reservation before
+  invocation, and an otherwise valid review completes without manual reservation
+  reconstruction.
+- A supervised Developer, Reviewer, or Archivist candidate rejected at finalization
+  remains inspectable and can be safely continued or finalized through a supported
+  command without repeating already completed agent work.
+- Unrelated, stale, superseded, or ambiguously owned worktree changes are never
+  silently accepted as part of a retained candidate.
+- Every rejected completion reports a non-empty, actionable diagnosis and clearly
+  separates the agent's declaration from the rejected durable transition.
+- Initial development and review remediation diagnostics identify all missing
+  machine-required task, review, and notes relationships.
+- Reviewer reservation provenance is executable-owned and cannot be bypassed or
+  reconstructed accidentally from agent-authored content alone.
+- Archivist failures identify the exact invalid mutation or evidence requirement
+  while preserving strict roadmap, capability, archive, and notes validation.
+- Accepted review/remediation cycles remain correctly counted across separate run
+  invocations and enforce the configured bound.
+- Deterministic repair and finalization do not make a billable agent invocation;
+  retained measurement classifies accepted and rejected cost truthfully.
+- Abandonment leaves source work and durable project evidence in an explicit,
+  recoverable state and reports what remains for the operator to resolve.
+- Existing manual role commands, policy behavior, task-branch integration,
+  capability reconciliation, prompt rendering, and agent-cost attribution remain
+  compatible and regression-tested.
