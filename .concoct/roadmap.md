@@ -728,7 +728,7 @@ requires intervention.
 
 ## CON-039 — Make supervised role completion transactional and recoverable
 
-- Status: `planned`
+- Status: `candidate`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-010, CAP-011, CAP-012, CAP-013, CAP-014, CAP-015
