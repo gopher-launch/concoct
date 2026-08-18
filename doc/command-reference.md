@@ -61,10 +61,29 @@ evidence freshness, current artifact state, workflow state, and repository
 state. Executable authority and observed state win over an agent claim. A
 `completed` result is rejected unless an allowed observable postcondition is
 actually present; malformed, duplicate, stale, mismatched, unsupported, or
-contradicted results cannot advance the workflow. Ready-state evidence can
-authorize only a Product Owner decision: it never autonomously selects a
-roadmap item. A successful ready-state decision instead carries one bounded
-`plan`, `roadmap`, `blocker`, or `no-action` recommendation and stops.
+contradicted results cannot advance the workflow. Ready-state evidence
+authorizes only Product Owner judgment. A successful supervised result carries
+one bounded semantic decision—`select`, `reconcile-and-select`, `reconcile`,
+`human-decision-required`, or `no-action`—rather than a command-only
+recommendation. The executable retains the evidence-bound decision privately
+and applies an approved `select` exactly once before continuing to the normal
+planning gate; it never ranks work itself.
+
+Reconciliation decisions may retain up to eight exact record replacements for
+`.concoct/roadmap.md` or `.concoct/capabilities.md`. Each replacement names its
+record and binds its complete previous record using SHA-256. At approval,
+Concoct rejects any changed, missing, or ambiguous previous record; these are
+record-scoped edits, not a general Markdown patch mechanism. A successful
+`concoct run --approve next` applies the retained reconciliation once and then
+either stops or continues directly to the separately authorized planner
+selection.
+
+The executable also validates the candidate record semantics: a roadmap
+promotion is limited to `candidate` → `planned`, while delivered roadmap and
+capability reconciliation must cite an existing archive summary whose status is
+`delivered` and delivery is `complete`. Product Owner cannot add or remove
+records, invent archive evidence, or use reconciliation as an arbitrary prose
+editor.
 
 Project-aware workflow commands first validate `.concoct/project.yaml` before
 creating output files, task branches, reviews, archives, commits, or integration
@@ -377,9 +396,10 @@ gate, intervention, cancellation, unsafe state, failure, no-progress condition,
 or bound stops the invocation. It never invokes `concoct exec` recursively and
 does not infer completion from process output.
 
-Ready state runs only Product Owner judgment. A valid `plan` recommendation is
-stored as a bounded proposal and always stops at `next`; only
-`--approve next` may establish its still-eligible planning context. The shared
+Ready state runs only Product Owner judgment. A valid semantic `select`
+decision is stored as a bounded proposal and always stops at `next`; only
+`--approve next` may establish its still-eligible planning context without a
+second Product Owner invocation. The shared
 planning operation gives manual and coordinated planning identical eligibility,
 branch, base, and prompt behavior. Planned work stops at `plan` by default.
 `--approve plan` authorizes only the exact pending plan. Archived work likewise
@@ -426,8 +446,11 @@ Manual integration retains its configured push behavior; `run` never pushes.
 
 ### Purpose
 
-Render a deterministic, read-only Product Owner prompt that recommends one
-valid next project action without selecting work or mutating lifecycle evidence.
+Render a deterministic, read-only Product Owner prompt that expresses one
+semantic decision without selecting work or mutating lifecycle evidence. The
+manual prompt uses the same decision vocabulary as supervised execution:
+`select`, `reconcile-and-select`, `reconcile`, `human-decision-required`, or
+`no-action`; it never retains or applies that decision.
 
 ### Valid starting states
 
@@ -439,9 +462,9 @@ The command validates and presents roadmap items, priority, dependencies,
 capability prerequisites and limitations, relevant archive provenance, and the
 currently supported human-product-input and roadmap-maintenance origins in
 stable order. Existing planning eligibility remains authoritative. The prompt
-requires exactly one outcome: plan an eligible item, perform supported roadmap
-or product intake, resolve a named blocker or inconsistency, or report no
-actionable recorded work.
+requires exactly one semantic decision: select an eligible item, reconcile
+accepted delivery evidence (optionally with a selection), name one unresolved
+human decision, or report no actionable recorded work.
 
 The command writes deterministic bytes to stdout or a create-only `--output`
 path and changes no workflow artifact or Git state. Presentation order is not

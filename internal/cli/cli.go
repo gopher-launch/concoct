@@ -20,6 +20,7 @@ import (
 	"github.com/gopher-launch/concoct/internal/project"
 	"github.com/gopher-launch/concoct/internal/prompt"
 	"github.com/gopher-launch/concoct/internal/runloop"
+	"github.com/gopher-launch/concoct/internal/runstate"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
@@ -105,7 +106,41 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			return nil
 		}
 		report := workflow.Detect(root)
+		// A retained Product Owner decision is private executable state, not a
+		// workflow phase.  Surface it here so status and run describe the same
+		// ready-state continuation without making status mutate or re-evaluate
+		// product judgment.
+		decision, decisionErr := runstate.LoadDecision(root)
+		if decisionErr == nil && report.State == workflow.Ready {
+			switch decision.Decision.Kind {
+			case "select":
+				if decision.Status != "applied" {
+					report.Next = "concoct run --approve next"
+				}
+			case "reconcile":
+				if decision.Status == "proposed" {
+					report.Next = "concoct run --approve next"
+				}
+			case "reconcile-and-select":
+				if decision.Status == "proposed" {
+					report.Next = "concoct run --approve next"
+				} else if decision.Status == "approved" {
+					report.Next = "concoct plan " + decision.Decision.Selection
+				}
+			case "human-decision-required", "no-action":
+				report.Next = ""
+			}
+		}
 		fmt.Fprint(stdout, report.String())
+		if decisionErr == nil {
+			fmt.Fprintf(stdout, "Product Owner decision: %s (%s)\n", decision.Decision.Kind, decision.Status)
+			if decision.Decision.Selection != "" {
+				fmt.Fprintf(stdout, "Product Owner selection: %s\n", decision.Decision.Selection)
+			}
+			fmt.Fprintf(stdout, "Product Owner rationale: %s\n", decision.Decision.Rationale)
+		} else if !os.IsNotExist(decisionErr) {
+			fmt.Fprintf(stdout, "Product Owner decision: unavailable (%v)\n", decisionErr)
+		}
 		if report.OperationalError != nil {
 			return report.OperationalError
 		}

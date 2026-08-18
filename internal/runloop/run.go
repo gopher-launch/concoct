@@ -227,8 +227,90 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 		return summary, fmt.Errorf("--approve %s requires a current pending gate", options.Approve)
 	}
 
+	// A retained Product Owner decision is the only reusable ready-state
+	// authority.  It is checked before resolving another Product Owner action,
+	// so approving a proposal never pays for a second invocation.
+	var pendingDecision *runstate.DecisionRecord
+	resumedPlan := ""
+	if decision, loadErr := runstate.LoadDecision(root); loadErr == nil {
+		if decision.Status == "proposed" || decision.Status == "approved" {
+			evidence, _, snapErr := orchestration.Snapshot(root)
+			if snapErr != nil {
+				return summary, snapErr
+			}
+			if decision.Evidence != evidence.Digest || decision.State != evidence.State {
+				if err := runstate.InvalidateDecision(root, decision, "repository or workflow evidence changed before Product Owner decision application"); err != nil {
+					return summary, err
+				}
+				return summary, fmt.Errorf("retained Product Owner decision is stale; repository or workflow evidence changed")
+			}
+			switch decision.Decision.Kind {
+			case orchestration.DecisionSelect:
+				if decision.Status == "approved" && approval == nil {
+					// The selection gate has already been consumed.  A failed or
+					// interrupted Task Planner attempt resumes this exact approved
+					// selection directly; it must not require another Product Owner
+					// invocation or a second approval.
+					pendingDecision = &decision
+					resumedPlan = decision.Decision.Selection
+				} else if approval == nil {
+					configDigest, err := config.EvidenceDigest(root)
+					if err != nil {
+						return summary, err
+					}
+					gate, err := runstate.New("next", "task-planning", decision.Decision.Selection, decision.Decision.Selection, evidence, decision.Correlation, configDigest)
+					if err != nil {
+						return summary, err
+					}
+					if err := runstate.Create(root, gate); err != nil && !strings.Contains(err.Error(), "already exists") {
+						return summary, err
+					}
+					summary.State, summary.Gate = evidence.State, "next"
+					summary.Stop, summary.Recommendation = "Product Owner decision awaits explicit approval", "concoct run --approve next"
+					return summary, nil
+				}
+				if approval != nil {
+					if approval.Name != "next" || approval.Action != "task-planning" || approval.Selection != decision.Decision.Selection {
+						return summary, fmt.Errorf("pending approval does not match retained Product Owner decision")
+					}
+					pendingDecision = &decision
+				}
+			case orchestration.DecisionReconcile, orchestration.DecisionReconcileAndSelect:
+				if approval == nil {
+					configDigest, err := config.EvidenceDigest(root)
+					if err != nil {
+						return summary, err
+					}
+					gate, err := runstate.New("next", "reconciliation", "", "", evidence, decision.Correlation, configDigest)
+					if err != nil {
+						return summary, err
+					}
+					if err := runstate.Create(root, gate); err != nil && !strings.Contains(err.Error(), "already exists") {
+						return summary, err
+					}
+					summary.State, summary.Gate = evidence.State, "next"
+					summary.Stop, summary.Recommendation = "Product Owner reconciliation awaits explicit approval", "concoct run --approve next"
+					return summary, nil
+				}
+				if approval.Name != "next" || approval.Action != "reconciliation" {
+					return summary, fmt.Errorf("pending approval does not match retained Product Owner reconciliation")
+				}
+				pendingDecision = &decision
+			case orchestration.DecisionNoAction, orchestration.DecisionHumanRequired:
+				summary.State, summary.Stop = evidence.State, decision.Decision.Rationale
+				return summary, nil
+			default:
+				summary.State = evidence.State
+				summary.Stop = "retained Product Owner reconciliation requires supported canonical application"
+				return summary, nil
+			}
+		}
+	} else if !isNotExist(loadErr) {
+		return summary, loadErr
+	}
+
 	seen := map[string]bool{}
-	selectedPlan := ""
+	selectedPlan := resumedPlan
 	for {
 		if err := ctx.Err(); err != nil {
 			summary.Stop, summary.Recommendation = "run cancelled", "concoct run"
@@ -263,20 +345,65 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 		}
 
 		if approval != nil && approval.Name == "next" && !consumedNext {
-			if report.State != workflow.Ready || approval.Action != "task-planning" {
-				return summary, fmt.Errorf("pending next approval no longer targets ready-state task planning")
+			if report.State != workflow.Ready {
+				return summary, fmt.Errorf("pending next approval no longer targets ready state")
 			}
-			if err := workflow.ValidatePlanItem(root, approval.Selection); err != nil {
-				return summary, fmt.Errorf("pending next selection is no longer eligible: %w", err)
+			if approval.Action == "reconciliation" {
+				if pendingDecision == nil {
+					return summary, fmt.Errorf("pending reconciliation has no retained Product Owner decision")
+				}
+				if err := runstate.ApplyDecision(root, *pendingDecision); err != nil {
+					return summary, err
+				}
+				if pendingDecision.Decision.Kind == orchestration.DecisionReconcile {
+					pendingDecision.Status = "applied"
+					if err := runstate.UpdateDecision(root, *pendingDecision); err != nil {
+						return summary, err
+					}
+					if err := consume(root, approval, "reconciliation", ""); err != nil {
+						return summary, err
+					}
+					summary.State, summary.Stop = workflow.Detect(root).State, "Product Owner reconciliation applied"
+					return finish(root, summary), nil
+				}
+				if err := workflow.ValidatePlanItem(root, pendingDecision.Decision.Selection); err != nil {
+					return summary, fmt.Errorf("reconciled Product Owner selection is not eligible: %w", err)
+				}
+				pendingDecision.Status = "approved"
+				if err := runstate.UpdateDecision(root, *pendingDecision); err != nil {
+					return summary, err
+				}
+				if err := consume(root, approval, "reconciliation", ""); err != nil {
+					return summary, err
+				}
+				consumedNext, selectedPlan, approval = true, pendingDecision.Decision.Selection, nil
+			} else {
+				if approval.Action != "task-planning" {
+					return summary, fmt.Errorf("pending next approval has unsupported action %s", approval.Action)
+				}
+				if err := workflow.ValidatePlanItem(root, approval.Selection); err != nil {
+					return summary, fmt.Errorf("pending next selection is no longer eligible: %w", err)
+				}
+				if pendingDecision != nil {
+					// Approval and application are deliberately separate durable
+					// boundaries.  The next gate authorizes the exact Product Owner
+					// selection, but Task Planner work can still fail before it creates
+					// a valid planned task.  Retaining "approved" here lets that exact
+					// selection resume without another Product Owner invocation.
+					pendingDecision.Status = "approved"
+					if err := runstate.UpdateDecision(root, *pendingDecision); err != nil {
+						return summary, err
+					}
+				}
+				if err := consume(root, approval, "task-planning", approval.Selection); err != nil {
+					return summary, err
+				}
+				consumedNext = true
+				nextAttempt = approval.AttemptID
+				nextPredecessor = approval.InvocationID
+				selectedPlan = approval.Selection
+				approval = nil
 			}
-			if err := consume(root, approval, "task-planning", approval.Selection); err != nil {
-				return summary, err
-			}
-			consumedNext = true
-			nextAttempt = approval.AttemptID
-			nextPredecessor = approval.InvocationID
-			selectedPlan = approval.Selection
-			approval = nil
 		}
 
 		resolution, err := orchestration.Resolve(root)
@@ -393,6 +520,17 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 			summary.Recommendation = safeContinuation(resolution.Kind)
 			return finish(root, summary), fmt.Errorf("%s", summary.Stop)
 		}
+		if resolution.Kind == "task-planning" && pendingDecision != nil && result.Facts.Class == orchestration.Completed {
+			// Only a validated planner transition consumes the approved Product
+			// Owner selection.  This update is intentionally after outcome
+			// validation, so an interrupted or rejected planner candidate
+			// remains an approved, evidence-bound continuation rather than an
+			// incorrectly applied decision.
+			pendingDecision.Status = "applied"
+			if err := runstate.UpdateDecision(root, *pendingDecision); err != nil {
+				return finish(root, summary), fmt.Errorf("mark Product Owner decision applied: %w", err)
+			}
+		}
 		if result.Facts.Class != orchestration.Completed {
 			summary.Stop = fmt.Sprintf("accepted %s outcome: %s", result.Facts.Class, result.Facts.Summary)
 			summary.Recommendation = result.Facts.Intervention.Next
@@ -400,11 +538,10 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 		}
 
 		if resolution.Kind == "product-owner-next" {
-			recommendation := result.Facts.Recommendation
-			switch recommendation.Kind {
-			case "plan":
-				parts := strings.Fields(recommendation.Command)
-				selection := parts[len(parts)-1]
+			decision := result.Facts.ProductDecision
+			switch decision.Kind {
+			case orchestration.DecisionSelect:
+				selection := decision.Selection
 				evidence, _, err := orchestration.Snapshot(root)
 				if err != nil {
 					return summary, err
@@ -421,15 +558,37 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 					return summary, err
 				}
 				summary.Gate = "next"
-				summary.Stop = "Product Owner proposal requires explicit selection approval"
+				summary.Stop = "Product Owner decision requires explicit selection approval"
 				summary.Recommendation = "concoct run --approve next"
 				return finish(root, summary), nil
-			case "roadmap":
-				summary.Stop, summary.Recommendation = recommendation.Reason, recommendation.Command
+			case orchestration.DecisionHumanRequired, orchestration.DecisionNoAction:
+				summary.Stop = decision.Rationale
 				return finish(root, summary), nil
-			case "blocker", "no-action":
-				summary.Stop = recommendation.Reason
+			case orchestration.DecisionReconcile, orchestration.DecisionReconcileAndSelect:
+				// The invocation has already retained the decision.  Publish its
+				// evidence-bound gate now, rather than requiring a second `run`
+				// merely to discover a proposal that is ready for approval.
+				evidence, _, err := orchestration.Snapshot(root)
+				if err != nil {
+					return finish(root, summary), err
+				}
+				configDigest, err := config.EvidenceDigest(root)
+				if err != nil {
+					return finish(root, summary), err
+				}
+				gate, err := runstate.New("next", "reconciliation", "", "", evidence, result.Prepared.Action.Correlation, configDigest)
+				if err != nil {
+					return finish(root, summary), err
+				}
+				if err := runstate.Create(root, gate); err != nil {
+					return finish(root, summary), err
+				}
+				summary.Gate = "next"
+				summary.Stop = "Product Owner reconciliation requires explicit approval"
+				summary.Recommendation = "concoct run --approve next"
 				return finish(root, summary), nil
+			default:
+				return finish(root, summary), fmt.Errorf("unsupported retained Product Owner decision %q", decision.Kind)
 			}
 		}
 		if resolution.Kind == "integration" {

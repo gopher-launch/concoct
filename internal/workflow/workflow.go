@@ -108,6 +108,14 @@ func (r Report) String() string {
 	field("Git trunk", r.GitTrunk)
 	field("Git task branch", r.GitTaskBranch)
 	field("Git archive commit", r.GitArchiveCommit)
+	// A ready repository deliberately has no current task.  Render that
+	// absence explicitly instead of leaving operators to infer it from missing
+	// fields: the next Product Owner decision is ready-state work, not a
+	// blocked or partially retained task.
+	if r.State == Ready && r.RoadmapItem == "" && r.TaskStatus == "" {
+		fmt.Fprintln(&b, "Active task: inactive")
+		fmt.Fprintln(&b, "Git task metadata: not applicable")
+	}
 	for _, activity := range r.PolicyActivities {
 		fmt.Fprintf(&b, "Policy %s: %s (%s", activity.Activity, activity.Disposition, activity.Requirement)
 		if activity.Reason != "" {
@@ -213,6 +221,15 @@ type NextRoadmapItem struct {
 type NextCapability struct {
 	ID, Status, Limitations string
 	Archives                []string
+}
+
+// ReconciliationChange describes one already-bound canonical record
+// replacement. It is deliberately smaller than an editor protocol: callers
+// provide the final candidate documents and this type only identifies which
+// records Product Owner authority is attempting to reconcile.
+type ReconciliationChange struct {
+	Target string
+	ID     string
 }
 
 // PromptContext exposes validated, read-only workflow evidence needed by role
@@ -463,6 +480,105 @@ func InspectNextActionEvidence(root string) (NextActionEvidence, error) {
 		evidence.Capabilities = append(evidence.Capabilities, NextCapability{ID: id, Status: record.Status, Limitations: record.Limitations, Archives: record.Archives})
 	}
 	return evidence, nil
+}
+
+// ValidateReconciliationCandidate checks that a Product Owner reconciliation
+// changes only bounded record fields that have accepted delivery provenance.
+// It is intentionally independent of private runtime records so the same
+// canonical checks apply immediately before their atomic application.
+func ValidateReconciliationCandidate(root string, roadmapData, capabilityData []byte, changes []ReconciliationChange) error {
+	currentRoadmap, err := os.ReadFile(filepath.Join(root, ".concoct", "roadmap.md"))
+	if err != nil {
+		return err
+	}
+	currentCapabilities, err := os.ReadFile(filepath.Join(root, ".concoct", "capabilities.md"))
+	if err != nil {
+		return err
+	}
+	beforeRoadmap, beforeRoadmapDiags := parseRoadmap(string(currentRoadmap))
+	afterRoadmap, afterRoadmapDiags := parseRoadmap(string(roadmapData))
+	beforeCapabilities, beforeCapabilityDiags := parseCapabilities(string(currentCapabilities))
+	afterCapabilities, afterCapabilityDiags := parseCapabilities(string(capabilityData))
+	for _, diagnostics := range [][]string{beforeRoadmapDiags, afterRoadmapDiags, beforeCapabilityDiags, afterCapabilityDiags} {
+		if len(diagnostics) > 0 {
+			return fmt.Errorf("invalid reconciliation candidate: %s", strings.Join(diagnostics, "; "))
+		}
+	}
+	seen := map[string]bool{}
+	for _, change := range changes {
+		key := change.Target + ":" + change.ID
+		if seen[key] {
+			return fmt.Errorf("duplicate reconciliation change for %s", key)
+		}
+		seen[key] = true
+		switch change.Target {
+		case "roadmap":
+			before, existsBefore := beforeRoadmap[change.ID]
+			after, existsAfter := afterRoadmap[change.ID]
+			if !existsBefore || !existsAfter {
+				return fmt.Errorf("reconciliation may not add or remove roadmap record %s", change.ID)
+			}
+			if before.Status == after.Status {
+				return fmt.Errorf("reconciliation for roadmap record %s must make an authorized status transition", change.ID)
+			}
+			if before.Status == "candidate" && after.Status == "planned" {
+				continue
+			}
+			if after.Status != "delivered" {
+				return fmt.Errorf("unauthorized roadmap status transition for %s: %s -> %s", change.ID, before.Status, after.Status)
+			}
+			if err := validateAcceptedDelivery(root, after.Archive); err != nil {
+				return fmt.Errorf("roadmap record %s delivery provenance: %w", change.ID, err)
+			}
+		case "capabilities":
+			before, existsBefore := beforeCapabilities[change.ID]
+			after, existsAfter := afterCapabilities[change.ID]
+			if !existsBefore || !existsAfter {
+				return fmt.Errorf("reconciliation may not add or remove capability record %s", change.ID)
+			}
+			if !hasNewArchive(before.Archives, after.Archives) {
+				return fmt.Errorf("capability reconciliation for %s requires new accepted archive provenance", change.ID)
+			}
+			for _, archive := range after.Archives {
+				if err := validateAcceptedDelivery(root, archive); err != nil {
+					return fmt.Errorf("capability record %s archive provenance: %w", change.ID, err)
+				}
+			}
+		default:
+			return fmt.Errorf("unsupported reconciliation target %q", change.Target)
+		}
+	}
+	return nil
+}
+
+func hasNewArchive(before, after []string) bool {
+	known := map[string]bool{}
+	for _, value := range before {
+		known[value] = true
+	}
+	for _, value := range after {
+		if !known[value] {
+			return true
+		}
+	}
+	return false
+}
+
+// validateAcceptedDelivery accepts only an archive summary produced by the
+// delivery lifecycle. Product Owner may reconcile that evidence but cannot
+// manufacture it or point a record at an arbitrary repository file.
+func validateAcceptedDelivery(root, archive string) error {
+	if !strings.HasPrefix(archive, ".concoct/archive/") || !strings.HasSuffix(archive, "/summary.md") || strings.Contains(archive, "..") {
+		return fmt.Errorf("must reference an archive summary")
+	}
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(archive)))
+	if err != nil {
+		return err
+	}
+	if !regexp.MustCompile(`(?m)^status:\s*delivered\s*$`).Match(data) || !regexp.MustCompile(`(?m)^delivery:\s*complete\s*$`).Match(data) {
+		return fmt.Errorf("%s is not accepted delivered evidence", archive)
+	}
+	return nil
 }
 
 func PlanItemTitle(root, id string) (string, error) {

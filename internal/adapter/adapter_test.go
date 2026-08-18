@@ -46,6 +46,19 @@ func TestCodexInvocationKeepsPromptOffArguments(t *testing.T) {
 	}
 }
 
+func TestProductOwnerSchemaPermitsOnlyBoundedRecordMutations(t *testing.T) {
+	action := orchestration.Action{ProtocolVersion: orchestration.ProtocolVersion, Kind: "product-owner-next", Correlation: orchestration.Correlation{InvocationID: "inv", ActionID: "act", AttemptID: "try", Role: "product-owner"}}
+	schema, err := Schema(action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"\"mutations\"", "\"before_digest\"", "\"capabilities\""} {
+		if !strings.Contains(string(schema), field) {
+			t.Fatalf("Product Owner schema lacks bounded mutation field %s:\n%s", field, schema)
+		}
+	}
+}
+
 func TestDecodeCodexJSONLPreservesNativeUsageWithoutSummingDuplicates(t *testing.T) {
 	evidence := DecodeCodexJSONL([]byte("{\"type\":\"item.completed\",\"usage\":{\"input_tokens\":0,\"cached_input_tokens\":3,\"output_tokens\":7,\"total_tokens\":10}}\n{\"type\":\"item.completed\",\"usage\":{\"input_tokens\":0,\"cached_input_tokens\":3,\"output_tokens\":7,\"total_tokens\":10}}\nnot-json\n"))
 	if evidence.Usage.Input == nil || *evidence.Usage.Input != 0 || evidence.Usage.Total == nil || *evidence.Usage.Total != 10 {

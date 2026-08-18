@@ -26,6 +26,7 @@ import (
 	"github.com/gopher-launch/concoct/internal/orchestration"
 	"github.com/gopher-launch/concoct/internal/planning"
 	"github.com/gopher-launch/concoct/internal/prompt"
+	"github.com/gopher-launch/concoct/internal/runstate"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
@@ -152,6 +153,17 @@ func Prepare(root string, options Options) (prepared Prepared, resultErr error) 
 	}
 	if !resolution.Executable {
 		return Prepared{Resolution: resolution}, fmt.Errorf("execution refused: %s", resolution.Refusal)
+	}
+	if options.SelectedPlan == "" && resolution.Kind == "product-owner-next" {
+		if decision, loadErr := runstate.LoadDecision(root); loadErr == nil && (decision.Status == "proposed" || decision.Status == "approved") {
+			continuation := "concoct run --approve next"
+			if decision.Status == "approved" && decision.Decision.Selection != "" {
+				continuation = "concoct plan " + decision.Decision.Selection
+			}
+			return Prepared{Resolution: orchestration.Resolution{Command: continuation, Refusal: "a retained Product Owner decision already controls the ready-state continuation"}}, fmt.Errorf("execution refused: retained Product Owner decision; run %s", continuation)
+		} else if loadErr != nil && !os.IsNotExist(loadErr) {
+			return Prepared{}, fmt.Errorf("load retained Product Owner decision: %w", loadErr)
+		}
 	}
 	attemptID := options.AttemptID
 	if attemptID == "" {
@@ -768,6 +780,16 @@ func reconcile(root, record string, prepared Prepared, disposition string, runEr
 		}
 		if validationErr == nil && runErr == nil {
 			reconciliation.ResultAccepted = true
+			if prepared.Resolution.Kind == "product-owner-next" && outcome.Class == orchestration.Completed {
+				decision, decisionErr := runstate.NewDecision(outcome.ProductDecision, prepared.Action.Evidence, prepared.Action.Correlation)
+				if decisionErr == nil {
+					decisionErr = runstate.CreateDecision(root, decision)
+				}
+				if decisionErr != nil {
+					reconciliation.ResultAccepted = false
+					validationErr = fmt.Errorf("retain Product Owner decision: %w", decisionErr)
+				}
+			}
 		}
 	} else if !os.IsNotExist(err) {
 		validationErr = err
@@ -1189,6 +1211,17 @@ func Inspect(root, id string, fullRaw ...bool) (string, error) {
 		if len(data) == 0 || data[len(data)-1] != '\n' {
 			b.WriteByte('\n')
 		}
+	}
+	if decision, decisionErr := runstate.LoadDecision(root); decisionErr == nil {
+		data, marshalErr := json.MarshalIndent(decision, "", "  ")
+		if marshalErr != nil {
+			return "", marshalErr
+		}
+		fmt.Fprintln(&b, "\n## Retained Product Owner decision")
+		b.Write(data)
+		b.WriteByte('\n')
+	} else if !os.IsNotExist(decisionErr) {
+		fmt.Fprintf(&b, "\n## Retained Product Owner decision\n\nunavailable (%v)\n", decisionErr)
 	}
 	return b.String(), nil
 }

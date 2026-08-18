@@ -298,7 +298,7 @@ func selectRole(root string, request Request, c workflow.PromptContext, policy i
 		if c.Report.State != workflow.Ready {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "ready")
 		}
-		return roleSpec{"product-owner", "built-in:prompt-next-action-recommendation", "prompt-next-action-recommendation", "next-action-recommendation", "Recommend exactly one supported next action from authoritative evidence without selecting work or mutating workflow artifacts.", "one exact follow-up command when applicable: `concoct plan <roadmap-id>` or `concoct roadmap`; otherwise name the blocker or report no actionable recorded work", append(base, ".concoct/roadmap.md"), []string{"none (read-only recommendation)"}}, nil
+		return roleSpec{"product-owner", "built-in:prompt-next-action-recommendation", "prompt-next-action-recommendation", "next-action-recommendation", "Render one read-only Product Owner decision using the shared semantic vocabulary; this manual path neither retains nor applies it.", "use the displayed decision to choose `concoct plan <roadmap-id>` or `concoct roadmap`; otherwise resolve the named human decision or report no action", append(base, ".concoct/roadmap.md"), []string{"none (read-only inspection)"}}, nil
 	case "roadmap":
 		if c.Report.State != workflow.Ready {
 			return roleSpec{}, wrongState(request.Command, c.Report.State, "ready")

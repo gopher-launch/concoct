@@ -84,6 +84,17 @@ its exact prompt and resolved profile, and the launch safety posture.
 `concoct exec` then runs at most that one action and returns control. It never
 loops into the next role.
 
+From `ready`, supervised execution captures one Product Owner semantic decision
+instead of a disposable command recommendation. The private decision is bound
+to the observed evidence and can be inspected without mutation. When the
+selected policy requires it, `concoct run --approve next` applies that exact
+decision once; a selection then enters the normal separately-gated planning
+step. Manual `concoct next` remains a deterministic read-only inspection path.
+Reconciliation replacements are record-scoped and digest-bound. The executable
+allows only a `candidate` to `planned` roadmap promotion or a delivered
+reconciliation backed by an existing accepted archive summary; it never treats
+the Product Owner outcome as a general Markdown edit.
+
 The executor binds the action to workflow, policy, Git, configuration, current
 task/review, and referenced archive evidence. The adapter receives the exact
 manual role prompt as its semantic core, followed by a fixed supervision
@@ -140,8 +151,10 @@ repository guidance, and active task context described in
 `concoct run` composes the same one-shot action boundary into a bounded loop.
 It re-detects workflow, Git, policy, configuration, role, prompt, and adapter
 before every action. Ready state can execute only the Product Owner decision;
-a valid plan proposal is stored privately and stops at the invariant `next`
-gate. Plan acceptance and local integration are gated by default, while project
+a valid semantic decision is stored privately and stops at the invariant `next`
+gate when approval is required. A retained approved selection resumes Task
+Planner work directly; it never invokes Product Owner again. Plan acceptance
+and local integration are gated by default, while project
 configuration and invocation flags may add finite gates or lower the hard
 20-action and three-review-cycle bounds.
 

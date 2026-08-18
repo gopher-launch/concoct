@@ -85,6 +85,10 @@ type Outcome struct {
 	Intervention    Intervention   `json:"intervention,omitempty"`
 	Diagnostics     []Diagnostic   `json:"diagnostics,omitempty"`
 	Recommendation  Recommendation `json:"recommendation,omitempty"`
+	// ProductDecision is required for a completed Product Owner action.  It is
+	// intentionally separate from Recommendation so an operator command can
+	// never be the sole retained meaning of product judgment.
+	ProductDecision ProductDecision `json:"product_decision,omitempty"`
 }
 
 // Recommendation is the bounded result of a decision action. It is separate
@@ -96,6 +100,91 @@ type Recommendation struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+// ProductDecision is the bounded semantic result of a Product Owner action.
+// It deliberately records intent separately from the command displayed to an
+// operator. Applying a decision remains executable authority; this value is a
+// validated candidate rather than a patch or a general-purpose editor.
+type ProductDecision struct {
+	Version            int    `json:"version"`
+	Kind               string `json:"kind"`
+	Selection          string `json:"selection,omitempty"`
+	Rationale          string `json:"rationale"`
+	RoadmapDigest      string `json:"roadmap_digest,omitempty"`
+	CapabilityDigest   string `json:"capability_digest,omitempty"`
+	CompletionEvidence string `json:"completion_evidence,omitempty"`
+	// Mutations are exact, record-scoped replacements. They are deliberately
+	// not a patch language: each binds one canonical record to its prior digest.
+	Mutations []ProductMutation `json:"mutations,omitempty"`
+}
+
+type ProductMutation struct {
+	Target       string `json:"target,omitempty"`
+	ID           string `json:"id,omitempty"`
+	BeforeDigest string `json:"before_digest,omitempty"`
+	Before       string `json:"before,omitempty"`
+	After        string `json:"after,omitempty"`
+}
+
+const (
+	DecisionSelect             = "select"
+	DecisionReconcileAndSelect = "reconcile-and-select"
+	DecisionReconcile          = "reconcile"
+	DecisionHumanRequired      = "human-decision-required"
+	DecisionNoAction           = "no-action"
+)
+
+// ValidateProductDecision enforces the versioned semantic vocabulary before a
+// candidate can be retained. Detailed mutation validation is intentionally a
+// later authority: digest fields bind the candidate to the exact inputs they
+// describe without retaining arbitrary Markdown or adapter output.
+func ValidateProductDecision(decision ProductDecision) error {
+	if decision.Version != 1 {
+		return fmt.Errorf("unsupported Product Owner decision version %d", decision.Version)
+	}
+	if len(decision.Kind) == 0 || len(decision.Kind) > 64 || len(decision.Rationale) == 0 || len(decision.Rationale) > 512 {
+		return errors.New("Product Owner decision kind and rationale must be bounded non-empty fields")
+	}
+	if len(decision.Selection) > 128 || strings.Contains(decision.Selection, "\x00") {
+		return errors.New("Product Owner decision contains an invalid selection")
+	}
+	for _, value := range []string{decision.Rationale, decision.RoadmapDigest, decision.CapabilityDigest, decision.CompletionEvidence} {
+		if strings.Contains(value, "\x00") || len(value) > 512 {
+			return errors.New("Product Owner decision contains an invalid bounded field")
+		}
+	}
+	if len(decision.Mutations) > 8 {
+		return errors.New("Product Owner decision contains too many record mutations")
+	}
+	seen := map[string]bool{}
+	for _, mutation := range decision.Mutations {
+		if (mutation.Target != "roadmap" && mutation.Target != "capabilities") || mutation.ID == "" || len(mutation.ID) > 128 || len(mutation.BeforeDigest) != 64 || len(mutation.Before) == 0 || len(mutation.After) == 0 || len(mutation.Before) > 8192 || len(mutation.After) > 8192 || strings.Contains(mutation.Before, "\x00") || strings.Contains(mutation.After, "\x00") || seen[mutation.Target+":"+mutation.ID] {
+			return errors.New("Product Owner decision contains an invalid record-scoped mutation")
+		}
+		seen[mutation.Target+":"+mutation.ID] = true
+	}
+	switch decision.Kind {
+	case DecisionSelect:
+		if decision.Selection == "" || decision.RoadmapDigest != "" || decision.CapabilityDigest != "" || decision.CompletionEvidence != "" {
+			return errors.New("select decision requires only a selected item and rationale")
+		}
+	case DecisionReconcileAndSelect:
+		if decision.Selection == "" || (decision.RoadmapDigest == "" && decision.CapabilityDigest == "" && decision.CompletionEvidence == "") {
+			return errors.New("reconcile-and-select decision requires a selected item and bounded reconciliation evidence")
+		}
+	case DecisionReconcile:
+		if decision.Selection != "" || (decision.RoadmapDigest == "" && decision.CapabilityDigest == "" && decision.CompletionEvidence == "") {
+			return errors.New("reconcile decision requires bounded reconciliation evidence and no selection")
+		}
+	case DecisionHumanRequired, DecisionNoAction:
+		if decision.Selection != "" || decision.RoadmapDigest != "" || decision.CapabilityDigest != "" || decision.CompletionEvidence != "" {
+			return fmt.Errorf("%s decision must not propose a selection or reconciliation", decision.Kind)
+		}
+	default:
+		return fmt.Errorf("unsupported Product Owner decision kind %q", decision.Kind)
+	}
+	return nil
+}
+
 // DurableFacts is the only representation suitable for durable task history.
 type DurableFacts struct {
 	ActionID, InvocationID, AttemptID, Role, Kind, Summary string
@@ -103,6 +192,7 @@ type DurableFacts struct {
 	Artifacts                                              []string
 	Intervention                                           Intervention
 	Recommendation                                         Recommendation
+	ProductDecision                                        ProductDecision
 }
 
 // Spec defines the authority and observable completion requirements for one
@@ -342,7 +432,7 @@ func validateOutcome(root string, action Action, outcome Outcome, allowPartialEf
 			if current.Digest != action.Evidence.Digest {
 				return DurableFacts{}, errors.New("Product Owner recommendation changed workflow or repository evidence")
 			}
-			if err := validateRecommendation(root, outcome.Recommendation); err != nil {
+			if err := validateProductOwnerDecision(root, outcome.ProductDecision); err != nil {
 				return DurableFacts{}, err
 			}
 		} else if current.Digest == action.Evidence.Digest {
@@ -357,7 +447,7 @@ func validateOutcome(root string, action Action, outcome Outcome, allowPartialEf
 	} else if current.Digest != action.Evidence.Digest && !allowPartialEffects {
 		return DurableFacts{}, errors.New("outcome is stale: repository evidence changed after authorization")
 	}
-	return DurableFacts{ActionID: action.Correlation.ActionID, InvocationID: action.Correlation.InvocationID, AttemptID: action.Correlation.AttemptID, Role: action.Correlation.Role, Kind: action.Kind, Class: outcome.Class, Summary: outcome.Summary, Artifacts: append([]string(nil), outcome.Artifacts...), Intervention: outcome.Intervention, Recommendation: outcome.Recommendation}, nil
+	return DurableFacts{ActionID: action.Correlation.ActionID, InvocationID: action.Correlation.InvocationID, AttemptID: action.Correlation.AttemptID, Role: action.Correlation.Role, Kind: action.Kind, Class: outcome.Class, Summary: outcome.Summary, Artifacts: append([]string(nil), outcome.Artifacts...), Intervention: outcome.Intervention, Recommendation: outcome.Recommendation, ProductDecision: outcome.ProductDecision}, nil
 }
 
 // ValidateCandidate validates the bounded structured claim before any
@@ -496,6 +586,27 @@ func bounded(o Outcome) error {
 	for _, value := range []string{o.Recommendation.Kind, o.Recommendation.Command, o.Recommendation.Reason} {
 		if len(value) > 512 || strings.Contains(value, "\x00") {
 			return errors.New("outcome recommendation exceeds bounds")
+		}
+	}
+	if o.ProductDecision.Version != 0 {
+		if err := ValidateProductDecision(o.ProductDecision); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateProductOwnerDecision(root string, decision ProductDecision) error {
+	if err := ValidateProductDecision(decision); err != nil {
+		return fmt.Errorf("invalid Product Owner semantic decision: %w", err)
+	}
+	// A selection that needs no reconciliation must already be structurally
+	// plannable. Reconciliation decisions retain their evidence for a later
+	// bounded application transaction and therefore cannot claim eligibility
+	// merely by displaying a command.
+	if decision.Kind == DecisionSelect {
+		if err := workflow.ValidatePlanItem(root, decision.Selection); err != nil {
+			return fmt.Errorf("selected Product Owner item is not eligible: %w", err)
 		}
 	}
 	return nil

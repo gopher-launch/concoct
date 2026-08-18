@@ -116,8 +116,26 @@ func Schema(action orchestration.Action) ([]byte, error) {
 		"required":   []string{"code", "message"},
 	}}
 	recommendationKinds := []string{""}
+	productDecision := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}, "required": []string{}}
 	if action.Kind == "product-owner-next" {
-		recommendationKinds = []string{"plan", "roadmap", "blocker", "no-action"}
+		recommendationKinds = []string{""}
+		mutation := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+			"target":        map[string]any{"type": "string", "enum": []string{"roadmap", "capabilities"}},
+			"id":            map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
+			"before_digest": map[string]any{"type": "string", "minLength": 64, "maxLength": 64},
+			"before":        map[string]any{"type": "string", "minLength": 1, "maxLength": 8192},
+			"after":         map[string]any{"type": "string", "minLength": 1, "maxLength": 8192},
+		}, "required": []string{"target", "id", "before_digest", "before", "after"}}
+		productDecision = map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+			"version":             map[string]any{"type": "integer", "const": 1},
+			"kind":                map[string]any{"type": "string", "enum": []string{orchestration.DecisionSelect, orchestration.DecisionReconcileAndSelect, orchestration.DecisionReconcile, orchestration.DecisionHumanRequired, orchestration.DecisionNoAction}},
+			"selection":           map[string]any{"type": "string", "maxLength": 128},
+			"rationale":           map[string]any{"type": "string", "minLength": 1, "maxLength": 512},
+			"roadmap_digest":      map[string]any{"type": "string", "maxLength": 512},
+			"capability_digest":   map[string]any{"type": "string", "maxLength": 512},
+			"completion_evidence": map[string]any{"type": "string", "maxLength": 512},
+			"mutations":           map[string]any{"type": "array", "maxItems": 8, "items": mutation},
+		}, "required": []string{"version", "kind", "selection", "rationale", "roadmap_digest", "capability_digest", "completion_evidence"}}
 	}
 	schema := map[string]any{
 		"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "additionalProperties": false,
@@ -129,10 +147,11 @@ func Schema(action orchestration.Action) ([]byte, error) {
 				"kind": enumString([]string{"", spec.Intervention.Kind}, "Use empty for completed; otherwise use the registered intervention kind."),
 				"next": enumString([]string{"", spec.Intervention.Next}, "Use empty for completed; otherwise use the registered intervention next step."),
 			}, "required": []string{"kind", "next"}},
-			"diagnostics":    diagnostics,
-			"recommendation": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"kind": map[string]any{"type": "string", "enum": recommendationKinds}, "command": map[string]any{"type": "string", "maxLength": 512}, "reason": map[string]any{"type": "string", "maxLength": 512}}, "required": []string{"kind", "command", "reason"}},
+			"diagnostics":      diagnostics,
+			"recommendation":   map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"kind": map[string]any{"type": "string", "enum": recommendationKinds}, "command": map[string]any{"type": "string", "maxLength": 512}, "reason": map[string]any{"type": "string", "maxLength": 512}}, "required": []string{"kind", "command", "reason"}},
+			"product_decision": productDecision,
 		},
-		"required": []string{"protocol_version", "correlation", "class", "summary", "artifacts", "intervention", "diagnostics", "recommendation"},
+		"required": []string{"protocol_version", "correlation", "class", "summary", "artifacts", "intervention", "diagnostics", "recommendation", "product_decision"},
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }

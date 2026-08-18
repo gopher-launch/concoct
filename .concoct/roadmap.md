@@ -917,7 +917,8 @@ transactional protocol.
 
 ## CON-040 — Give the Product Owner authority to advance ready-state work
 
-- Status: `planned`
+- Status: `active`
+- Archive: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-006, CAP-009, CAP-011, CAP-012, CAP-013, CAP-014, CAP-015

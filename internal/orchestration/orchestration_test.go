@@ -88,13 +88,38 @@ func TestValidateProductOwnerDecisionWithoutArtifactMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome := Outcome{ProtocolVersion: ProtocolVersion, Correlation: action.Correlation, Class: Completed, Summary: "no actionable work", Recommendation: Recommendation{Kind: "no-action", Reason: "no eligible roadmap work is recorded"}}
+	outcome := Outcome{ProtocolVersion: ProtocolVersion, Correlation: action.Correlation, Class: Completed, Summary: "no actionable work", ProductDecision: ProductDecision{Version: 1, Kind: DecisionNoAction, Rationale: "no eligible roadmap work is recorded"}}
 	if _, err := ValidateOutcome(root, action, outcome); err != nil {
 		t.Fatalf("valid decision rejected: %v", err)
 	}
-	outcome.Recommendation = Recommendation{Kind: "plan", Command: "concoct plan APP-999"}
+	outcome.ProductDecision = ProductDecision{Version: 1, Kind: DecisionSelect, Selection: "APP-999", Rationale: "not eligible"}
 	if _, err := ValidateOutcome(root, action, outcome); err == nil {
 		t.Fatal("ineligible plan recommendation accepted")
+	}
+}
+
+func TestValidateProductDecisionRequiresSemanticKindAndBoundedEffects(t *testing.T) {
+	valid := []ProductDecision{
+		{Version: 1, Kind: DecisionSelect, Selection: "APP-001", Rationale: "the item is ready"},
+		{Version: 1, Kind: DecisionReconcileAndSelect, Selection: "APP-001", Rationale: "reconcile delivery before planning", CompletionEvidence: "archive:APP-000"},
+		{Version: 1, Kind: DecisionReconcile, Rationale: "remove delivered item", RoadmapDigest: "abc"},
+		{Version: 1, Kind: DecisionHumanRequired, Rationale: "choose between two outcomes"},
+		{Version: 1, Kind: DecisionNoAction, Rationale: "no outstanding work"},
+	}
+	for _, decision := range valid {
+		if err := ValidateProductDecision(decision); err != nil {
+			t.Fatalf("valid decision %#v: %v", decision, err)
+		}
+	}
+	for _, decision := range []ProductDecision{
+		{Version: 1, Kind: DecisionSelect, Rationale: "missing selection"},
+		{Version: 1, Kind: DecisionReconcile, Selection: "APP-001", Rationale: "reconciliation is not selection", RoadmapDigest: "abc"},
+		{Version: 1, Kind: DecisionNoAction, Rationale: "not no action", RoadmapDigest: "abc"},
+		{Version: 2, Kind: DecisionNoAction, Rationale: "unsupported version"},
+	} {
+		if err := ValidateProductDecision(decision); err == nil {
+			t.Fatalf("invalid decision accepted: %#v", decision)
+		}
 	}
 }
 

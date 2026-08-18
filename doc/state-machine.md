@@ -47,6 +47,17 @@ When two configured gates protect the same immediate action, that record may
 also carry the already-consumed prerequisite gate. It cannot authorize a later
 occurrence of the same action kind.
 
+The private Product Owner decision record is a separate, evidence-bound
+ready-state continuation rather than a new workflow state. It retains one
+semantic decision and, for reconciliation, at most eight complete canonical
+record replacements. `status`, execution inspection, and `run` may display
+that continuation, but only `concoct run --approve next` can consume it. A
+changed policy, configuration, roadmap, capability ledger, archive, current
+task, or Git evidence invalidates the record before canonical mutation.
+Record replacements are further restricted to allowed roadmap transitions and
+accepted archive-delivery provenance; the private record cannot add, remove, or
+otherwise act as a general editor for canonical records.
+
 Empty tracked placeholders do not count as active artifacts. A parser must distinguish a documented placeholder from a populated artifact and must reject partially populated task or review files as malformed.
 
 ## Normative states
@@ -56,7 +67,7 @@ The states below are mutually exclusive. `invalid` is a detected condition, not 
 | State | Observable evidence | Normal next action |
 | --- | --- | --- |
 | `uninitialized` | The target is absent, or it lacks the required Concoct project contract created by initialization. | `concoct init <project>` |
-| `ready` | The project contract is valid; no populated active task or current review exists; roadmap and capability artifacts are readable and internally consistent. | `concoct next` |
+| `ready` | The project contract is valid; no populated active task or current review exists; roadmap and capability artifacts are readable and internally consistent. Task phases are inactive and Git task metadata is not applicable. A retained Product Owner decision is a ready-state continuation, not an active task. | `concoct next`, or the retained decision's exact approval/planning continuation |
 | `planned` | A valid task plan and notes exist; the plan maps to one eligible roadmap item; task status is `planned`; no review exists. | `concoct code` |
 | `implementation-in-progress` | The active task status is `implementation-in-progress`; required task artifacts are valid; after review, either `remediates-review` names the latest `changes-requested` review or a valid `blocked-review-resolution` names the latest `blocked` review and selects `code`. | `concoct code` to continue or resume |
 | `implementation-complete` | The active task status is `implementation-complete`; required task artifacts are valid; either no review exists, `remediates-review` names the latest `changes-requested` review and notes contain its completed finding dispositions, or a valid `blocked-review-resolution` names the latest `blocked` review and selects `review`. A policy-valid externally satisfied independent review instead recommends archival. | `concoct review` or `concoct archive` |

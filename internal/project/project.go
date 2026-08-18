@@ -138,7 +138,7 @@ func projectOutput(rel string) bool {
 }
 
 func writeBootstrap(target string) error {
-	content := "# Concoct bootstrap\n\nThis project is in the `ready` state.\n\nRun the read-only Product Owner recommendation step before selecting work or performing roadmap intake.\n\nRecommended next command: `concoct next`\n"
+	content := "# Concoct bootstrap\n\nThis project is in the `ready` state.\n\nRun the supervised Product Owner decision boundary before selecting work or performing roadmap intake. Use `concoct next` only for read-only inspection.\n\nRecommended next command: `concoct run`\n"
 	return os.WriteFile(filepath.Join(target, ".concoct", "current", "bootstrap-prompt.md"), []byte(content), 0o644)
 }
 

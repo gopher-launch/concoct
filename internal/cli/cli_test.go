@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gopher-launch/concoct/internal/orchestration"
 	"github.com/gopher-launch/concoct/internal/project"
+	"github.com/gopher-launch/concoct/internal/runstate"
+	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
 func TestPromptStdoutAndFileOutputAreIdenticalAndNonDestructive(t *testing.T) {
@@ -195,6 +198,106 @@ func TestMalformedProjectRecordsUseReducedStatusAndRejectWorkflowOutput(t *testi
 			}
 			if _, err := os.Stat(output); !os.IsNotExist(err) {
 				t.Fatalf("workflow command wrote output: %v", err)
+			}
+		})
+	}
+}
+
+func TestStatusAppliedSelectionDefersToPlannedTaskContinuation(t *testing.T) {
+	root := transitionProject(t, true)
+	decision, err := runstate.NewDecision(
+		orchestration.ProductDecision{
+			Version:   1,
+			Kind:      orchestration.DecisionSelect,
+			Selection: "APP-001",
+			Rationale: "Plan the selected item.",
+		},
+		orchestration.Evidence{Digest: "ready-state-evidence", State: workflow.Ready},
+		orchestration.Correlation{
+			InvocationID: "invocation-1",
+			ActionID:     "action-1",
+			AttemptID:    "attempt-1",
+			Role:         "product-owner",
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision.Status = "applied"
+	if err := runstate.CreateDecision(root, decision); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONCOCT_CALLER_DIR", root)
+
+	var status bytes.Buffer
+	if err := Run([]string{"status"}, &status, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(status.String(), "Next: concoct code") {
+		t.Fatalf("status did not retain planned continuation:\n%s", status.String())
+	}
+	if strings.Contains(status.String(), "Next: concoct plan APP-001") {
+		t.Fatalf("status repeated applied selection:\n%s", status.String())
+	}
+}
+
+func TestStatusRetainedNonSelectionDecisionsDeferToPlannedTaskContinuation(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision orchestration.ProductDecision
+		status   string
+	}{
+		{
+			name: "proposed reconcile",
+			decision: orchestration.ProductDecision{
+				Version: 1, Kind: orchestration.DecisionReconcile, Rationale: "Reconcile accepted delivery.", RoadmapDigest: "ready-state-evidence",
+			},
+			status: "proposed",
+		},
+		{
+			name: "approved reconcile and select",
+			decision: orchestration.ProductDecision{
+				Version: 1, Kind: orchestration.DecisionReconcileAndSelect, Selection: "APP-001", Rationale: "Reconcile then plan the selected item.", RoadmapDigest: "ready-state-evidence",
+			},
+			status: "approved",
+		},
+		{
+			name: "human decision required",
+			decision: orchestration.ProductDecision{
+				Version: 1, Kind: orchestration.DecisionHumanRequired, Rationale: "Choose between incompatible product outcomes.",
+			},
+			status: "proposed",
+		},
+		{
+			name: "no action",
+			decision: orchestration.ProductDecision{
+				Version: 1, Kind: orchestration.DecisionNoAction, Rationale: "No actionable roadmap work remains.",
+			},
+			status: "proposed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := transitionProject(t, true)
+			decision, err := runstate.NewDecision(tt.decision, orchestration.Evidence{Digest: "ready-state-evidence", State: workflow.Ready}, orchestration.Correlation{
+				InvocationID: "invocation-1", ActionID: "action-1", AttemptID: "attempt-1", Role: "product-owner",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			decision.Status = tt.status
+			if err := runstate.CreateDecision(root, decision); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("CONCOCT_CALLER_DIR", root)
+
+			var output bytes.Buffer
+			if err := Run([]string{"status"}, &output, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), "Next: concoct code") {
+				t.Fatalf("status did not retain planned continuation:\n%s", output.String())
 			}
 		})
 	}

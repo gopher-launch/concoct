@@ -65,7 +65,7 @@ func TestInitializeEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(bootstrap), "Recommended next command: `concoct next`") != 1 || strings.Contains(string(bootstrap), "concoct roadmap or concoct plan") {
+	if strings.Count(string(bootstrap), "Recommended next command: `concoct run`") != 1 || !strings.Contains(string(bootstrap), "`concoct next` only for read-only inspection") || strings.Contains(string(bootstrap), "concoct roadmap or concoct plan") {
 		t.Fatalf("bootstrap does not recommend exactly concoct next: %s", bootstrap)
 	}
 }

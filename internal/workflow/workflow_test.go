@@ -36,6 +36,20 @@ func TestDetectStates(t *testing.T) {
 	}
 }
 
+func TestReadyReportMakesAbsentTaskAndGitMetadataExplicit(t *testing.T) {
+	root := fixture(t, "", "", "")
+	report := Detect(root)
+	if report.State != Ready {
+		t.Fatalf("state = %s; diagnostics: %v", report.State, report.Diagnostics)
+	}
+	text := report.String()
+	for _, want := range []string{"Active task: inactive", "Git task metadata: not applicable", "Next: concoct next"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ready report missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestResolveActionClassifiesExecutableAndHumanGatedStates(t *testing.T) {
 	tests := []struct {
 		state      State
@@ -380,6 +394,35 @@ func TestInspectNextActionEvidenceUsesPlanEligibility(t *testing.T) {
 	}
 	if evidence.RoadmapItems[0].Priority != "high" || len(evidence.SupportedOrigins) != 2 {
 		t.Fatalf("evidence = %#v", evidence)
+	}
+}
+
+func TestValidateReconciliationCandidateRestrictsTransitionsAndRequiresAcceptedEvidence(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, ".concoct/roadmap.md"), "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Roadmap\n\n## CON-101 — Example\n- Status: `candidate`\n")
+	write(t, filepath.Join(root, ".concoct/capabilities.md"), "---\nversion: 1\nproject: demo\nupdated: 2026-01-01\n---\n# Capabilities\n\n## CAP-101 — Example\n- Status: `active`\n")
+	roadmap, err := os.ReadFile(filepath.Join(root, ".concoct/roadmap.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err := os.ReadFile(filepath.Join(root, ".concoct/capabilities.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	promoted := []byte(strings.Replace(string(roadmap), "`candidate`", "`planned`", 1))
+	if err := ValidateReconciliationCandidate(root, promoted, capabilities, []ReconciliationChange{{Target: "roadmap", ID: "CON-101"}}); err != nil {
+		t.Fatalf("candidate promotion rejected: %v", err)
+	}
+	if err := ValidateReconciliationCandidate(root, []byte(strings.Replace(string(roadmap), "`candidate`", "`blocked`", 1)), capabilities, []ReconciliationChange{{Target: "roadmap", ID: "CON-101"}}); err == nil || !strings.Contains(err.Error(), "unauthorized roadmap status") {
+		t.Fatalf("unauthorized transition error = %v", err)
+	}
+	changedCapability := []byte(strings.Replace(string(capabilities), "- Status: `active`", "- Status: `active`\n- Archive: `.concoct/archive/2026-01-01-CON-101/`", 1))
+	if err := ValidateReconciliationCandidate(root, roadmap, changedCapability, []ReconciliationChange{{Target: "capabilities", ID: "CAP-101"}}); err == nil || !strings.Contains(err.Error(), "archive provenance") {
+		t.Fatalf("missing provenance error = %v", err)
+	}
+	write(t, filepath.Join(root, ".concoct/archive/2026-01-01-CON-101/summary.md"), "---\nstatus: delivered\ndelivery: complete\n---\n# Summary\n")
+	if err := ValidateReconciliationCandidate(root, roadmap, changedCapability, []ReconciliationChange{{Target: "capabilities", ID: "CAP-101"}}); err != nil {
+		t.Fatalf("accepted capability reconciliation rejected: %v", err)
 	}
 }
 

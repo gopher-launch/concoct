@@ -16,7 +16,9 @@ import (
 	"github.com/gopher-launch/concoct/internal/adapter"
 	"github.com/gopher-launch/concoct/internal/config"
 	"github.com/gopher-launch/concoct/internal/defaults"
+	"github.com/gopher-launch/concoct/internal/orchestration"
 	"github.com/gopher-launch/concoct/internal/prompt"
+	"github.com/gopher-launch/concoct/internal/runstate"
 	"github.com/gopher-launch/concoct/internal/workflow"
 )
 
@@ -39,6 +41,25 @@ func TestPrepareDryRunPreservesPromptBytesAndRuntime(t *testing.T) {
 	}
 	if !strings.Contains(Describe(prepared), "workspace-write") || !strings.Contains(Describe(prepared), "stdin") {
 		t.Fatal("dry-run omitted safety or prompt posture")
+	}
+}
+
+func TestPrepareDoesNotReinvokeProductOwnerWhileDecisionIsRetained(t *testing.T) {
+	root := readyFixture(t)
+	evidence, _, err := orchestration.Snapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := runstate.NewDecision(orchestration.ProductDecision{Version: 1, Kind: orchestration.DecisionSelect, Selection: "APP-001", Rationale: "awaiting approval"}, evidence, orchestration.Correlation{InvocationID: "invocation", ActionID: "action", AttemptID: "attempt", Role: "product-owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runstate.CreateDecision(root, decision); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Prepare(root, Options{})
+	if err == nil || !strings.Contains(err.Error(), "retained Product Owner decision") || !strings.Contains(err.Error(), "concoct run --approve next") {
+		t.Fatalf("Prepare error = %v", err)
 	}
 }
 
@@ -277,7 +298,7 @@ task=$(value task_id)
 attempt=$(value attempt_id)
 role=$(value role)
 printf 'OPENAI_API_KEY=sk-supersecret123456789\n' >&2
-printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"no-action","command":"","reason":"no eligible work"}}\n' "$invocation" "$action" "$task" "$attempt" "$role" > "$output"
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":""}}\n' "$invocation" "$action" "$task" "$attempt" "$role" > "$output"
 `)
 	result, err := Run(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
 	if err != nil {
@@ -497,7 +518,7 @@ value() {
   awk -v key="\"$1\"" '$0 ~ key { found=1 } found && /"const":/ { line=$0; sub(/^.*"const": "/, "", line); sub(/".*$/, "", line); print line; exit }' "$schema"
 }
 printf '%s\n' '` + event + `'
-printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"no-action","command":"","reason":"no eligible work"}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":""}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"
 sleep 10`
 }
 
@@ -522,7 +543,7 @@ value() {
 }
 printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution","command":"go test ./...","aggregated_output":"ok"}}'
 sleep 0.04
-printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"no-action","command":"","reason":"no eligible work"}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"`,
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":""}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"`,
 			disposition: "completed",
 		},
 		{

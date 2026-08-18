@@ -105,6 +105,35 @@ func TestReadyRunStopsOnAcceptedInterventionWithoutRetry(t *testing.T) {
 	}
 }
 
+func TestReadyReconciliationProposalPublishesNextGateWithoutSecondInvocation(t *testing.T) {
+	parent := t.TempDir()
+	if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "demo")
+	installRunCodex(t, "completed", "reconcile", "", "reconcile accepted delivery", "", "")
+
+	summary, err := Run(context.Background(), root, Options{Policy: config.RunOverrides{MaxActions: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Actions != 1 || summary.Gate != "next" || summary.Recommendation != "concoct run --approve next" {
+		t.Fatalf("summary = %#v", summary)
+	}
+	gate, err := runstate.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate.Name != "next" || gate.Action != "reconciliation" {
+		t.Fatalf("gate = %#v", gate)
+	}
+	decision, err := runstate.LoadDecision(root)
+	if err != nil || decision.Status != "proposed" || decision.Decision.Kind != orchestration.DecisionReconcile {
+
+		t.Fatalf("decision = %#v, err = %v", decision, err)
+	}
+}
+
 func TestCoordinatorStopsForEveryNonCompletionClassAndProcessFailure(t *testing.T) {
 	for _, test := range []struct {
 		class string
@@ -191,6 +220,10 @@ func TestApprovedSelectionUsesPlanningBranchAndStopsAtPlanGate(t *testing.T) {
 	}
 	if second.Actions != 1 || second.Steps[0].Action != "task-planning" || second.Gate != "plan" || second.State != "planned" {
 		t.Fatalf("planning summary = %#v", second)
+	}
+	decision, err := runstate.LoadDecision(root)
+	if err != nil || decision.Status != "applied" || decision.Decision.Selection != "APP-001" {
+		t.Fatalf("decision after successful planning = %#v err=%v", decision, err)
 	}
 	if branch := gitOutput(t, root, "branch", "--show-current"); branch != "concoct/app-001-proposed-work" {
 		t.Fatalf("task branch = %s", branch)
@@ -428,11 +461,24 @@ func TestPlanningStartupRollbackAndPostLaunchPreservation(t *testing.T) {
 		if err == nil || summary.Actions != 1 || summary.Recommendation != "concoct plan" {
 			t.Fatalf("summary=%#v err=%v", summary, err)
 		}
+		decision, decisionErr := runstate.LoadDecision(root)
+		if decisionErr != nil || decision.Status != "approved" {
+			t.Fatalf("decision after planner startup failure = %#v err=%v", decision, decisionErr)
+		}
 		if branch := gitOutput(t, root, "branch", "--show-current"); branch == "concoct/app-001-proposed-work" {
 			t.Fatalf("startup failure retained unused planning branch %s", branch)
 		}
 		if branches := gitOutput(t, root, "branch", "--list", "concoct/app-001-proposed-work"); branches != "" {
 			t.Fatalf("startup failure retained task branch: %s", branches)
+		}
+		installPlanningCodex(t)
+		resumed, resumeErr := Run(context.Background(), root, Options{})
+		if resumeErr != nil || resumed.Actions != 1 || len(resumed.Steps) != 1 || resumed.Steps[0].Action != "task-planning" || resumed.Gate != "plan" {
+			t.Fatalf("approved selection did not resume planner directly: summary=%#v err=%v", resumed, resumeErr)
+		}
+		decision, decisionErr = runstate.LoadDecision(root)
+		if decisionErr != nil || decision.Status != "applied" {
+			t.Fatalf("resumed planner did not apply decision: %#v err=%v", decision, decisionErr)
 		}
 	})
 
@@ -451,6 +497,10 @@ func TestPlanningStartupRollbackAndPostLaunchPreservation(t *testing.T) {
 		summary, err := Run(context.Background(), root, Options{Approve: "next"})
 		if err == nil || summary.Actions != 1 || summary.Recommendation != "concoct plan" {
 			t.Fatalf("summary=%#v err=%v", summary, err)
+		}
+		decision, decisionErr := runstate.LoadDecision(root)
+		if decisionErr != nil || decision.Status != "approved" {
+			t.Fatalf("decision after rejected planner candidate = %#v err=%v", decision, decisionErr)
 		}
 		if branch := gitOutput(t, root, "branch", "--show-current"); branch != "concoct/app-001-proposed-work" {
 			t.Fatalf("post-launch work was moved off task branch: %s", branch)
@@ -721,6 +771,13 @@ printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id"
 func installRunCodex(t *testing.T, class, kind, command, reason, interventionKind, interventionNext string) {
 	t.Helper()
 	dir := t.TempDir()
+	decision := `{"version":1,"kind":"no-action","selection":"","rationale":"no actionable work","roadmap_digest":"","capability_digest":"","completion_evidence":""}`
+	if kind == "plan" {
+		selection := strings.TrimSpace(strings.TrimPrefix(command, "concoct plan"))
+		decision = `{"version":1,"kind":"select","selection":"` + selection + `","rationale":"selected eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":""}`
+	} else if kind == "reconcile" {
+		decision = `{"version":1,"kind":"reconcile","selection":"","rationale":"reconcile accepted delivery","roadmap_digest":"accepted delivery evidence","capability_digest":"","completion_evidence":""}`
+	}
 	body := `#!/bin/sh
 set -eu
 schema=""
@@ -735,7 +792,7 @@ done
 value() {
   awk -v key="\"$1\"" '$0 ~ key { found=1 } found && /"const":/ { line=$0; sub(/^.*"const": "/, "", line); sub(/".*$/, "", line); print line; exit }' "$schema"
 }
-printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"%s","summary":"proposal","artifacts":[],"intervention":{"kind":"%s","next":"%s"},"diagnostics":[],"recommendation":{"kind":"%s","command":"%s","reason":"%s"}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" ` + quote(class) + ` ` + quote(interventionKind) + ` ` + quote(interventionNext) + ` ` + quote(kind) + ` ` + quote(command) + ` ` + quote(reason) + ` > "$output"
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"%s","summary":"proposal","artifacts":[],"intervention":{"kind":"%s","next":"%s"},"diagnostics":[],"recommendation":{"kind":"%s","command":"%s","reason":"%s"},"product_decision":` + decision + `}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" ` + quote(class) + ` ` + quote(interventionKind) + ` ` + quote(interventionNext) + ` ` + quote(kind) + ` ` + quote(command) + ` ` + quote(reason) + ` > "$output"
 `
 	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte(body), 0o755); err != nil {
 		t.Fatal(err)
@@ -768,6 +825,7 @@ kind="plan"
 command="concoct plan APP-001"
 reason="selected eligible work"
 summary="proposal"
+decision='{"version":1,"kind":"select","selection":"APP-001","rationale":"selected eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":""}'
 if [ "$role" = "task-planner" ]; then
   trunk=$(grep '^- Git trunk:' "$prompt" | cut -d: -f2- | tr -d ' \140')
   branch=$(grep '^- Git task branch:' "$prompt" | cut -d: -f2- | tr -d ' \140')
@@ -779,8 +837,9 @@ if [ "$role" = "task-planner" ]; then
   command=""
   reason=""
   summary="planning complete"
+  decision='{}'
 fi
-printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"%s","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"%s","command":"%s","reason":"%s"}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$role" "$summary" "$kind" "$command" "$reason" > "$output"
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"%s","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"%s","command":"%s","reason":"%s"},"product_decision":%s}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$role" "$summary" "$kind" "$command" "$reason" "$decision" > "$output"
 rm -f "$prompt"
 `
 	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte(body), 0o755); err != nil {

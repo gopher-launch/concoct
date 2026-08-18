@@ -32,13 +32,16 @@ The roadmap should be useful to both humans and agents.
 
 ## Ready-state recommendation boundary
 
-`concoct next` is a read-only decision step before work selection. Use its
-validated roadmap, capability, dependency, prerequisite, archive, and
-supported-origin evidence to recommend exactly one next action. Do not edit the
-roadmap during that recommendation, treat deterministic ordering as selection,
-or present blocked work as immediately plannable. `concoct roadmap` remains the
-separate roadmap-mutation handoff, and `concoct plan <roadmap-id>` remains the
-separate explicit selection and task-planning handoff.
+`concoct next` is a read-only inspection step. Use its validated roadmap,
+capability, dependency, prerequisite, archive, and supported-origin evidence to
+express one semantic decision: `select`, `reconcile-and-select`, `reconcile`,
+`human-decision-required`, or `no-action`. Do not edit the roadmap during that
+inspection, treat deterministic ordering as selection, or present blocked work
+as immediately plannable. Supervised Product Owner execution retains and, after
+the configured approval, applies the validated decision exactly once; the
+manual prompt does neither. `concoct roadmap` remains the separate
+roadmap-mutation handoff, and `concoct plan <roadmap-id>` remains the separate
+task-planning handoff.
 
 ## Canonical inputs
 

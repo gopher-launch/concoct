@@ -19,6 +19,12 @@ than an ongoing dependency on a roadmap item.
 
 ## CAP-001 — Durable file-based workflow contract
 
+- Accepted Product Owner decisions are retained as bounded private evidence,
+  approved once, and applied through validated reconciliation or planning;
+  active task evidence remains authoritative over ready-state decisions.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
+
 - Status: `active`
 - Audience: `developers and coding agents`
 - Added by: `baseline inventory`
@@ -235,6 +241,11 @@ executable-rendered protocol and role guidance where supported.
 
 ## CAP-005 — Executable initialization, compatibility, and workflow status
 
+- Status reports retained Product Owner decision evidence while preserving the
+  canonical continuation of an active task.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
+
 - Archive: `.concoct/archive/2026-08-11-CON-031-establish-release-and-compatibility-versioning/summary.md`
 - Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
@@ -300,6 +311,11 @@ Project maintainers can bootstrap the workflow reliably from an installed binary
 - `CAP-006` adds deterministic role-prompt rendering to the CLI.
 
 ## CAP-006 — Deterministic role-aware prompt rendering
+
+- Manual and supervised Product Owner guidance share the semantic decision
+  vocabulary; manual `next` remains explicitly read-only.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
 
 - Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
@@ -546,6 +562,11 @@ rendering for a completed planning transition.
 
 ## CAP-009 — Evidence-backed next-action recommendation
 
+- Supervised Product Owner decisions provide a distinct evidence-bound path for
+  one approved selection or reconciliation; read-only `next` remains unchanged.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
+
 - Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
@@ -698,6 +719,11 @@ handoffs, unsafe Git context, or manufactured role judgment.
 
 ## CAP-011 — Validated archive and capability reconciliation
 
+- Product Owner reconciliation uses the same bounded, record-scoped validation
+  boundary before changing canonical roadmap or capability truth.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
+
 - Updated by: `.concoct/archive/2026-08-04-CON-018-configure-workflow-policy/summary.md`
 - Updated by: `.concoct/archive/2026-08-13-CON-036-make-capability-ledger-change-detection-record-aware/summary.md`
 - Status: `active`
@@ -773,6 +799,11 @@ capability reconciliation, and lifecycle-appropriate roadmap and Git evidence.
   archive completion.
 
 ## CAP-012 — Structured orchestration action and outcome validation
+
+- The protocol carries semantic Product Owner selection and reconciliation
+  outcomes with evidence-bound approval and application.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
 
 - Status: `active`
 - Audience: `adapter authors, project maintainers, and coding agents`
@@ -853,6 +884,11 @@ as proof that a workflow transition occurred.
 
 ## CAP-013 — One-shot execution of an authorized workflow action
 
+- A retained Product Owner outcome can be reused for its authorized transition
+  without a second Product Owner invocation.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
+
 - Status: `active`
 - Audience: `developers and coding agents`
 - Added by: `.concoct/archive/2026-08-11-CON-010-execute-one-recommended-action-through-an-agent-adapter/summary.md`
@@ -910,6 +946,11 @@ evidence without regenerating it.
 
 ## CAP-014 — Bounded repeated lifecycle orchestration
 
+- Bounded runs can supervise one-use Product Owner approval and continue to
+  reconciliation or planning while preserving evidence binding.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
+
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`
 - Added by: `.concoct/archive/2026-08-12-CON-033-orchestrate-the-task-lifecycle-with-configurable-gates/summary.md`
@@ -963,6 +1004,11 @@ remote push authority.
 - `CAP-007` supplies Git integration authority.
 
 ## CAP-015 — Agent invocation cost attribution and bounded measurement
+
+- Product Owner proposal, approval, application, and reuse remain attributable
+  in bounded lifecycle evidence.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/summary.md`
 
 - Status: `active`
 - Audience: `project maintainers, developers, and coding agents`

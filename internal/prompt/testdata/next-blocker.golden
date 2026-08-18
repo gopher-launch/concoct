@@ -39,13 +39,13 @@ Ordering is deterministic presentation only. The CLI has not selected work; prio
 
 ## Authorized updates
 
-- `none (read-only recommendation)`
+- `none (read-only inspection)`
 
 The `concoct next` command itself made none of these updates. Do not modify any completed review, archive artifact, or capability ledger unless explicitly listed above.
 
 ## Expected outcome
 
-Recommend exactly one supported next action from authoritative evidence without selecting work or mutating workflow artifacts.
+Render one read-only Product Owner decision using the shared semantic vocabulary; this manual path neither retains nor applies it.
 
 ## Validation and completion
 
@@ -53,7 +53,7 @@ Validate repository assumptions before writing, stay within the selected persona
 
 ## Recommended next transition
 
-one exact follow-up command when applicable: `concoct plan <roadmap-id>` or `concoct roadmap`; otherwise name the blocker or report no actionable recorded work
+use the displayed decision to choose `concoct plan <roadmap-id>` or `concoct roadmap`; otherwise resolve the named human decision or report no action
 
 ## Canonical handoff instructions
 
@@ -62,17 +62,21 @@ one exact follow-up command when applicable: `concoct plan <roadmap-id>` or `con
 ```text
 Act as the Product Owner for this repository.
 
-Use the rendered authoritative evidence to recommend exactly one next action.
-Do not edit any file, select or activate a task, create a branch, or treat
-priority ordering as an automated decision.
+Use the rendered authoritative evidence to make exactly one Product Owner
+decision. This is a read-only inspection path: do not edit any file, retain or
+apply a decision, select or activate a task, create a branch, or treat priority
+ordering as an automated decision.
 
-Choose exactly one outcome:
-- plan one structurally eligible roadmap item;
-- perform supported human-product-input or roadmap reconciliation work;
-- resolve one named blocker or inconsistency;
-- acknowledge that no actionable work is recorded.
+Choose exactly one semantic decision:
+- `select` one structurally eligible roadmap item;
+- `reconcile-and-select` when accepted delivery evidence needs constrained
+  reconciliation before selecting one item;
+- `reconcile` when only accepted delivery evidence needs reconciliation;
+- `human-decision-required` for one unresolved product decision; or
+- `no-action` to report no actionable recorded work after considering
+  reconciliation.
 
-For the recommendation:
+For the decision:
 - explain why it is next;
 - cite the roadmap, capability, dependency, prerequisite, and archive evidence
   that supports it;
@@ -82,13 +86,14 @@ For the recommendation:
 - do not infer acceptance from priority, implementation presence, or checks;
 - do not propose unsupported work origins.
 
-End with exactly one applicable command:
+End with exactly one applicable manual follow-up:
 - `concoct plan <roadmap-id>` for an eligible selected roadmap item;
 - `concoct roadmap` for supported product input or roadmap reconciliation;
 - `concoct status` after external blocker repair when status must be rechecked;
 - no command when no actionable work is recorded.
 
-When an adapter supplies a structured result schema, express the same single
-outcome through it: `plan`, `roadmap`, `blocker`, or `no-action`. The schema is
-transport only; do not start the recommended follow-up or mutate evidence.
+When an adapter supplies a structured result schema, express the same decision
+through its versioned `product_decision` value. A display command is derived
+from that decision and is never its meaning. The schema is transport only;
+do not start the follow-up or mutate evidence.
 ```

@@ -168,6 +168,12 @@ authorized prompt through Codex instead. The agent still has to use the same
 completion command and produce the same durable handoff. Manual prompt commands
 remain available whenever direct execution is unavailable or undesirable.
 
+When the project is `ready`, supervised execution retains the Product Owner's
+semantic decision privately and binds it to the exact repository evidence.
+`concoct run --approve next` applies the approved decision once, then continues
+to planning when a selection was made. `concoct next` is still read-only and
+useful for manual inspection; it never retains, approves, or applies a choice.
+
 Execution settings use invocation flags first, then project role settings,
 user role settings, adapter role defaults, and adapter defaults. Project
 settings live in `.concoct/config.yaml`; user settings live in the platform

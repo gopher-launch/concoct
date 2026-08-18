@@ -3,7 +3,9 @@ package runstate
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +18,21 @@ import (
 )
 
 const maxRecordBytes = 16 * 1024
+
+// DecisionRecord is the private, executable-owned durable boundary between a
+// Product Owner proposal and later approval/application. It is intentionally
+// not accepted product truth: roadmap and capability changes remain canonical
+// only after their dedicated application transaction.
+type DecisionRecord struct {
+	Version       int                           `json:"version"`
+	Status        string                        `json:"status"`
+	Decision      orchestration.ProductDecision `json:"decision"`
+	Evidence      string                        `json:"evidence"`
+	State         workflow.State                `json:"state"`
+	Correlation   orchestration.Correlation     `json:"correlation"`
+	CreatedAt     string                        `json:"created_at"`
+	InvalidReason string                        `json:"invalid_reason,omitempty"`
+}
 
 // Gate binds one approval to the exact forthcoming action and repository
 // evidence. Selection is populated only for the invariant next gate.
@@ -39,6 +56,200 @@ func Path(root string) string {
 	return filepath.Join(root, ".concoct", "runtime", "pending-gate.json")
 }
 
+func DecisionPath(root string) string {
+	return filepath.Join(root, ".concoct", "runtime", "product-owner-decision.json")
+}
+
+// NewDecision constructs a proposed decision bound to the exact authorization
+// snapshot. It does not create a pending approval gate or mutate canonical
+// workflow artifacts.
+func NewDecision(decision orchestration.ProductDecision, evidence orchestration.Evidence, correlation orchestration.Correlation) (DecisionRecord, error) {
+	record := DecisionRecord{Version: 1, Status: "proposed", Decision: decision, Evidence: evidence.Digest, State: evidence.State, Correlation: correlation, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if err := validateDecision(record); err != nil {
+		return DecisionRecord{}, err
+	}
+	return record, nil
+}
+
+// CreateDecision publishes a decision once. A caller must explicitly inspect,
+// invalidate, or apply the existing record; a new Product Owner invocation may
+// not silently replace it.
+func CreateDecision(root string, record DecisionRecord) error {
+	if err := validateDecision(record); err != nil {
+		return err
+	}
+	return createJSON(DecisionPath(root), record, "Product Owner decision")
+}
+
+func LoadDecision(root string) (DecisionRecord, error) {
+	if err := validateRuntimePath(root, false); err != nil {
+		return DecisionRecord{}, err
+	}
+	path := DecisionPath(root)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return DecisionRecord{}, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 || info.Size() > maxRecordBytes {
+		return DecisionRecord{}, fmt.Errorf("Product Owner decision must be a bounded private regular file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return DecisionRecord{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var record DecisionRecord
+	if err := decoder.Decode(&record); err != nil {
+		return DecisionRecord{}, fmt.Errorf("malformed Product Owner decision: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return DecisionRecord{}, fmt.Errorf("malformed Product Owner decision: trailing JSON data")
+	}
+	if err := validateDecision(record); err != nil {
+		return DecisionRecord{}, err
+	}
+	return record, nil
+}
+
+// UpdateDecision atomically replaces one validated private decision record.
+// Unlike CreateDecision it is deliberately limited to the record lifecycle;
+// it is never a generic product-data writer.
+func UpdateDecision(root string, record DecisionRecord) error {
+	if err := validateDecision(record); err != nil {
+		return err
+	}
+	path := DecisionPath(root)
+	if _, err := LoadDecision(root); err != nil {
+		return err
+	}
+	return replaceJSON(path, record, "Product Owner decision")
+}
+
+func InvalidateDecision(root string, record DecisionRecord, reason string) error {
+	if strings.TrimSpace(reason) == "" || len(reason) > 512 || strings.Contains(reason, "\x00") {
+		return errors.New("Product Owner decision invalidation requires a bounded reason")
+	}
+	record.Status, record.InvalidReason = "invalidated", reason
+	return UpdateDecision(root, record)
+}
+
+// ApplyDecision applies only the exact record replacements retained in a
+// validated Product Owner decision. Each replacement must still match its
+// digest and occur exactly once; this prevents a decision from acting as a
+// general Markdown patch after evidence has drifted.
+func ApplyDecision(root string, record DecisionRecord) error {
+	if record.Status != "proposed" && record.Status != "approved" {
+		return fmt.Errorf("Product Owner decision %s cannot be applied", record.Status)
+	}
+	if len(record.Decision.Mutations) == 0 {
+		// A reconciliation may record that accepted evidence was inspected but
+		// needs no canonical record replacement. Its semantic evidence remains
+		// bounded by the decision record; there is simply no mutation to apply.
+		return nil
+	}
+	// Validate every retained replacement before changing either canonical file.
+	// This keeps a rejected multi-record reconciliation entirely non-mutating.
+	original := map[string][]byte{}
+	updated := map[string][]byte{}
+	for _, mutation := range record.Decision.Mutations {
+		path := filepath.Join(root, ".concoct", map[string]string{"roadmap": "roadmap.md", "capabilities": "capabilities.md"}[mutation.Target])
+		data, ok := updated[path]
+		if !ok {
+			var err error
+			data, err = os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			original[path] = append([]byte(nil), data...)
+		}
+		before := []byte(mutation.Before)
+		digest := fmt.Sprintf("%x", sha256.Sum256(before))
+		if digest != mutation.BeforeDigest || bytes.Count(data, before) != 1 {
+			return fmt.Errorf("Product Owner %s mutation for %s is stale or ambiguous", mutation.Target, mutation.ID)
+		}
+		if !strings.HasPrefix(mutation.Before, "## "+mutation.ID+" ") || !strings.HasPrefix(mutation.After, "## "+mutation.ID+" ") {
+			return fmt.Errorf("Product Owner mutation for %s is not an exact canonical record", mutation.ID)
+		}
+		updated[path] = bytes.Replace(data, before, []byte(mutation.After), 1)
+	}
+	// Digest and heading checks above bind replacements to exact bytes. The
+	// workflow layer additionally constrains the semantic transition and its
+	// accepted delivery provenance before either canonical file is written.
+	roadmapPath := filepath.Join(root, ".concoct", "roadmap.md")
+	capabilityPath := filepath.Join(root, ".concoct", "capabilities.md")
+	roadmapCandidate := original[roadmapPath]
+	if candidate, ok := updated[roadmapPath]; ok {
+		roadmapCandidate = candidate
+	}
+	if roadmapCandidate == nil {
+		var err error
+		roadmapCandidate, err = os.ReadFile(roadmapPath)
+		if err != nil {
+			return err
+		}
+	}
+	capabilityCandidate := original[capabilityPath]
+	if candidate, ok := updated[capabilityPath]; ok {
+		capabilityCandidate = candidate
+	}
+	if capabilityCandidate == nil {
+		var err error
+		capabilityCandidate, err = os.ReadFile(capabilityPath)
+		if err != nil {
+			return err
+		}
+	}
+	changes := make([]workflow.ReconciliationChange, 0, len(record.Decision.Mutations))
+	for _, mutation := range record.Decision.Mutations {
+		changes = append(changes, workflow.ReconciliationChange{Target: mutation.Target, ID: mutation.ID})
+	}
+	if err := workflow.ValidateReconciliationCandidate(root, roadmapCandidate, capabilityCandidate, changes); err != nil {
+		return err
+	}
+	paths := []string{roadmapPath, capabilityPath}
+	var written []string
+	for _, path := range paths {
+		data, ok := updated[path]
+		if !ok {
+			continue
+		}
+		if err := writeCanonicalAtomic(path, data); err != nil {
+			var rollbackErrs []string
+			for _, prior := range written {
+				if rollbackErr := writeCanonicalAtomic(prior, original[prior]); rollbackErr != nil {
+					rollbackErrs = append(rollbackErrs, rollbackErr.Error())
+				}
+			}
+			if len(rollbackErrs) > 0 {
+				return fmt.Errorf("apply Product Owner decision: %w; rollback failed: %s", err, strings.Join(rollbackErrs, "; "))
+			}
+			return fmt.Errorf("apply Product Owner decision: %w; no canonical mutation retained", err)
+		}
+		written = append(written, path)
+	}
+	return nil
+}
+
+func writeCanonicalAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".product-owner-apply-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err = tmp.Write(data); err == nil {
+		err = tmp.Chmod(0o644)
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(name, path)
+}
+
 // New constructs a bounded gate from current evidence and optional action
 // correlation. It does not write anything.
 func New(name, action, task, selection string, evidence orchestration.Evidence, correlation orchestration.Correlation, configDigest string) (Gate, error) {
@@ -59,15 +270,18 @@ func Create(root string, gate Gate) error {
 	if err := validate(gate); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(gate, "", "  ")
+	return createJSON(Path(root), gate, "pending approval gate")
+}
+
+func createJSON(path string, value any, name string) error {
+	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
 	if len(data) > maxRecordBytes {
-		return fmt.Errorf("pending gate exceeds %d bytes", maxRecordBytes)
+		return fmt.Errorf("%s exceeds %d bytes", name, maxRecordBytes)
 	}
-	path := Path(root)
 	if err := ensurePrivateDir(filepath.Dir(path)); err != nil {
 		return err
 	}
@@ -75,8 +289,8 @@ func Create(root string, gate Gate) error {
 	if err != nil {
 		return err
 	}
-	name := tmp.Name()
-	defer os.Remove(name)
+	temporary := tmp.Name()
+	defer os.Remove(temporary)
 	if _, err = tmp.Write(data); err == nil {
 		err = tmp.Chmod(0o600)
 	}
@@ -86,13 +300,43 @@ func Create(root string, gate Gate) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Link(name, path); err != nil {
+	if err := os.Link(temporary, path); err != nil {
 		if os.IsExist(err) {
-			return fmt.Errorf("pending approval gate already exists")
+			return fmt.Errorf("%s already exists", name)
 		}
 		return err
 	}
-	return os.Remove(name)
+	return os.Remove(temporary)
+}
+
+func replaceJSON(path string, value any, name string) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if len(data) > maxRecordBytes {
+		return fmt.Errorf("%s exceeds %d bytes", name, maxRecordBytes)
+	}
+	if err := ensurePrivateDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".product-owner-decision-*")
+	if err != nil {
+		return err
+	}
+	temporary := tmp.Name()
+	defer os.Remove(temporary)
+	if _, err = tmp.Write(data); err == nil {
+		err = tmp.Chmod(0o600)
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
 }
 
 func Load(root string) (Gate, error) {
@@ -208,8 +452,36 @@ func validate(g Gate) error {
 		}
 		seenPrerequisite[prerequisite] = true
 	}
-	if g.Name == "next" && g.Selection == "" {
+	if g.Name == "next" && g.Action == "task-planning" && g.Selection == "" {
 		return fmt.Errorf("next gate requires a selected roadmap item")
+	}
+	return nil
+}
+
+func validateDecision(record DecisionRecord) error {
+	if record.Version != 1 {
+		return fmt.Errorf("unsupported Product Owner decision record version %d", record.Version)
+	}
+	if record.Status != "proposed" && record.Status != "approved" && record.Status != "applied" && record.Status != "invalidated" {
+		return fmt.Errorf("unsupported Product Owner decision record status %q", record.Status)
+	}
+	if err := orchestration.ValidateProductDecision(record.Decision); err != nil {
+		return err
+	}
+	if record.Evidence == "" || len(record.Evidence) > 512 || record.State != workflow.Ready || record.CreatedAt == "" {
+		return errors.New("Product Owner decision record lacks bounded ready-state evidence")
+	}
+	if record.Correlation.InvocationID == "" || record.Correlation.ActionID == "" || record.Correlation.AttemptID == "" || record.Correlation.Role != "product-owner" {
+		return errors.New("Product Owner decision record has invalid correlation")
+	}
+	if len(record.InvalidReason) > 512 || strings.Contains(record.InvalidReason, "\x00") {
+		return errors.New("Product Owner decision record has invalid invalidation reason")
+	}
+	if record.Status == "invalidated" && record.InvalidReason == "" {
+		return errors.New("invalidated Product Owner decision requires a reason")
+	}
+	if record.Status != "invalidated" && record.InvalidReason != "" {
+		return errors.New("only an invalidated Product Owner decision may have an invalidation reason")
 	}
 	return nil
 }
