@@ -917,7 +917,7 @@ transactional protocol.
 
 ## CON-040 — Give the Product Owner authority to advance ready-state work
 
-- Status: `active`
+- Status: `delivered`
 - Archive: `.concoct/archive/2026-08-18-CON-040-give-the-product-owner-authority-to-advance-ready-state-work/`
 - Priority: `critical`
 - Depends on: None
