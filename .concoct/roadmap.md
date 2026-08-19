@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-08-17
+updated: 2026-08-18
 ---
 
 # Roadmap
@@ -914,3 +914,60 @@ transactional protocol.
 - Existing manual role commands, policy behavior, task-branch integration,
   capability reconciliation, prompt rendering, and agent-cost attribution remain
   compatible and regression-tested.
+
+---
+
+## CON-041 — Repair structured-output schema and terminal failure diagnostics
+
+- Status: `planned`
+- Priority: `critical`
+- Depends on: None
+- Capability prerequisites: CAP-001, CAP-012, CAP-013, CAP-014, CAP-015
+- Capability impact: corrects supervised structured-output contracts, failure evidence, and actionable retry guidance
+
+### Outcome
+
+Repair the post-CON-040 Product Owner invocation failure by making every generated
+structured-output schema locally contract-valid, rejecting malformed results before
+Codex invocation, and preserving bounded Codex terminal diagnostics through one-shot
+and lifecycle-run reporting.
+
+### Rationale
+
+The retained post-CON-040 invocation demonstrates that the generated Product Owner
+schema declared `mutations` but omitted it from the parent object's required fields.
+Codex rejected the schema before inference, while reconciliation discarded the
+structured terminal diagnostic and recommended an unchanged blind retry. This wastes
+operator time and model capacity and obscures the exact configuration defect.
+
+### Requirements
+
+- Require every declared object property exactly once in `required`, require
+  `additionalProperties: false`, and validate this contract recursively offline for
+  every role/action output schema.
+- Correct Product Owner outcomes so `mutations` is always present, including an empty
+  array for decisions without mutations, and cover every supported decision kind.
+- Reject malformed generated schemas and malformed or omitted mutations locally
+  before launching Codex.
+- Parse only bounded diagnostic type/message fields from `turn.failed`, retain them
+  in measurement and reconciliation evidence, and display them in `exec` and `run`.
+- Do not depend on stdout or stderr logs for JSONL-reported Codex failures and do not
+  retain arbitrary raw event content.
+- Classify pre-inference schema rejection as retryable only after the exact schema or
+  configuration defect changes, and report that corrective action or blocker.
+
+### Acceptance criteria
+
+- The exact post-CON-040 Product Owner schema passes the recursive schema-contract
+  validator and requires `product_decision.mutations`.
+- Empty-mutation select, reconcile-and-select, reconcile,
+  human-decision-required, and no-action results validate; omitted or malformed
+  mutations fail before adapter launch.
+- Every generated role/action schema is exercised by the offline validator with
+  complete paths for missing and duplicate required properties.
+- A `turn.started` → `turn.failed` → nonzero exit sequence with no adapter result
+  and no usage retains and displays the bounded type/message diagnostic in both
+  one-shot and run output.
+- Focused and full tests, race tests, vet, native and Windows builds,
+  source/template parity, fresh initialization, shell validation, and diff checks
+  pass without any live or billable model invocation.
