@@ -919,7 +919,7 @@ transactional protocol.
 
 ## CON-041 — Repair structured-output schema and terminal failure diagnostics
 
-- Status: `active`
+- Status: `delivered`
 - Archive: `.concoct/archive/2026-08-18-CON-041-repair-structured-output-schema-and-terminal-failure-diagnostics/`
 - Priority: `critical`
 - Depends on: None
