@@ -124,6 +124,12 @@ Where a consumed gate identifies a prior invocation, metadata records it as a
 non-authoritative predecessor link. A terminal `turn.*` event followed by later
 events is retained as partial evidence and marked `degraded`, rather than being
 silently counted as a complete ordered transcript.
+Generated structured-output schemas are recursively checked offline before
+Codex starts: every object is closed and requires every property exactly once.
+Product Owner decisions explicitly emit `mutations: []` when no mutation is
+proposed. A terminal `turn.failed` retains only bounded type/message evidence,
+which remains visible in one-shot and run summaries even without usage or an
+adapter result; schema/configuration rejection requires correction before retry.
 
 Normalized measurement adds payload-free semantic activity, repeated-operation
 fingerprints, command-output byte totals, bounded native usage snapshots, and

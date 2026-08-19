@@ -365,6 +365,9 @@ func runExec(args []string, stdout, stderr io.Writer) error {
 		} else {
 			fmt.Fprintf(stdout, "Prompt bytes: %d\nAgent usage: %s\n", result.Prepared.Composition.ByteCount(), result.Measurement.UsageSummary())
 		}
+		if failure := result.Reconciliation.FailureDiagnostic; failure != nil {
+			fmt.Fprintf(stdout, "Codex failure: %s: %s\nCorrective action: %s\n", failure.Type, failure.Message, result.Reconciliation.Recovery)
+		}
 	}
 	return runErr
 }

@@ -919,7 +919,8 @@ transactional protocol.
 
 ## CON-041 — Repair structured-output schema and terminal failure diagnostics
 
-- Status: `planned`
+- Status: `active`
+- Archive: `.concoct/archive/2026-08-18-CON-041-repair-structured-output-schema-and-terminal-failure-diagnostics/`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-012, CAP-013, CAP-014, CAP-015

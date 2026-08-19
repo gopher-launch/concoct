@@ -135,7 +135,7 @@ func Schema(action orchestration.Action) ([]byte, error) {
 			"capability_digest":   map[string]any{"type": "string", "maxLength": 512},
 			"completion_evidence": map[string]any{"type": "string", "maxLength": 512},
 			"mutations":           map[string]any{"type": "array", "maxItems": 8, "items": mutation},
-		}, "required": []string{"version", "kind", "selection", "rationale", "roadmap_digest", "capability_digest", "completion_evidence"}}
+		}, "required": []string{"version", "kind", "selection", "rationale", "roadmap_digest", "capability_digest", "completion_evidence", "mutations"}}
 	}
 	schema := map[string]any{
 		"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "additionalProperties": false,
@@ -153,7 +153,85 @@ func Schema(action orchestration.Action) ([]byte, error) {
 		},
 		"required": []string{"protocol_version", "correlation", "class", "summary", "artifacts", "intervention", "diagnostics", "recommendation", "product_decision"},
 	}
+	if err := ValidateSchemaContract(schema); err != nil {
+		return nil, fmt.Errorf("generated output schema is invalid: %w", err)
+	}
 	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ValidateSchemaContract checks the closed-object subset required by Codex
+// strict structured outputs. It is deliberately recursive and offline.
+func ValidateSchemaContract(schema any) error { return validateSchemaNode(schema, "$") }
+
+func validateSchemaNode(node any, path string) error {
+	object, ok := node.(map[string]any)
+	if !ok {
+		return nil
+	}
+	if propertiesValue, hasProperties := object["properties"]; hasProperties {
+		properties, ok := propertiesValue.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s.properties must be an object", path)
+		}
+		closed, ok := object["additionalProperties"].(bool)
+		if !ok || closed {
+			return fmt.Errorf("%s.additionalProperties must be false", path)
+		}
+		requiredValue, ok := object["required"]
+		if !ok {
+			return fmt.Errorf("%s.required is missing", path)
+		}
+		var required []string
+		switch values := requiredValue.(type) {
+		case []string:
+			required = values
+		case []any:
+			for _, value := range values {
+				name, ok := value.(string)
+				if !ok {
+					return fmt.Errorf("%s.required must be an array of property names", path)
+				}
+				required = append(required, name)
+			}
+		default:
+			return fmt.Errorf("%s.required must be an array of property names", path)
+		}
+		counts := map[string]int{}
+		for _, name := range required {
+			counts[name]++
+			if counts[name] > 1 {
+				return fmt.Errorf("%s.required contains duplicate property %q", path, name)
+			}
+			if _, exists := properties[name]; !exists {
+				return fmt.Errorf("%s.required contains undeclared property %q", path, name)
+			}
+		}
+		for name := range properties {
+			if counts[name] == 0 {
+				return fmt.Errorf("%s.required is missing property %q", path, name)
+			}
+		}
+	}
+	for name, child := range object {
+		if err := validateSchemaValue(child, path+"."+name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSchemaValue(value any, path string) error {
+	switch nested := value.(type) {
+	case map[string]any:
+		return validateSchemaNode(nested, path)
+	case []any:
+		for index, child := range nested {
+			if err := validateSchemaValue(child, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func DisplayCommand(inv Invocation) string {

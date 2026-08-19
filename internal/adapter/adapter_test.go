@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,6 +57,83 @@ func TestProductOwnerSchemaPermitsOnlyBoundedRecordMutations(t *testing.T) {
 		if !strings.Contains(string(schema), field) {
 			t.Fatalf("Product Owner schema lacks bounded mutation field %s:\n%s", field, schema)
 		}
+	}
+}
+
+func TestEveryGeneratedActionSchemaSatisfiesRecursiveContract(t *testing.T) {
+	for _, spec := range orchestration.Registry() {
+		t.Run(spec.Kind, func(t *testing.T) {
+			action := orchestration.Action{Kind: spec.Kind, Correlation: orchestration.Correlation{Role: spec.Role}}
+			data, err := Schema(action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var schema map[string]any
+			if err := json.Unmarshal(data, &schema); err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateSchemaContract(schema); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSchemaContractReportsCompleteMissingAndDuplicatePaths(t *testing.T) {
+	base := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+		"outer": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []string{}},
+	}, "required": []string{"outer"}}
+	if err := ValidateSchemaContract(base); err == nil || !strings.Contains(err.Error(), `$.properties.outer.required is missing property "value"`) {
+		t.Fatalf("missing error = %v", err)
+	}
+	base["properties"].(map[string]any)["outer"].(map[string]any)["required"] = []string{"value", "value"}
+	if err := ValidateSchemaContract(base); err == nil || !strings.Contains(err.Error(), `$.properties.outer.required contains duplicate property "value"`) {
+		t.Fatalf("duplicate error = %v", err)
+	}
+}
+
+func TestSchemaContractRecursesThroughArbitraryMapsAndArrays(t *testing.T) {
+	schema := map[string]any{"oneOf": []any{map[string]any{"$defs": map[string]any{
+		"nested": map[string]any{"type": "object", "additionalProperties": true, "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []string{"value"}},
+	}}}}
+	err := ValidateSchemaContract(schema)
+	if err == nil || !strings.Contains(err.Error(), `$.oneOf[0].$defs.nested.additionalProperties must be false`) {
+		t.Fatalf("nested schema error = %v", err)
+	}
+}
+
+func TestPostCON040ProductOwnerSchemaRequiresMutations(t *testing.T) {
+	action := orchestration.Action{Kind: "product-owner-next", Correlation: orchestration.Correlation{Role: "product-owner"}}
+	data, err := Schema(action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Required []string `json:"required"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, name := range schema.Properties["product_decision"].Required {
+		found = found || name == "mutations"
+	}
+	if !found {
+		t.Fatal("product_decision.mutations is not required")
+	}
+}
+
+func TestTurnFailedRetainsOnlyBoundedDiagnostic(t *testing.T) {
+	stream := `{"type":"turn.started"}` + "\n" + `{"type":"turn.failed","error":{"type":"invalid_request_error","message":"schema rejected","raw":"secret"},"arbitrary":"do not retain"}` + "\n"
+	evidence := DecodeCodexJSONL([]byte(stream))
+	if evidence.TerminalFailure == nil || evidence.TerminalFailure.Type != "invalid_request_error" || evidence.TerminalFailure.Message != "schema rejected" || evidence.HasUsage() {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+	encoded, _ := json.Marshal(evidence)
+	if strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), "arbitrary") {
+		t.Fatalf("raw payload retained: %s", encoded)
 	}
 }
 

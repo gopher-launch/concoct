@@ -38,6 +38,16 @@ func TestSummaryUsageAggregatesRepeatedPartialAndMechanicalActions(t *testing.T)
 	}
 }
 
+func TestRunSummaryDisplaysBoundedTerminalFailureAndCorrection(t *testing.T) {
+	summary := Summary{Steps: []Step{{Action: "product-owner-next", Role: "product-owner", PromptBytes: 1, Disposition: "nonzero-exit", FailureDiagnostic: &adapter.FailureDiagnostic{Type: "invalid_json_schema", Message: "mutations must be required"}, Recovery: "correct the generated schema before authorizing another invocation"}}, ActionLimit: 1, CycleLimit: 1}
+	text := summary.String()
+	for _, want := range []string{"invalid_json_schema", "mutations must be required", "correct the generated schema before authorizing another invocation"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("summary lacks %q: %s", want, text)
+		}
+	}
+}
+
 func TestReadyRunPersistsProposalAndRejectsDriftedApproval(t *testing.T) {
 	parent := t.TempDir()
 	if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {

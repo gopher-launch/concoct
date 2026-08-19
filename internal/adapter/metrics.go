@@ -63,6 +63,11 @@ type BudgetEvent struct {
 	Enforceable bool   `json:"enforceable"`
 }
 
+type FailureDiagnostic struct {
+	Type    string `json:"type,omitempty"`
+	Message string `json:"message"`
+}
+
 // EventEvidence is compact, adapter-neutral evidence extracted from Codex JSONL.
 type EventEvidence struct {
 	Usage                   Usage                    `json:"usage"`
@@ -81,6 +86,7 @@ type EventEvidence struct {
 	CurrentActivity         string                   `json:"current_activity,omitempty"`
 	ActivityEvents          int64                    `json:"activity_events"`
 	Budgets                 []BudgetEvent            `json:"budget_events,omitempty"`
+	TerminalFailure         *FailureDiagnostic       `json:"terminal_failure,omitempty"`
 	// Status is supported unless the stream contains an event sequence the
 	// adapter cannot interpret as a complete, ordered Codex JSONL transcript.
 	// Usage collected before degradation remains observational evidence.
@@ -243,6 +249,9 @@ func (d *StreamDecoder) consume(data []byte) {
 	}
 	d.appendProgress(kind)
 	d.consumeActivity(kind, raw)
+	if kind == "turn.failed" {
+		d.consumeFailure(raw)
+	}
 	usageRaw := raw["usage"]
 	if len(usageRaw) == 0 {
 		if item, ok := raw["item"]; ok {
@@ -275,6 +284,28 @@ func (d *StreamDecoder) consume(data []byte) {
 	// Codex usage objects are snapshots, not additive deltas. Preserve the
 	// latest native observation while retaining the bounded timeline above.
 	d.evidence.Usage = usage
+}
+
+func (d *StreamDecoder) consumeFailure(raw map[string]json.RawMessage) {
+	var failure struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw["error"], &failure) != nil || strings.TrimSpace(failure.Message) == "" {
+		d.appendDiagnostic(fmt.Sprintf("event line %d has malformed turn.failed diagnostic", d.line))
+		return
+	}
+	failure.Type = boundText(failure.Type, 128)
+	failure.Message = boundText(failure.Message, 512)
+	d.evidence.TerminalFailure = &FailureDiagnostic{Type: failure.Type, Message: failure.Message}
+}
+
+func boundText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func (d *StreamDecoder) consumeActivity(kind string, raw map[string]json.RawMessage) {

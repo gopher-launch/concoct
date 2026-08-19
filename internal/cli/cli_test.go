@@ -94,6 +94,32 @@ func TestExecDryRunIsInspectablyNonMutating(t *testing.T) {
 	}
 }
 
+func TestExecDisplaysTurnFailedDiagnosticAndCorrectiveAction(t *testing.T) {
+	parent := t.TempDir()
+	if err := project.Initialize(parent, "demo", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "demo")
+	bin := t.TempDir()
+	script := "#!/bin/sh\nif [ \"${1:-}\" = \"--version\" ]; then echo codex-test; exit 0; fi\nprintf '%s\\n' '{\"type\":\"turn.started\"}' '{\"type\":\"turn.failed\",\"error\":{\"type\":\"invalid_json_schema\",\"message\":\"mutations must be required\"}}'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CONCOCT_CALLER_DIR", root)
+	var out bytes.Buffer
+	err := Run([]string{"exec"}, &out, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("failed Codex turn unexpectedly succeeded")
+	}
+	for _, want := range []string{"Codex failure: invalid_json_schema: mutations must be required", "Corrective action: correct the reported schema or configuration defect", "Retry safe from original evidence: false"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("exec output lacks %q: %s", want, out.String())
+		}
+	}
+}
+
 func TestExecDryRunHonorsIndependentReviewPolicyRoutes(t *testing.T) {
 	for _, disposition := range []string{"required", "not-required", "externally-satisfied"} {
 		t.Run(disposition, func(t *testing.T) {

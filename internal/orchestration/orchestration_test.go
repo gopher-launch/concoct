@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +121,46 @@ func TestValidateProductDecisionRequiresSemanticKindAndBoundedEffects(t *testing
 		if err := ValidateProductDecision(decision); err == nil {
 			t.Fatalf("invalid decision accepted: %#v", decision)
 		}
+	}
+}
+
+func TestReadResultRequiresExplicitMutationsForEveryProductDecisionKind(t *testing.T) {
+	decisions := []ProductDecision{
+		{Version: 1, Kind: DecisionSelect, Selection: "APP-001", Rationale: "ready", Mutations: []ProductMutation{}},
+		{Version: 1, Kind: DecisionReconcileAndSelect, Selection: "APP-001", Rationale: "ready after reconciliation", CompletionEvidence: "archive:APP-000", Mutations: []ProductMutation{}},
+		{Version: 1, Kind: DecisionReconcile, Rationale: "reconcile", RoadmapDigest: "digest", Mutations: []ProductMutation{}},
+		{Version: 1, Kind: DecisionHumanRequired, Rationale: "human choice", Mutations: []ProductMutation{}},
+		{Version: 1, Kind: DecisionNoAction, Rationale: "nothing to do", Mutations: []ProductMutation{}},
+	}
+	for _, decision := range decisions {
+		t.Run(decision.Kind, func(t *testing.T) {
+			data, err := json.Marshal(Outcome{ProtocolVersion: ProtocolVersion, ProductDecision: decision, Summary: "decision"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "result.json")
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReadResult(path); err != nil {
+				t.Fatalf("explicit empty mutations rejected: %v", err)
+			}
+		})
+	}
+
+	path := filepath.Join(t.TempDir(), "result.json")
+	missing := `{"protocol_version":"v1","summary":"decision","product_decision":{"version":1,"kind":"no-action","rationale":"none"}}`
+	if err := os.WriteFile(path, []byte(missing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadResult(path); err == nil || !strings.Contains(err.Error(), "product_decision.mutations is required") {
+		t.Fatalf("omitted mutations error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(missing, `"rationale":"none"`, `"rationale":"none","mutations":{}`, 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadResult(path); err == nil || !strings.Contains(err.Error(), "cannot unmarshal object") {
+		t.Fatalf("malformed mutations error = %v", err)
 	}
 }
 

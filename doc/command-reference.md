@@ -331,6 +331,11 @@ inclusion mode, exact byte count, and bounded exact/whitespace-normalized
 duplicate group when applicable. A path reference is recorded as an input
 reference; it does not claim that the file's contents were embedded.
 
+The Codex adapter validates every generated structured-output schema offline
+before process launch. Every object is closed and requires each declared
+property exactly once. Product Owner decisions always require `mutations`, with
+`[]` representing a decision that has no roadmap or capability mutations.
+
 The Codex adapter requests JSONL events. Structured events are decoded while
 the process runs, independently of retained-output and display limits: a late
 terminal usage event remains attributable even when earlier progress has
@@ -351,6 +356,10 @@ after a terminal `turn.*` event mark
 the measurement `status` as `degraded`; valid usage seen before that point is
 preserved as partial observation and does not change structured workflow-result
 acceptance.
+For `turn.failed`, only the bounded diagnostic type and message are promoted to
+measurement and reconciliation evidence; arbitrary event content is not. This
+diagnostic is shown by both `exec` and `run`, including when Codex exits nonzero
+without a result or usage and stdout/stderr logs contain no separate error.
 
 Payload-safe metrics classify model messages, file reads, searches, edits,
 checks, compaction, completion, and conservative command-other/unknown
@@ -372,7 +381,10 @@ terminal-only evaluation without becoming completion authority.
 Startup failure, nonzero exit, missing or malformed output, duplicate delivery,
 stale correlation, evidence drift, and postcondition mismatch all stop the
 one-shot invocation and report adapter disposition separately from observed
-state. A retry always authorizes a fresh envelope from current evidence.
+state. A retry always authorizes a fresh envelope from current evidence. A
+pre-inference schema or configuration rejection is not safe to retry unchanged:
+the reported defect must be corrected before another invocation is authorized,
+and operator output names that blocker rather than recommending blind `run`.
 
 `concoct exec inspect [<invocation-id>]` is metrics-first: it shows metadata,
 component evidence, normalized native usage, result, and reconciliation but

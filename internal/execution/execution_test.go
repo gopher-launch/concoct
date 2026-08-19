@@ -298,7 +298,7 @@ task=$(value task_id)
 attempt=$(value attempt_id)
 role=$(value role)
 printf 'OPENAI_API_KEY=sk-supersecret123456789\n' >&2
-printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":""}}\n' "$invocation" "$action" "$task" "$attempt" "$role" > "$output"
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":"","mutations":[]}}\n' "$invocation" "$action" "$task" "$attempt" "$role" > "$output"
 `)
 	result, err := Run(context.Background(), root, Options{}, strings.NewReader(""), &strings.Builder{})
 	if err != nil {
@@ -384,6 +384,33 @@ func TestAdapterFailureModesCloseInspectably(t *testing.T) {
 				t.Fatal(statErr)
 			}
 		})
+	}
+}
+
+func TestTurnFailedDiagnosticSurvivesNonzeroExitWithoutResultOrUsage(t *testing.T) {
+	root := readyFixture(t)
+	installFakeCodex(t, `printf '%s\n' '{"type":"turn.started"}' '{"type":"turn.failed","error":{"type":"invalid_json_schema","message":"product_decision.required must include mutations","raw":"must not survive"}}'
+exit 7`)
+	result, err := Run(context.Background(), root, Options{}, strings.NewReader(""), io.Discard)
+	if err == nil {
+		t.Fatal("failed adapter unexpectedly succeeded")
+	}
+	failure := result.Reconciliation.FailureDiagnostic
+	if failure == nil || failure.Type != "invalid_json_schema" || !strings.Contains(failure.Message, "mutations") {
+		t.Fatalf("reconciliation = %#v", result.Reconciliation)
+	}
+	if result.Measurement.HasUsage() || result.Reconciliation.RetrySafe || !strings.Contains(result.Reconciliation.Recovery, "correct the reported schema or configuration defect") {
+		t.Fatalf("result = %#v", result)
+	}
+	if _, statErr := os.Stat(filepath.Join(result.RecordPath, "adapter-result.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("adapter result unexpectedly exists: %v", statErr)
+	}
+	data, readErr := os.ReadFile(filepath.Join(result.RecordPath, "measurement.json"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(data), "must not survive") || !strings.Contains(string(data), "invalid_json_schema") {
+		t.Fatalf("bounded measurement = %s", data)
 	}
 }
 
@@ -518,7 +545,7 @@ value() {
   awk -v key="\"$1\"" '$0 ~ key { found=1 } found && /"const":/ { line=$0; sub(/^.*"const": "/, "", line); sub(/".*$/, "", line); print line; exit }' "$schema"
 }
 printf '%s\n' '` + event + `'
-printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":""}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":"","mutations":[]}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"
 sleep 10`
 }
 
@@ -543,7 +570,7 @@ value() {
 }
 printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution","command":"go test ./...","aggregated_output":"ok"}}'
 sleep 0.04
-printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":""}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"`,
+printf '{"protocol_version":"v1","correlation":{"invocation_id":"%s","action_id":"%s","task_id":"%s","attempt_id":"%s","role":"%s"},"class":"completed","summary":"no actionable work","artifacts":[],"intervention":{"kind":"","next":""},"diagnostics":[],"recommendation":{"kind":"","command":"","reason":""},"product_decision":{"version":1,"kind":"no-action","selection":"","rationale":"no eligible work","roadmap_digest":"","capability_digest":"","completion_evidence":"","mutations":[]}}\n' "$(value invocation_id)" "$(value action_id)" "$(value task_id)" "$(value attempt_id)" "$(value role)" > "$output"`,
 			disposition: "completed",
 		},
 		{

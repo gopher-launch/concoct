@@ -35,6 +35,8 @@ type Step struct {
 	PromptBytes                                                     int
 	Measurement                                                     adapter.EventEvidence
 	Accepted                                                        bool
+	FailureDiagnostic                                               *adapter.FailureDiagnostic
+	Recovery                                                        string
 }
 
 type Summary struct {
@@ -66,6 +68,9 @@ func (s Summary) String() string {
 			fmt.Fprintf(&b, " {prompt-bytes=%d; cost=%s; disposition=%s; activity=%d; command-output-bytes=%d; %s}", step.PromptBytes, cost, step.Disposition, step.Measurement.ActivityEvents, step.Measurement.Commands.OutputBytes, step.Measurement.UsageSummary())
 		} else if step.Action == "integration" {
 			fmt.Fprint(&b, " {no-agent mechanical action}")
+		}
+		if step.FailureDiagnostic != nil {
+			fmt.Fprintf(&b, " {codex-failure=%s: %s; corrective-action=%s}", step.FailureDiagnostic.Type, step.FailureDiagnostic.Message, step.Recovery)
 		}
 		b.WriteByte('\n')
 	}
@@ -506,13 +511,17 @@ func run(ctx context.Context, root string, options Options, runAccepted actionRu
 		if after, _, snapshotErr := orchestration.Snapshot(root); snapshotErr == nil {
 			progressEvidence += " -> " + shortDigest(after.Digest)
 		}
-		summary.Steps = append(summary.Steps, Step{Action: resolution.Kind, Role: resolution.Role, Outcome: outcome, State: string(result.Reconciliation.ObservedState), Invocation: result.Prepared.Action.Correlation.InvocationID, Progress: progressEvidence, Disposition: result.Reconciliation.InvocationDisposition, PromptBytes: result.Prepared.Composition.ByteCount(), Measurement: result.Measurement, Accepted: result.Reconciliation.ResultAccepted})
+		summary.Steps = append(summary.Steps, Step{Action: resolution.Kind, Role: resolution.Role, Outcome: outcome, State: string(result.Reconciliation.ObservedState), Invocation: result.Prepared.Action.Correlation.InvocationID, Progress: progressEvidence, Disposition: result.Reconciliation.InvocationDisposition, PromptBytes: result.Prepared.Composition.ByteCount(), Measurement: result.Measurement, Accepted: result.Reconciliation.ResultAccepted, FailureDiagnostic: result.Reconciliation.FailureDiagnostic, Recovery: result.Reconciliation.Recovery})
 		if resolution.Kind == "independent-review" && result.Reconciliation.ResultAccepted && result.Facts.Class == orchestration.Completed {
 			summary.Cycles++
 		}
 		if runErr != nil {
 			summary.Stop = runErr.Error()
-			summary.Recommendation = safeContinuation(resolution.Kind)
+			if result.Reconciliation.FailureDiagnostic != nil {
+				summary.Recommendation = result.Reconciliation.Recovery
+			} else {
+				summary.Recommendation = safeContinuation(resolution.Kind)
+			}
 			return finish(root, summary), runErr
 		}
 		if !result.Reconciliation.ResultAccepted {

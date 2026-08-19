@@ -114,7 +114,7 @@ type ProductDecision struct {
 	CompletionEvidence string `json:"completion_evidence,omitempty"`
 	// Mutations are exact, record-scoped replacements. They are deliberately
 	// not a patch language: each binds one canonical record to its prior digest.
-	Mutations []ProductMutation `json:"mutations,omitempty"`
+	Mutations []ProductMutation `json:"mutations"`
 }
 
 type ProductMutation struct {
@@ -528,6 +528,17 @@ func ReadResult(path string) (Outcome, error) {
 	var outcome Outcome
 	if err := json.Unmarshal(data, &outcome); err != nil {
 		return Outcome{}, fmt.Errorf("malformed result: %w", err)
+	}
+	if outcome.ProductDecision.Version != 0 {
+		var envelope struct {
+			ProductDecision map[string]json.RawMessage `json:"product_decision"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			return Outcome{}, fmt.Errorf("malformed result: %w", err)
+		}
+		if _, ok := envelope.ProductDecision["mutations"]; !ok {
+			return Outcome{}, fmt.Errorf("malformed result: product_decision.mutations is required; use [] when there are no mutations")
+		}
 	}
 	if err := bounded(outcome); err != nil {
 		return Outcome{}, err

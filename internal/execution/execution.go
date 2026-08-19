@@ -104,18 +104,19 @@ type Metadata struct {
 }
 
 type Reconciliation struct {
-	InvocationDisposition string            `json:"invocation_disposition"`
-	ResultAccepted        bool              `json:"result_accepted"`
-	OutcomeClass          string            `json:"outcome_class,omitempty"`
-	ResultError           string            `json:"result_error,omitempty"`
-	ObservedState         workflow.State    `json:"observed_state"`
-	ObservedNext          string            `json:"observed_next"`
-	RetrySafe             bool              `json:"retry_safe"`
-	FinishedAt            string            `json:"finished_at"`
-	CostDisposition       string            `json:"cost_disposition"`
-	FailedInvariant       string            `json:"failed_invariant,omitempty"`
-	ArtifactReusability   map[string]string `json:"artifact_reusability,omitempty"`
-	Recovery              string            `json:"recovery,omitempty"`
+	InvocationDisposition string                     `json:"invocation_disposition"`
+	ResultAccepted        bool                       `json:"result_accepted"`
+	OutcomeClass          string                     `json:"outcome_class,omitempty"`
+	ResultError           string                     `json:"result_error,omitempty"`
+	ObservedState         workflow.State             `json:"observed_state"`
+	ObservedNext          string                     `json:"observed_next"`
+	RetrySafe             bool                       `json:"retry_safe"`
+	FinishedAt            string                     `json:"finished_at"`
+	CostDisposition       string                     `json:"cost_disposition"`
+	FailedInvariant       string                     `json:"failed_invariant,omitempty"`
+	ArtifactReusability   map[string]string          `json:"artifact_reusability,omitempty"`
+	Recovery              string                     `json:"recovery,omitempty"`
+	FailureDiagnostic     *adapter.FailureDiagnostic `json:"failure_diagnostic,omitempty"`
 }
 
 type Result struct {
@@ -800,6 +801,20 @@ func reconcile(root, record string, prepared Prepared, disposition string, runEr
 	if runErr != nil && reconciliation.ResultError == "" {
 		reconciliation.ResultError = runErr.Error()
 	}
+	if target.Measurement.TerminalFailure != nil {
+		reconciliation.FailureDiagnostic = target.Measurement.TerminalFailure
+		failure := target.Measurement.TerminalFailure
+		label := failure.Message
+		if failure.Type != "" {
+			label = failure.Type + ": " + label
+		}
+		reconciliation.ResultError = "Codex turn failed: " + label
+		reconciliation.Recovery = "resolve the reported Codex failure before authorizing another invocation"
+		failureText := strings.ToLower(failure.Type + " " + failure.Message)
+		if strings.Contains(failureText, "schema") || strings.Contains(failureText, "config") {
+			reconciliation.Recovery = "correct the reported schema or configuration defect before authorizing another invocation"
+		}
+	}
 	if reconciliation.ResultAccepted {
 		reconciliation.CostDisposition = "accepted"
 	} else {
@@ -815,6 +830,9 @@ func reconcile(root, record string, prepared Prepared, disposition string, runEr
 	}
 	current, _, snapshotErr := orchestration.Snapshot(root)
 	reconciliation.RetrySafe = snapshotErr == nil && current.Digest == prepared.Action.Evidence.Digest
+	if reconciliation.FailureDiagnostic != nil {
+		reconciliation.RetrySafe = false
+	}
 	if !prepared.Direct {
 		// Measurements are supplied by the live stream decoder.  Retained event
 		// bytes are intentionally only diagnostic evidence, so their independent

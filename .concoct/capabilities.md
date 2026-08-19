@@ -800,6 +800,11 @@ capability reconciliation, and lifecycle-appropriate roadmap and Git evidence.
 
 ## CAP-012 — Structured orchestration action and outcome validation
 
+- Generated strict output schemas are recursively validated offline, and Product
+  Owner outcomes require an explicit bounded mutation array.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-041-repair-structured-output-schema-and-terminal-failure-diagnostics/summary.md`
+
 - The protocol carries semantic Product Owner selection and reconciliation
   outcomes with evidence-bound approval and application.
 
@@ -846,6 +851,10 @@ as proof that a workflow transition occurred.
   logs remain ephemeral; the returned durable facts are bounded and sanitized.
 - Ready-state authorization permits Product Owner decision work only and never
   autonomously selects a roadmap item.
+- Before adapter launch, every generated object schema must close additional
+  properties and require every declared property exactly once. Product Owner
+  results require `mutations`, with `[]` for decisions without mutations;
+  malformed or omitted mutation fields are rejected locally.
 
 ### Limitations
 
@@ -884,6 +893,11 @@ as proof that a workflow transition occurred.
 
 ## CAP-013 — One-shot execution of an authorized workflow action
 
+- Bounded Codex terminal failure type/message evidence survives reconciliation
+  and is shown with the exact correction required before retry.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-041-repair-structured-output-schema-and-terminal-failure-diagnostics/summary.md`
+
 - A retained Product Owner outcome can be reused for its authorized transition
   without a second Product Owner invocation.
 
@@ -920,6 +934,9 @@ reconciliation, and observed state. Dry-run launches nothing; failures,
 cancellation, timeout, stale authorization, malformed results, and postcondition
 mismatches do not advance workflow state. `concoct exec inspect` reads retained
 evidence without regenerating it.
+JSONL `turn.failed` events retain only bounded type/message evidence, independent
+of stdout/stderr logs. Schema/configuration rejection is not reported as safe to
+retry unchanged and names the correction blocker in operator output.
 
 ### Limitations
 
@@ -945,6 +962,11 @@ evidence without regenerating it.
 - `CAP-007` supplies direct Git integration authority.
 
 ## CAP-014 — Bounded repeated lifecycle orchestration
+
+- Run summaries preserve bounded terminal Codex diagnostics and do not recommend
+  blind retry after unchanged schema/configuration rejection.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-041-repair-structured-output-schema-and-terminal-failure-diagnostics/summary.md`
 
 - Bounded runs can supervise one-use Product Owner approval and continue to
   reconciliation or planning while preserving evidence binding.
@@ -976,6 +998,9 @@ safety boundaries, or integration authorization.
 
 Runs produce bounded summaries of attempted actions, accepted outcomes,
 progress, current state, gates, interventions, and safe continuation commands.
+Terminal Codex failures include their bounded diagnostic and corrective action;
+pre-inference schema/configuration rejection stops without an unchanged `run`
+recommendation.
 Supervised role actions retain manual prompt parity and are finalized by the
 outer executable. Run-driven integration is local-only and never implies
 remote push authority.
@@ -1005,6 +1030,11 @@ remote push authority.
 
 ## CAP-015 — Agent invocation cost attribution and bounded measurement
 
+- Measurement retains a bounded terminal failure type/message without arbitrary
+  raw JSONL payload content, including failures with no usage or adapter result.
+
+- Updated by: `.concoct/archive/2026-08-18-CON-041-repair-structured-output-schema-and-terminal-failure-diagnostics/summary.md`
+
 - Product Owner proposal, approval, application, and reuse remain attributable
   in bounded lifecycle evidence.
 
@@ -1025,6 +1055,8 @@ bounded private structured evidence, provides payload-free metrics-first
 inspection and run aggregation, supports conservative activity and repetition
 evidence, live-observable warnings, configured enforceable hard budgets, and
 stopped/rejected-cost accounting, and supports reproducible six-role baselines.
+Terminal failure measurement uses only bounded diagnostic type/message fields and
+remains available when native usage and a structured adapter result are absent.
 The accepted implementation includes verified reductions of 44.2% in fixed
 Developer continuation prompt bytes and 54.1% in the Archivist persona while
 preserving workflow authority, structured-result validation, and role
