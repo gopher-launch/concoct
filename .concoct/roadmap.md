@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-08-18
+updated: 2026-08-20
 ---
 
 # Roadmap
@@ -680,240 +680,266 @@ explicit bug provenance.
 
 ## CON-034 — Make lifecycle runs durable and resumable
 
-- Status: `candidate`
+- Status: `cancelled`
 - Priority: `high`
 - Depends on: CON-033
 - Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-009
-- Capability impact: makes lifecycle orchestration durable across interruption, failure, intervention, and environment restart
+- Capability impact: None; its durable-session, restart-reconciliation, checkpoint, and abandonment scope is absorbed by CON-039
 
 ### Outcome
 
-Make lifecycle runs inspectable, recoverable, and resumable without replaying
-completed actions, losing intervention context, overwriting user changes, or
-trusting stale agent results.
+Retain this identifier as the superseded proposal for durable lifecycle runs.
+CON-039 now establishes the durable governed work session as the principal
+execution unit and absorbs every remaining requirement from this item. No
+separate durable-run authority or history model should be implemented.
 
 ### Rationale
 
-Long-running agent workflows will be interrupted. Correct orchestration must
-reconcile persisted attempt evidence with current workflow, repository, and Git
-state before it can decide whether an action completed, can be retried, or
-requires intervention.
+A run record beside a work-session record would create competing execution
+state. The governed-session architecture resolves the same interruption,
+reconciliation, stale-result, intervention, and abandonment problems while also
+separating lifecycle, assurance, authorization, and cost state.
 
-### Requirements
+### Historical disposition
 
-- Give each run and action attempt a stable identity and persist only the state required to reconstruct policy, validated actions, the current attempt, stop reason, unresolved intervention, and last validated state.
-- Distinguish running, completed, cancelled, interrupted, blocked, awaiting-approval, and failed run states.
-- Detect abandoned attempts and reconcile recorded run evidence with current workflow and Git state before continuing.
-- Never replay proven-complete actions or accept results from stale or superseded attempts.
-- Treat uncertain completion conservatively and require explicit blocker or decision resolution when needed.
-- Detect and preserve user changes made while paused; refuse continuation when external changes invalidate the prior recommendation.
-- Support inspection, safe continuation, and abandonment without discarding the underlying task state.
-- Separate recoverable local execution records from permanent task history and deliberately promote only material decisions and outcomes.
-- Reuse existing workflow and integration recovery semantics rather than creating a competing state authority.
+- Stable run and attempt identity, restart reconciliation, safe continuation,
+  unresolved intervention, checkpointing, and abandonment move to CON-039.
+- Future cross-machine or shared-store portability must extend the CON-039
+  `SessionStore` contract rather than revive a separate run subsystem.
+- Accepted lifecycle and integration evidence remains canonical; session state
+  must reconcile with it rather than replace it.
 
-### Product decisions before planning
+---
 
-- Define which run data is repository-resident, local-only, portable, and retained for how long.
-- Decide how to detect an agent process that may remain alive after coordinator disconnection.
-- Define evidence sufficient to classify uncertain completion and whether a retry creates a new attempt or action instance.
-- Define how resolved decisions enter durable project history and whether abandonment releases any workflow or repository lease.
+## CON-039 — Establish durable governed work sessions and recoverable execution
 
-### Acceptance criteria
-
-- Interruption between actions resumes at the next valid action without replay.
-- Interruption during an action does not assume success or failure before reconciliation.
-- Stale outcomes and externally invalidated recommendations cannot be applied.
-- Resolved gates, blockers, and decisions can continue the same run with retained context.
-- A user can inspect and safely abandon an incomplete run without corrupting task state.
-
-## CON-039 — Make supervised role completion transactional and recoverable
-
-- Status: `candidate`
+- Status: `planned`
 - Priority: `critical`
 - Depends on: None
 - Capability prerequisites: CAP-001, CAP-005, CAP-007, CAP-010, CAP-011, CAP-012, CAP-013, CAP-014, CAP-015
-- Capability impact: makes supervised Developer, Reviewer, and Archivist completion reliable and recoverable without repeating usable agent work
+- Capability impact: replaces role-per-invocation orchestration with a portable, recoverable, policy-governed work-session foundation and cost-aware primary-agent execution
 
 ### Outcome
 
-Make every supervised Developer, Reviewer, and Archivist action cross a clear
-transactional boundary: Concoct either accepts the candidate and completes the
-durable workflow transition, or preserves the rejected candidate with an exact
-diagnosis and a supported path to repair, continue, or deliberately abandon it.
+Make a durable governed work session the principal execution unit. Concoct
+computes eligible work, records an operator or policy-admissible agent selection,
+transactionally claims one item, supervises a resumable primary agent across
+ordinary lifecycle stages, owns every deterministic mechanism, preserves
+recoverable candidates and checkpoints, records assurance truthfully, governs
+cost, and requires exact separate grants for integration and publication.
 
-Successful agent work must not become stranded merely because deterministic
-finalization rejects incomplete, malformed, or incorrectly attributed evidence.
+Lifecycle stages remain canonical repository evidence but no longer imply one
+role, one model context, or one invocation. The ordinary primary agent may plan,
+implement, validate, self-review, correct, and prepare archival meaning in one
+continuing context. Same-context review is useful assurance evidence but never
+independent review.
 
 ### Rationale
 
-The first real `concoct run` and the CON-037/CON-038 live exercises repeatedly
-produced substantively useful candidates that failed deterministic finalization.
-Examples included missing Developer completion metadata, Reviewer evidence without
-executable-owned reservation provenance, Archivist ordering and archive-reference
-errors, and unsupported roadmap fields.
+Strict outer validation, exact Git transitions, evidence-bound decisions, and
+integration recovery are valuable, but ordinary agent candidates can still become
+stranded between authorship and deterministic finalization. `concoct run` retains
+no durable session identity, cycle count, budget, work ownership, or restart state.
+It launches a fresh ephemeral Codex process for every lifecycle action.
 
-Concoct preserved many of these changes physically, but normal commands could not
-resume them because the retained candidate left the worktree dirty or lacked
-executable-owned transition evidence. Recovery required expert knowledge, custom
-prompts, or manual movement and reconstruction of artifacts. Repeating a full role
-invocation would waste model allocation and could overwrite or diverge from usable
-work.
+CON-037 through CON-041 show that repeated tool/edit exchanges and cached
+conversation-prefix replay dominate cost. Static prompt reduction and per-invocation
+budgets can measure or contain that cost but cannot remove the amplification.
+Concoct must reduce model exchanges by owning mechanical operations, reuse primary
+semantic context across stages, bound tool results, and deliberately compact or
+checkpoint context before replay becomes excessive.
 
-Protective validation is correct and must remain strict. The defect is that
-preparation, finalization, reporting, and recovery do not yet form one supported
-transactional protocol.
+The CON-041 free-range session demonstrated that one capable primary agent can
+carry ordinary work quickly and self-correct. It also demonstrated that repository
+instructions do not confer integration or publication authority and that
+same-context critique cannot be represented as independent review.
 
 ### Requirements
 
-#### Prepared supervised boundaries
+#### Separate state planes
 
-- Before invoking a role, establish every executable-owned prerequisite that can
-  be established deterministically, including the exact next Reviewer reservation.
-- Render the role prompt against the prepared evidence and identify the exact
-  artifacts and transition the candidate is authorized to complete.
-- Record enough bounded local attempt identity and baseline evidence to distinguish
-  the supervised candidate from unrelated or subsequently introduced worktree
-  changes.
-- Do not ask an agent to manufacture executable-owned provenance or transition
-  evidence that Concoct can prepare itself.
+- Keep lifecycle, session, assurance, authorization, and cost state separate.
+- Continue deriving lifecycle truth from validated task, review, archive, policy,
+  capability, roadmap, and Git evidence.
+- Persist a stable work-session identity, selected item, repository baseline,
+  current stage, attempts, checkpoints, stop reason, unresolved intervention,
+  cost, assurance requirements, and authority references.
+- Reconcile session expectations with canonical evidence after every restart; a
+  session record must never become a competing lifecycle authority.
 
-#### Atomic finalization
+#### Portable state and target-tree neutrality
 
-- Treat the agent's structured outcome as a candidate declaration, not proof that
-  the durable workflow transition completed.
-- Validate the declared outcome, authorized file set, artifact schemas, workflow
-  invariants, Git state, and role-specific completion boundary before accepting the
-  transition.
-- Commit or otherwise finalize accepted role evidence only through the existing
-  executable-owned authority.
-- Never report a candidate outcome as a completed durable transition when
-  finalization was rejected.
-- Preserve strict validation; do not silently repair semantic evidence, infer an
-  approving outcome, weaken independent review, or accept unauthorized changes.
+- Define an execution-neutral `SessionStore` contract and keep operational state
+  outside the target project tree by default.
+- Permit project-managed, external-state, portable, and temporary/no-attribution
+  modes without making Git a session-storage requirement.
+- A no-attribution workflow may leave local audit history outside the target tree
+  while pushing no Concoct metadata, artifacts, branch names, or commit attribution
+  to the target origin.
+- Start with a simple local compare-and-swap store while keeping future shared or
+  cross-clone stores implementable behind the same contract.
 
-#### Recoverable rejected candidates
+#### Work selection and transactional claim
 
-- Preserve a rejected or interrupted supervised candidate when it can be retained
-  safely, and identify it as belonging to the exact role attempt and baseline.
-- Allow the applicable role command or `concoct run` continuation to inspect and
-  resume an eligible retained candidate without requiring a clean worktree and
-  without replaying the completed agent work.
-- Distinguish authorized retained changes from unrelated user changes, stale
-  results, superseded attempts, and drift from the recorded baseline.
-- Refuse automatic continuation when provenance or ownership is ambiguous, while
-  preserving all work and reporting the decision required from the operator.
-- Support deliberate abandonment of the retained attempt without silently deleting
-  source changes or durable workflow evidence. General project diagnosis and
-  archaeology remain within CON-011 rather than this item.
-- A corrective continuation may invoke an agent only when judgment or substantive
-  editing is still required; deterministic repair or finalization must not trigger
-  an unnecessary billable invocation.
+- Compute a typed eligible work set from roadmap state, readiness, priority,
+  dependencies, capabilities, blockers, ownership, repository capacity, project
+  policy, item policy, agent capability, risk, and budget.
+- Allow operator selection and policy-bounded agent selection through one shared
+  path. Agent selection requires a uniquely dominant eligible item, complete
+  product intent, no material ambiguity, bounded rationale, and immediate
+  executable revalidation.
+- Atomically claim the selected item for one session using exact policy,
+  repository, roadmap, capability, configuration, and ownership evidence.
+- Recover every claim crash point without selecting different work or producing
+  duplicate ownership. Keep the initial lease local and simple without preventing
+  a future shared-store implementation.
 
-#### Actionable diagnostics and truthful reporting
+#### Executable-owned mechanics
 
-- On rejection, report the candidate outcome, finalization disposition, unchanged
-  durable workflow state, and exact safe continuation command separately.
-- Identify the failed invariant, affected artifact and location where known,
-  observed value or state, required value or state, and whether deterministic
-  repair, agent continuation, operator decision, or abandonment is appropriate.
-- Developer completion failures must report task status, expected status, latest
-  review, required `remediates-review` relationship, missing finding dispositions,
-  and current next action as applicable.
-- Reviewer completion must validate exactly the executable-reserved artifact and
-  preserve reservation provenance without requiring reservation marker surgery.
-- Archivist completion must diagnose the exact invalid section, provenance record,
-  archive-reference form, or byte-identity requirement rather than reporting only
-  a broad ledger mutation failure.
-- Run summaries must distinguish at least: agent candidate outcome, finalization
-  result, accepted durable transition, resulting workflow state, retained-candidate
-  disposition, and cost classified as accepted or wasted.
+- Move every deterministic operation into the Concoct executable: eligibility,
+  branch or worktree setup, metadata projection, review reservation, evidence
+  snapshots, diff summaries, bounded validation execution, lifecycle commits,
+  archive copying and structure, recovery, cost accounting, grants, integration,
+  publication, and cleanup.
+- Ask agents only for semantic product judgment, planning, implementation,
+  debugging, review judgment, correction, and archival/capability meaning.
+- Never ask an agent to manufacture executable-owned provenance, exact paths,
+  status projections, commit boundaries, or mechanically derivable ledger edits.
 
-#### Review-cycle integrity
+#### Recoverable session attempts
 
-- Derive completed review/remediation cycles from durable task and sequential review
-  evidence so the configured cycle limit remains meaningful across separate
-  `concoct run` processes.
-- Rejected or unaccepted review candidates must not increment the durable cycle
-  count, while accepted changes-requested reviews and their remediation must not be
-  forgotten when execution resumes.
-- A workflow must not evade its configured review-cycle bound merely because each
-  action is attempted by a new process.
+- Record a bounded baseline/candidate/current manifest for each attempt, including
+  authorized effects, process identity, invocation linkage, diagnostics, cost, and
+  terminal disposition.
+- Treat structured output as a candidate declaration, not proof of completion.
+- Preserve rejected or interrupted candidates and distinguish them from later,
+  unrelated, stale, superseded, or ambiguously overlapping changes.
+- Support inspect, deterministic-finalize, semantic-continue, checkpoint, and
+  explicit operator abandonment without replaying proven-complete model work.
+- Prepare executable prerequisites before invocation, including exclusive review
+  evidence, and make deterministic repair or finalization non-billable.
+- Persist review/remediation counts and all session bounds across coordinator
+  processes so restart cannot evade policy.
 
-#### Verification and compatibility
+#### Resumable primary-agent execution and context cost
 
-- Cover initial development, review remediation, independent review, and archival
-  candidates across accepted, rejected, blocked, interrupted, stale, ambiguous, and
-  safely resumable outcomes.
-- Include regressions for the observed missing Developer status, missing
-  `remediates-review`, unreserved Reviewer artifact, dirty-worktree deadlock,
-  unsupported Archivist field, incorrect archive reference, wrong capability
-  provenance, notes-order mismatch, and empty completion diagnostic failures.
-- Preserve source/template parity, prompt-only/manual command behavior, policy
-  enforcement, task-branch isolation, independent review, cost measurement, privacy
-  bounds, and supported Codex adapter behavior.
-- Verify full tests, race tests, vet/static checks, native and Windows builds, fresh
-  initialization, shell checks, and focused diff inspection.
+- Introduce an adapter capability for starting, continuing, compacting,
+  checkpointing, and closing one primary agent context.
+- Permit that primary context to carry planning, implementation, validation,
+  same-context self-review, correction, and archival preparation across lifecycle
+  stages while the executable changes authorized effect scopes mechanically.
+- Reduce conversation amplification with bounded tool results, executable-generated
+  stage and recovery briefs, repeated-operation detection, and deliberate context
+  compaction or rollover at stage and cost thresholds.
+- Benchmark equivalent workloads; resumability alone is not evidence of lower
+  cost and must not permit an indefinitely growing prefix.
+
+#### Truthful assurance and selectable risk policy
+
+- Record self-review, isolated-agent review, external review, deterministic checks,
+  candidate revision, context identities, findings, and dispositions as separate
+  assurance facts.
+- Never describe same-context self-review as independent, including after an
+  operator relaxes the required assurance level.
+- Provide built-in `relaxed`, `standard`, and `strict` risk profiles covering at
+  least security/authorization, destructive work, persistence/migrations,
+  recovery/concurrency, public APIs, release/supply chain, external side effects,
+  billing/cost, privacy/compliance, broad diffs, weak verification, and agent
+  uncertainty. Default to `standard`.
+- Require a fresh executor-created review context when resolved risk policy
+  requires isolated review. Legacy approved reviews before CON-041 remain
+  grandfathered; CON-041 remains truthfully same-context reviewed and
+  operator-accepted.
+
+#### Actors, grants, overrides, and publication
+
+- Attribute material events to authenticated operator, primary agent,
+  isolated-review agent, executable, or external-system contexts independently of
+  Git authorship.
+- Keep grant creation in the operator control plane; an agent may request but may
+  not mint operator authority or relabel its actor identity.
+- Permit an authenticated and authorized operator to relax project or item policy
+  at any point through an exact, scoped, reasoned, expiring, auditable override.
+- Preserve evidence truth under every override: policy may be relaxed, but actor,
+  assurance, result, and provenance facts may not be falsified.
+- Remove automatic push. Require separate, short-lived, one-use grants for local
+  integration and external publication.
+- Bind integration to the exact task, archive revision, trunk, and pre-integration
+  head. Bind publication to the exact local revision, remote name and URL identity,
+  destination ref, expected remote head where available, and non-force behavior.
+
+#### Cost governance
+
+- Govern session cost independently from cost efficiency using available native
+  input, cached-input, output, reasoning, elapsed, activity, and command-output
+  measurements, with optional credit or currency providers when authoritative.
+- Reserve sufficient budget for required assurance before implementation spends
+  the remaining allocation.
+- On exhaustion, create a durable checkpoint and return control without blind
+  retry, silent assurance reduction, or candidate loss.
+- Allow an agent to request additional session budget with bounded rationale. A
+  session top-up requires an exact policy-controlled operator grant and does not
+  itself purchase external account credits or change an account plan.
 
 ### Product decisions before planning
 
-- Persist a bounded, Git-ignored manifest for each supervised action attempt.
-  It records baseline authority, prepared evidence, authorized mutations, captured
-  candidate identity, invocation linkage, diagnostic state, and terminal disposition,
-  but no multi-action run coordination.
-- Derive inspect, deterministic-finalize, role-continue, and abandon operations from
-  retained evidence. Deterministic finalization may proceed under existing authority;
-  another agent invocation and abandonment require explicit operator action.
-- Reconcile the pre-invocation baseline, captured post-invocation candidate, and
-  current state. Preserve later changes automatically only when their ownership and
-  non-interference are provable; ambiguous overlap or authority drift requires
-  intervention.
-- Permit automatic correction only for executable-owned bookkeeping and uniquely
-  derivable mechanical projections. Semantic evidence remains the responsibility of
-  the role that owns it.
-- Retain unresolved attempts until resolution. Retain bounded terminal manifests for
-  30 days and at least the most recent 100 records; never prune source changes, durable
-  workflow evidence, or CAP-015 measurements.
+- The operator has approved the complete requirements and authority boundaries in
+  this record. No additional pre-planning product decision remains.
+- An operator override may relax policy but may not falsify evidence or actor and
+  assurance provenance.
+- The initial store and work claim are local and KISS; their interfaces must not
+  prevent later portability or coordination across clones.
+- Ordinary session authority may be granted once at launch. Integration and
+  publication remain separate just-in-time grants.
+- The implementation should use Go and the Codex app-server or equivalent supported
+  resumable protocol rather than introducing a JavaScript/TypeScript runtime.
 
 ### Scope boundaries
 
-- This item repairs ordinary supervised action preparation, finalization, and
-  immediate candidate recovery. It does not add general-purpose `doctor`, project
-  reconstruction, or historical recovery commands from CON-011.
-- It does not make a multi-action run crash-resumable across environment restart or
-  add permanent run history; those remain CON-034 responsibilities.
-- It does not complete candidate-to-planned selection, delivered-roadmap removal,
-  or ready-state integration reporting; those belong to ready-to-ready lifecycle
-  reconciliation.
-- It does not weaken artifact schemas, role ownership, independent review, Git
-  isolation, or integration approval to make finalization appear successful.
+- This item delivers one coherent governed-session vertical slice for a single
+  locally claimed item. Parallel active tasks, distributed locks, and cross-clone
+  coordination remain future extensions of the store/claim contracts.
+- It does not add general-purpose project archaeology or historical repair from
+  CON-011.
+- It does not require Git for session persistence, remote account-credit purchase,
+  or permanent retention of raw conversation transcripts.
+- Manual role commands and current adapter behavior are not compatibility
+  requirements before v1. Preserve only mechanisms that support the target design.
+- Do not weaken strict lifecycle validation, archive truth, capability provenance,
+  or safe integration recovery to make a session appear successful.
 
 ### Acceptance criteria
 
-- `concoct run` prepares and commits the exact next Reviewer reservation before
-  invocation, and an otherwise valid review completes without manual reservation
-  reconstruction.
-- A supervised Developer, Reviewer, or Archivist candidate rejected at finalization
-  remains inspectable and can be safely continued or finalized through a supported
-  command without repeating already completed agent work.
-- Unrelated, stale, superseded, or ambiguously owned worktree changes are never
-  silently accepted as part of a retained candidate.
-- Every rejected completion reports a non-empty, actionable diagnosis and clearly
-  separates the agent's declaration from the rejected durable transition.
-- Initial development and review remediation diagnostics identify all missing
-  machine-required task, review, and notes relationships.
-- Reviewer reservation provenance is executable-owned and cannot be bypassed or
-  reconstructed accidentally from agent-authored content alone.
-- Archivist failures identify the exact invalid mutation or evidence requirement
-  while preserving strict roadmap, capability, archive, and notes validation.
-- Accepted review/remediation cycles remain correctly counted across separate run
-  invocations and enforce the configured bound.
-- Deterministic repair and finalization do not make a billable agent invocation;
-  retained measurement classifies accepted and rejected cost truthfully.
-- Abandonment leaves source work and durable project evidence in an explicit,
-  recoverable state and reports what remains for the operator to resolve.
-- Existing manual role commands, policy behavior, task-branch integration,
-  capability reconciliation, prompt rendering, and agent-cost attribution remain
-  compatible and regression-tested.
+- A portable external session store creates, compares-and-swaps, loads, checkpoints,
+  reconciles, and finalizes a session without writing Concoct state into the target
+  directory; project-managed mode remains possible through the same contract.
+- Eligible-set output is deterministic and explains every included and excluded
+  item. Operator and admissible agent selection use one transactional work-claim
+  path, and racing or interrupted claims produce exactly one owner.
+- A work session survives process restart with its stage, attempts, intervention,
+  assurance, cycle count, budget, and safe continuation intact without replaying
+  proven-complete work.
+- The executable prepares and owns all deterministic workflow evidence and
+  transition operations. Agents are not required to synthesize reservation markers,
+  exact metadata, commit boundaries, archive paths, or mechanical ledger edits.
+- Rejected, interrupted, stale, superseded, disjoint, and ambiguously overlapping
+  candidates reconcile correctly; ambiguity preserves all work and stops for the
+  operator.
+- One resumable primary Codex context can cross ordinary semantic stages with
+  executable-controlled scopes. Stage briefs and compaction keep retained context
+  bounded, and an equivalent-workload report distinguishes governance from actual
+  cost reduction.
+- Same-context review cannot satisfy isolated-review policy. A distinct
+  executor-created context bound to the exact candidate revision can satisfy it.
+- Operator overrides are exact and auditable while underlying evidence remains
+  truthful. Agent contexts cannot mint grants or claim operator identity.
+- Integration and publication require distinct exact grants. No configuration,
+  repository instruction, role output, or integration grant can cause a push.
+- Budget exhaustion checkpoints the session and does not retry or weaken assurance;
+  an exact operator grant can add a bounded session budget and resume it.
+- Deterministic tests cover every claim, attempt, checkpoint, compaction, assurance,
+  override, grant, integration, publication, and abandonment crash boundary without
+  live or billable model execution.
 
 ---
 

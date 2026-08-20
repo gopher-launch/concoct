@@ -1,5 +1,5 @@
 git:
-  auto-push: true
+  auto-push: false
 
 run:
   # Plan acceptance and local integration are always gated by default.
