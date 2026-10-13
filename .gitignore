@@ -1,32 +1,7 @@
-# Go build and test artifacts
 /concoct
 /concoct.exe
-/cmd/concoct/concoct
-/cmd/concoct/concoct.exe
 *.test
 *.out
-coverage.txt
-coverage.html
-cover.txt
-cover.html
-*.prof
-
-# Working dir
-.concoct/work/
-.concoct/runtime/invocations/
-.concoct/runtime/pending-gate.json*
-.concoct/runtime/product-owner-decision.json*
-
-# Local environment files
-.env
-.env.*
-!.env.example
-
-# Editor and operating-system metadata
+.DS_Store
 .idea/
 .vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db

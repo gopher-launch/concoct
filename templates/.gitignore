@@ -1,4 +1,0 @@
-# Concoct local execution evidence
-.concoct/runtime/invocations/
-.concoct/runtime/pending-gate.json*
-.concoct/runtime/product-owner-decision.json*
