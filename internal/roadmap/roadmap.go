@@ -11,7 +11,8 @@ import (
 
 var (
 	idPattern      = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[A-Z]*[0-9]{3,}$`)
-	entryHeading   = regexp.MustCompile(`^## ([A-Z][A-Z0-9]*-[A-Z0-9]+) — (.+)$`)
+	idLikePattern  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*-[A-Za-z]*[0-9]{3,}$`)
+	entryHeading   = regexp.MustCompile(`^## ([A-Za-z][A-Za-z0-9]*-[A-Za-z0-9]+) — (.+)$`)
 	metadataBullet = regexp.MustCompile(`^- ([A-Za-z ]+): (.+)$`)
 )
 
@@ -193,8 +194,11 @@ func parseHeading(line string, number int) (id, title string, isEntry bool, err 
 }
 
 func looksLikeID(token string) bool {
-	prefix, _, found := strings.Cut(token, "-")
-	return found && prefix != "" && prefix == strings.ToUpper(prefix) && token != strings.ToLower(token)
+	if !idLikePattern.MatchString(token) {
+		return false
+	}
+	prefix, _, _ := strings.Cut(token, "-")
+	return prefix == strings.ToUpper(prefix) || prefix == strings.ToLower(prefix)
 }
 
 func parseEntry(section section, id, title string) (Entry, error) {
@@ -259,6 +263,26 @@ func parseEntry(section section, id, title string) (Entry, error) {
 		return Entry{}, fmt.Errorf("line %d: only tasks may be ready (%s)", section.line, id)
 	}
 	body := section.lines[bodyStart:]
+	fenceChar := byte(0)
+	fenceLength := 0
+	for offset, line := range body {
+		if ch, count, ok := fenceMarker(line); ok {
+			if fenceChar == 0 {
+				fenceChar, fenceLength = ch, count
+			} else if ch == fenceChar && count >= fenceLength && strings.TrimSpace(strings.TrimLeft(line, " ")[count:]) == "" {
+				fenceChar = 0
+			}
+			continue
+		}
+		if fenceChar != 0 {
+			continue
+		}
+		for _, key := range []string{"Kind", "Status", "Priority", "Parent", "Depends on"} {
+			if strings.HasPrefix(line, "- "+key+":") {
+				return Entry{}, fmt.Errorf("line %d: %s metadata for %s is separated from the opening metadata block", section.line+bodyStart+offset, key, id)
+			}
+		}
+	}
 	for len(body) > 0 && strings.TrimSpace(body[0]) == "" {
 		body = body[1:]
 	}

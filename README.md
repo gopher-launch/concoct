@@ -15,7 +15,7 @@ go build -o /tmp/concoct ./cmd/concoct
 /tmp/concoct run # exits nonzero: workflow unavailable
 ```
 
-The CLI also accepts `--help` and `--version`. The read-only `internal/roadmap` package accepts `## ID — title` headings followed by `Kind`, `Status` and `Priority` bullets, plus optional `Parent` and `Depends on` bullets. Its `Parse` result retains task prose and reports ready tasks with delivered dependencies; it does not choose among them. Supported kinds are `epic`, `feature`, `task`; statuses are `planned`, `ready`, `delivered`; priorities are `high`, `medium`, `low`. Delivered-task headings in `capabilities.md` can resolve dependencies after detailed completed work leaves the roadmap.
+The CLI also accepts `--help` and `--version`. The read-only `internal/roadmap` package accepts `## ID — title` headings followed by contiguous `Kind`, `Status` and `Priority` bullets, plus optional `Parent` and `Depends on` bullets. Those top-level metadata bullet names are reserved throughout an entry; put examples in code fences. Its `Parse` result retains task prose and reports ready tasks with delivered dependencies; it does not choose among them. Supported kinds are `epic`, `feature`, `task`; statuses are `planned`, `ready`, `delivered`; priorities are `high`, `medium`, `low`. Delivered-task headings in `capabilities.md` can resolve dependencies after detailed completed work leaves the roadmap.
 
 No initialization, task selection, agent execution, review, integration or release command is implemented in this baseline.
 

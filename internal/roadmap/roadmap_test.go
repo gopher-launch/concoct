@@ -126,6 +126,7 @@ func TestMalformedMetadataAndReferences(t *testing.T) {
 		{"unsupported status", strings.Replace(base, "Status: ready", "Status: unknowable", 1), "", "unsupported status"},
 		{"duplicate field", strings.Replace(base, "- Kind: task", "- Kind: task\n- Kind: task", 1), "", "duplicate Kind"},
 		{"malformed heading", strings.Replace(base, "APP-001 —", "APP-001 -", 1), "", "malformed entry heading"},
+		{"lowercase heading ID", strings.Replace(base, "APP-001 —", "app-001 —", 1), "", `line 1: malformed ID "app-001"`},
 		{"malformed dependency", strings.Replace(base, "Depends on: none", "Depends on: app-001", 1), "", "malformed dependency ID"},
 		{"contradictory capability", base, "## APP-001 — Delivered\n", "recorded as delivered but roadmap status is ready"},
 		{"duplicate capability", base, "## APP-999 — One\n\n## APP-999 — Two\n", "duplicate delivered ID"},
@@ -138,6 +139,60 @@ func TestMalformedMetadataAndReferences(t *testing.T) {
 				t.Fatalf("error = %v, want substring %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestSeparatedDependencyCannotMakeTaskEligible(t *testing.T) {
+	roadmap := `## APP-001 — Prerequisite
+- Kind: task
+- Status: planned
+- Priority: high
+
+## APP-002 — Candidate
+- Kind: task
+- Status: ready
+- Priority: high
+
+- Depends on: APP-001
+`
+	_, err := Parse([]byte(roadmap), nil)
+	if err == nil || !strings.Contains(err.Error(), "line 11: Depends on metadata for APP-002 is separated") {
+		t.Fatalf("error = %v, want line-specific separated-dependency diagnostic", err)
+	}
+	withProse := strings.Replace(roadmap, "\n- Depends on: APP-001", "\n**Objective:** a paragraph precedes the misplaced field.\n\n- Depends on: APP-001", 1)
+	_, err = Parse([]byte(withProse), nil)
+	if err == nil || !strings.Contains(err.Error(), "Depends on metadata for APP-002 is separated") {
+		t.Fatalf("error after prose = %v, want separated-dependency diagnostic", err)
+	}
+	withEmptyValue := strings.Replace(roadmap, "- Depends on: APP-001", "- Depends on:", 1)
+	_, err = Parse([]byte(withEmptyValue), nil)
+	if err == nil || !strings.Contains(err.Error(), "Depends on metadata for APP-002 is separated") {
+		t.Fatalf("error for empty separated field = %v, want separated-dependency diagnostic", err)
+	}
+}
+
+func TestOrdinaryHeadingsAndFencedMetadataRemainProse(t *testing.T) {
+	roadmap := `## Phase-001 notes
+
+## FAQ-notes
+
+## APP-001 — Task
+- Kind: task
+- Status: ready
+- Priority: high
+
+**Objective:** describe metadata in prose.
+
+~~~md
+- Depends on: this is a fenced example, not task metadata.
+~~~
+`
+	doc, err := Parse([]byte(roadmap), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Entries()) != 1 || !strings.Contains(doc.Entries()[0].Body, "- Depends on: this is a fenced example") {
+		t.Fatalf("ordinary prose lost: %#v", doc.Entries())
 	}
 }
 
