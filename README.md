@@ -4,7 +4,7 @@ Concoct is at the CON-043 repository reset baseline. The active Go program is a 
 
 ## Build and smoke check
 
-Requires Go 1.23 or newer.
+Requires Go 1.27.2 or newer.
 
 ```sh
 go test ./...
