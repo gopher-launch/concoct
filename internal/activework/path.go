@@ -46,6 +46,10 @@ func Open(repository, rootOverride string) (*Store, error) {
 	repo := checkout
 	if filepath.Base(common) == ".git" {
 		repo = filepath.Dir(common)
+	} else {
+		// A separate Git directory has no stable checkout path to infer.
+		// Bind every worktree to the same canonical common directory.
+		repo = common
 	}
 	root := rootOverride
 	if root == "" {

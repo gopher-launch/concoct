@@ -223,7 +223,7 @@ func (o *Owner) validateStart(spec StartSpec) error {
 	if err := o.validateParent(spec.ParentBranch, spec.ParentCommit); err != nil {
 		return err
 	}
-	output, err := exec.Command("git", "-C", o.store.Repository, "check-ref-format", "--branch", spec.TaskBranch).Output()
+	output, err := exec.Command("git", "-C", o.store.Checkout, "check-ref-format", "--branch", spec.TaskBranch).Output()
 	if err != nil || strings.TrimSpace(string(output)) != spec.TaskBranch {
 		return fmt.Errorf("invalid Git branch binding %q", spec.TaskBranch)
 	}
@@ -242,14 +242,14 @@ func (o *Owner) validateParent(branch, commit string) error {
 	if branch == "" || len(branch) > 200 || strings.ContainsAny(branch, " \t\r\n\x00") || strings.HasPrefix(branch, "-") || strings.Contains(branch, "..") {
 		return fmt.Errorf("invalid parent branch binding %q", branch)
 	}
-	output, err := exec.Command("git", "-C", o.store.Repository, "check-ref-format", "--branch", branch).Output()
+	output, err := exec.Command("git", "-C", o.store.Checkout, "check-ref-format", "--branch", branch).Output()
 	if err != nil || strings.TrimSpace(string(output)) != branch {
 		return fmt.Errorf("invalid Git branch binding %q", branch)
 	}
-	if err := exec.Command("git", "-C", o.store.Repository, "cat-file", "-e", commit+"^{commit}").Run(); err != nil {
+	if err := exec.Command("git", "-C", o.store.Checkout, "cat-file", "-e", commit+"^{commit}").Run(); err != nil {
 		return fmt.Errorf("parent commit %s is not present in the repository: %w", commit, err)
 	}
-	actual, err := exec.Command("git", "-C", o.store.Repository, "rev-parse", "--verify", "refs/heads/"+branch).Output()
+	actual, err := exec.Command("git", "-C", o.store.Checkout, "rev-parse", "--verify", "refs/heads/"+branch).Output()
 	if err != nil || strings.TrimSpace(string(actual)) != commit {
 		return fmt.Errorf("parent branch %q does not point to commit %s", branch, commit)
 	}

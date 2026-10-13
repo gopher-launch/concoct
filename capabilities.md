@@ -17,7 +17,7 @@ This ledger describes delivered behavior, including the proposed post-merge CON-
 
 ## CON-044 — External active-work store
 
-- Canonical Git and storage-root bindings keep run state and task evidence outside the target repository; one explicit root override is supported.
+- Canonical Git common-directory and storage-root bindings share one run across worktrees, including repositories with a separate Git directory; one explicit root override is supported.
 - A repository execution lock protects mutation while status reads atomic snapshots without that lock.
 - Run/task metadata, checkpoints, operator decisions, pending/final reviews and bounded receipts use atomic file writes; interrupted cross-file writes reconcile on reopen.
 - Dedicated host methods protect agreed task scope and finalized reviews from ordinary checkpoint or review updates.

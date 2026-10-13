@@ -108,6 +108,75 @@ func TestCommonGitDirectorySharesOwnershipAcrossWorktrees(t *testing.T) {
 	}
 }
 
+func TestSeparateGitDirectorySharesBindingAndRecoveryAcrossWorktrees(t *testing.T) {
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "project")
+	gitDir := filepath.Join(parent, "git-data")
+	cmd := exec.Command("git", "init", "--initial-branch=main", "--separate-git-dir="+gitDir, repo)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init with separate directory: %v: %s", err, output)
+	}
+	cmd = exec.Command("git", "-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "base")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, output)
+	}
+	sibling := filepath.Join(parent, "sibling")
+	cmd = exec.Command("git", "-C", repo, "worktree", "add", "-b", "task", sibling, "HEAD")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, output)
+	}
+	root := filepath.Join(parent, "external")
+	store, err := Open(repo, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := Open(sibling, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Repository != other.Repository || store.CommonDir != other.CommonDir || store.dir != other.dir {
+		t.Fatalf("separate Git directory yielded different bindings: %#v %#v", store, other)
+	}
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Acquire(); !errors.Is(err, ErrOwned) {
+		t.Fatalf("sibling acquired concurrent ownership: %v", err)
+	}
+	if _, err := owner.Start(spec(t, repo)); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := other.Status()
+	if err != nil || !snap.Active || snap.TaskID != "APP-001" {
+		t.Fatalf("sibling status = %#v, %v", snap, err)
+	}
+	owner.hook = func(stage string) error {
+		if stage == "write-evidence" {
+			return errors.New("injected stop")
+		}
+		return nil
+	}
+	if err := owner.SaveCheckpoint("Recover from sibling."); err == nil {
+		t.Fatal("checkpoint did not stop")
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	siblingOwner, err := other.Acquire()
+	if err != nil {
+		t.Fatalf("sibling recovery: %v", err)
+	}
+	defer siblingOwner.Close()
+	snap, err = other.Status()
+	if err != nil || snap.PendingWrite || snap.Revision != 1 {
+		t.Fatalf("sibling recovered status = %#v, %v", snap, err)
+	}
+	if err := siblingOwner.SaveCheckpoint("Continued from sibling."); err != nil {
+		t.Fatalf("sibling checkpoint: %v", err)
+	}
+}
+
 func TestOwnershipStatusEvidenceAndFinalReview(t *testing.T) {
 	store, repo := testStore(t)
 	owner, err := store.Acquire()
