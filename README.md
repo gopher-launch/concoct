@@ -15,10 +15,12 @@ go build -o /tmp/concoct ./cmd/concoct
 /tmp/concoct run # exits nonzero: workflow unavailable
 ```
 
-The CLI also accepts `--help` and `--version`. No initialization, task selection, agent execution, review, integration or release command is implemented in this baseline.
+The CLI also accepts `--help` and `--version`. The read-only `internal/roadmap` package accepts `## ID — title` headings followed by `Kind`, `Status` and `Priority` bullets, plus optional `Parent` and `Depends on` bullets. Its `Parse` result retains task prose and reports ready tasks with delivered dependencies; it does not choose among them. Supported kinds are `epic`, `feature`, `task`; statuses are `planned`, `ready`, `delivered`; priorities are `high`, `medium`, `low`. Delivered-task headings in `capabilities.md` can resolve dependencies after detailed completed work leaves the roadmap.
+
+No initialization, task selection, agent execution, review, integration or release command is implemented in this baseline.
 
 ## Construction
 
-Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Implement from current source and the accepted design, record active task evidence outside the repository under `$HOME/.concoct/manual/<task-id>/`, and commit a reviewable candidate on a task branch. An independent review and explicit operator acceptance precede local integration. Git history, including the CON-042 branch, is reference material for selective future harvesting. CON-057, roadmap metadata parsing, is next after the reset candidate is accepted and integrated.
+Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Implement from current source and the accepted design, record active task evidence outside the repository under `$HOME/.concoct/manual/<task-id>/`, and commit a reviewable candidate on a task branch. An independent review and explicit operator acceptance precede local integration. Git history, including the CON-042 branch, is reference material for selective future harvesting. CON-044, external active-work persistence, is next after the CON-057 parser candidate is accepted and integrated.
 
 The first planned runtime scope is Linux with Codex. The broader workflow and its operator commands remain future tasks; see `capabilities.md` for behavior delivered by this skeleton.

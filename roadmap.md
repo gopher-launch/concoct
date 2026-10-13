@@ -6,16 +6,16 @@ updated: 2026-10-13
 
 # Concoct implementation roadmap
 
-Candidate 0.3 · CON-043 proposed completion · awaiting independent review and integration
+Candidate 0.4 · CON-057 proposed completion · awaiting independent review and integration
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-This candidate describes the proposed state after CON-043 is reviewed and integrated. The reset CLI is a buildable skeleton; the workflow remains planned. CON-057 is the next ready task. This candidate does not itself prove review, operator acceptance or integration. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+This candidate describes the proposed state after CON-057 is reviewed and integrated. The CLI remains a buildable skeleton; the workflow remains planned. CON-044 is the next ready task. This candidate does not itself prove review, operator acceptance or integration. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-057` is proposed ready after CON-043 integration. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-044` is proposed ready after CON-057 integration. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the unfinished runner to build itself. The reset CLI truthfully exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation. CON-055 completes the new operator interface.
@@ -25,7 +25,7 @@ This candidate describes the proposed state after CON-043 is reviewed and integr
 
 | Checkpoint | Tasks | Reviewable result |
 | --- | --- | --- |
-| M0: clean rebuild baseline | CON-043 | Candidate skeleton prepared; independent review and operator-authorized integration pending |
+| M0: clean rebuild baseline | CON-043 | Integrated minimal buildable CLI and current guidance, with no legacy engine or skill active |
 | M1: trusted execution foundation | CON-057, CON-044–CON-046 | Small roadmap parser, external active store, app-server client and enforced dispatch policy, verified with fixtures/fakes |
 | M2: automatic candidate/review flow | CON-047–CON-050 | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance |
 | M3: durable interventions | CON-051–CON-052 | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition |
@@ -106,31 +106,22 @@ Tasks CON-055–CON-056 expose the complete operator interface and demonstrate i
 - Parent: CON-F001
 - Depends on: none
 
-Proposed post-merge outcome: the active tree contains the minimal Go CLI, current guidance, accepted design and rebuild backlog; legacy runtime, generated templates, local skill and release machinery are retired. The task branch candidate still awaits independent review and operator-authorized integration. Delivery status in this document applies only to that proposed integrated state.
+Delivered baseline: minimal Go CLI, current guidance, accepted design and rebuild backlog; legacy runtime, generated templates, local skill and release machinery retired.
 
 ## CON-057 — Parse the bounded roadmap metadata contract
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F001
 - Depends on: CON-043
 
-**Objective:** add the small read-only roadmap parser to the clean baseline without implementing selection or the runner.
-
-**Acceptance criteria:**
-
-- Recognize the heading/bullet convention used here: unique stable ID, kind, status, priority, optional parent and dependencies. Preserve objective/acceptance prose rather than converting it into a product ledger.
-- Validate known references, parent kinds and dependency cycles, including completed dependencies resolved through concise delivered-task IDs in `capabilities.md`. Ignore examples in code fences and diagnose malformed metadata.
-- Only ready task entries can be claim candidates; unresolved dependencies exclude eligibility. Epics/features organize work and cannot be selected. Standalone tasks remain supported.
-- Parsing/readiness checks do not choose a task, interpret product intent, launch agents or require archive narratives.
-
-**Verification:** fixture tests for standalone/grouped tasks, completed/unresolved dependencies, unknown/duplicate IDs, cycles, code fences and malformed metadata; focused Go tests/build and `git diff --check`. No provider dispatch.
+Proposed post-merge outcome: a read-only Go parser validates bounded roadmap metadata, known references, parent kinds and dependency cycles. It preserves task prose and reports ready tasks with delivered dependencies, including completion IDs in `capabilities.md`. No selection or runner behavior is delivered. This delivery status applies only after review and integration of the CON-057 candidate.
 
 ## CON-044 — Persist active work and expose a read-only snapshot
 
 - Kind: task
-- Status: planned
+- Status: ready
 - Priority: high
 - Parent: CON-F001
 - Depends on: CON-057
@@ -382,4 +373,4 @@ Proposed post-merge outcome: the active tree contains the minimal Go CLI, curren
 
 ## Candidate boundary
 
-CON-043 stops at a committed candidate for independent review. Integration requires explicit operator acceptance of the exact reviewed commit against the unchanged main parent. CON-057 begins only after that integration. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-057 stops at a committed candidate for independent review. Integration requires explicit operator acceptance of the exact reviewed commit against the unchanged main parent. CON-044 begins only after that integration. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
