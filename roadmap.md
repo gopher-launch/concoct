@@ -6,16 +6,16 @@ updated: 2026-10-13
 
 # Concoct implementation roadmap
 
-Candidate 0.5 · CON-044 proposed completion · awaiting independent review and integration
+Implementation state 0.5 · CON-044 delivered
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-This candidate describes the proposed state after CON-044 is reviewed and integrated. The CLI remains a buildable skeleton; the workflow remains planned. CON-045 is the next ready task. This candidate does not itself prove review, operator acceptance or integration. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+CON-044 has been independently reviewed, operator-approved and integrated. The CLI remains a buildable skeleton; the workflow remains planned. CON-045 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-045` is proposed ready after CON-044 integration. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-045` is ready after CON-044 integration. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the unfinished runner to build itself. The reset CLI truthfully exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation. CON-055 completes the new operator interface.
@@ -126,7 +126,7 @@ Delivered parser: read-only validation of bounded roadmap metadata, references a
 - Parent: CON-F001
 - Depends on: CON-057
 
-Proposed post-merge outcome: an external active-work store binds one run to its repository and parent, keeps task/review/receipt evidence with atomic writes and recoverable pending transitions, enforces one execution owner, and serves read-only status snapshots. Host methods separate checkpoint, decision and review writes. This delivery status applies only after review and integration of the CON-044 candidate.
+Delivered store: an external active-work store binds one run to its repository and parent, keeps task/review/receipt evidence with atomic writes and recoverable pending transitions, enforces one execution owner, and serves read-only status snapshots. Host methods separate checkpoint, decision and review writes.
 
 ## CON-045 — Implement the verified app-server transport
 
@@ -361,6 +361,6 @@ Proposed post-merge outcome: an external active-work store binds one run to its 
 
 **Verification:** one real-task run and normal operator acceptance, within configured bounds. The task's product/acceptance must actually be ready; do not invent requirements. Review source/checkpoint/reviews and normal project checks. Further live dispatches require an explicit task/budget reason, not an open-ended convergence experiment.
 
-## Candidate boundary
+## Next task boundary
 
-CON-044 stops at a committed candidate for independent review. Integration requires explicit operator acceptance of the exact reviewed commit against the unchanged main parent. CON-045 begins only after that integration. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-044 was integrated after independent review and operator acceptance of its exact candidate. CON-045 is the next ready task and has not begun. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.

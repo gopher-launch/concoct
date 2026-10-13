@@ -1,6 +1,6 @@
 # Delivered capabilities
 
-This ledger describes delivered behavior, including the proposed post-merge CON-044 candidate. CON-044 still requires independent review and operator-authorized integration.
+This ledger describes delivered behavior through the integrated CON-044 active-work store.
 
 ## CON-043 — Buildable reset skeleton
 
