@@ -49,4 +49,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Readiness also requires resolved host callbacks, an idle provider background-terminal list and source documentation that marks the selected task delivered while preserving IDs and agreed scope. Invalid or uncertain results retain active work and do not create a candidate.
 - Candidate capture includes baseline and candidate revisions and trees, a binary diff digest, changed paths and the checkpoint digest. Existing reagent commits are preserved; dirty source can be staged and committed mechanically without another agent turn. Untracked deliverables are included even when ignored by Git; an omitted generated output must be individually declared and match an explicit exclusion.
 
-The CLI workflow, independent review controller, threshold-triggered interruption and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.
+## CON-049 — Internal initial independent review
+
+- A frozen candidate can flow directly into a candidate-bound iragent dispatch under the recorded policy. The reviewer gets a separate thread with explicit resolved settings and a detached checkout pinned to the candidate. The host instructions require source-read-only review and supply the agreed task, verification evidence, candidate identity and reviewer responsibility.
+- The active record binds review 01 to the candidate and agreed scope digest. Pending assessment text and the same review number survive interrupted or uncertain turns. Source or branch drift, unresolved tool activity, an invalid result or missing assessment cannot produce approval.
+- A completed approved or changes-requested result finalizes one external review-01.md with candidate, scope and verdict bindings and consumes one assessment. A genuine blocker retains the pending review. Configured authorization can pause the initial dispatch. Correction routing and interrupted-turn reconciliation remain later work.
+
+The CLI workflow, correction loop, threshold-triggered interruption and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.

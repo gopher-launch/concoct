@@ -36,7 +36,7 @@ func (a CodexAgent) Idle(ctx context.Context, threadID string) error {
 		return err
 	}
 	if len(terminals) != 0 {
-		return fmt.Errorf("reagent still has %d background terminals", len(terminals))
+		return fmt.Errorf("role thread still has %d background terminals", len(terminals))
 	}
 	return nil
 }

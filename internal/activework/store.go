@@ -57,6 +57,16 @@ type Candidate struct {
 	TurnID                       string
 }
 
+// PendingReview binds the first independent assessment to immutable candidate
+// source, agreed scope and one reserved dispatch. Later review cycles are
+// handled by the correction controller.
+type PendingReview struct {
+	Number                      int
+	Candidate, ScopeSHA256      string
+	AttemptID, ThreadID, TurnID string
+	Verdict                     string
+}
+
 type Snapshot struct {
 	ObservedAt     time.Time
 	Active         bool
@@ -78,6 +88,7 @@ type Snapshot struct {
 	Counters       map[string]int
 	Dispatch       *dispatch.State
 	Candidate      *Candidate
+	Review         *PendingReview
 }
 
 type pointer struct {
@@ -102,6 +113,7 @@ type state struct {
 	Pending                                        *pendingWrite
 	Dispatch                                       *dispatch.State
 	Candidate                                      *Candidate
+	Review                                         *PendingReview
 }
 
 type startIntent struct {
@@ -155,6 +167,10 @@ func (s *Store) Status() (Snapshot, error) {
 		copy := *st.Candidate
 		copy.ChangedPaths = append([]string(nil), st.Candidate.ChangedPaths...)
 		snapshot.Candidate = &copy
+	}
+	if st.Review != nil {
+		copy := *st.Review
+		snapshot.Review = &copy
 	}
 	return snapshot, nil
 }
@@ -478,6 +494,9 @@ func (o *Owner) SaveReview(number int, content string) error {
 	if err != nil {
 		return err
 	}
+	if st.Review != nil && (st.Review.Number != number || st.Review.Verdict != "") {
+		return fmt.Errorf("review %02d is not the pending assessment", number)
+	}
 	if st.FinalReviews[number] {
 		return fmt.Errorf("review %02d is finalized", number)
 	}
@@ -491,6 +510,9 @@ func (o *Owner) FinalizeReview(number int) error {
 	st, err := o.currentState()
 	if err != nil {
 		return err
+	}
+	if st.Review != nil {
+		return fmt.Errorf("bound assessment requires a candidate and verdict finalization")
 	}
 	if st.FinalReviews[number] {
 		return fmt.Errorf("review %02d is already finalized", number)

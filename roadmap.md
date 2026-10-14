@@ -10,12 +10,12 @@ Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-The source tree includes internal selection, engineering and candidate freezing. The CLI remains a buildable skeleton; the complete workflow remains planned. CON-049 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+The source tree includes internal selection, engineering, candidate freezing and initial independent review. The CLI remains a buildable skeleton; the complete workflow remains planned. CON-050 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-049` is ready after CON-048 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-050` is ready after CON-049 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the unfinished runner to build itself. The reset CLI truthfully exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation. CON-055 completes the new operator interface.
@@ -168,7 +168,7 @@ Delivered policy: provider-catalog role resolution with explicit Concoct invocat
 
 **Verification:** controller/fake-agent plus disposable Git tests proving claim → branch binding → engineering/checkpoint within one turn, prerequisite rejection without dispatch, two competing claims and normal no-work. No live turn required.
 
-Delivered internal controller: fresh reagent selection uses current instructions and roadmap context, a clean parent baseline and external task checkout. Host callbacks bind one eligible task after branch creation and before source changes, then persist engineering checkpoints in the same turn. Durable dispatch reservation precedes provider start. Normal no-work retires the unclaimed checkout and active pointer; decision requests retain active work. CLI workflow and independent review remain later work.
+Delivered internal controller: fresh reagent selection uses current instructions and roadmap context, a clean parent baseline and external task checkout. Host callbacks bind one eligible task after branch creation and before source changes, then persist engineering checkpoints in the same turn. Durable dispatch reservation precedes provider start. Normal no-work retires the unclaimed checkout and active pointer; decision requests retain active work. CLI workflow and correction routing remain later work.
 
 ## CON-048 — Freeze a verified and reconciled candidate
 
@@ -190,12 +190,12 @@ Delivered internal controller: fresh reagent selection uses current instructions
 
 **Verification:** Git/candidate and role-result fixtures for changed/untracked files, identical-content commit finalization, incomplete verification, callback uncertainty and reconciliation in the reviewed diff.
 
-Delivered internal freeze path: a completed reagent turn with resolved callbacks and idle background tools can present a structured final checkpoint. The host checks acceptance and mandatory-check evidence, post-integration roadmap/capability reconciliation and the complete source path set. It accepts ordinary reagent commits or makes a mechanical commit of the same staged contents, then records baseline/candidate revisions and trees, diff digest, changed paths and checkpoint digest. Unresolved or invalid results retain active work without creating a candidate. Independent review remains later work.
+Delivered internal freeze path: a completed reagent turn with resolved callbacks and idle background tools can present a structured final checkpoint. The host checks acceptance and mandatory-check evidence, post-integration roadmap/capability reconciliation and the complete source path set. It accepts ordinary reagent commits or makes a mechanical commit of the same staged contents, then records baseline/candidate revisions and trees, diff digest, changed paths and checkpoint digest. Unresolved or invalid results retain active work without creating a candidate. Initial independent review is delivered by CON-049; correction routing remains later work.
 
 ## CON-049 — Independently assess an exact candidate
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F002
 - Depends on: CON-048
@@ -211,10 +211,12 @@ Delivered internal freeze path: a completed reagent turn with resolved callbacks
 
 **Verification:** fake role/provider tests for thread separation, candidate/scope binding, source drift, interrupted assessment reuse and valid verdict routing. Reviewer/high real execution is covered in CON-056, not another standalone probe.
 
+Delivered internal initial review: after candidate freeze, the controller can automatically reserve the candidate-bound iragent dispatch and start a separate explicitly configured reviewer thread in a detached checkout. The active record binds the pending assessment to candidate and agreed scope, retaining its number and checkpoint through interruption. The host checks candidate source integrity and completed, idle reviewer execution before finalizing review-01.md as approved or changes requested; a genuine blocker remains pending. Configured dispatch authorization still applies. Correction routing, interrupted-turn reconciliation and live reviewer execution remain later work.
+
 ## CON-050 — Close the bounded review/correction loop
 
 - Kind: task
-- Status: planned
+- Status: ready
 - Priority: high
 - Parent: CON-F002
 - Depends on: CON-049
@@ -347,4 +349,4 @@ Delivered internal freeze path: a completed reagent turn with resolved callbacks
 
 ## Next task boundary
 
-CON-049 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-050 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.

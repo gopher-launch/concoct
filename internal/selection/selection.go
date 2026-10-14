@@ -13,6 +13,7 @@ import (
 	"github.com/gopher-launch/concoct/internal/activework"
 	"github.com/gopher-launch/concoct/internal/codexapp"
 	"github.com/gopher-launch/concoct/internal/dispatch"
+	"github.com/gopher-launch/concoct/internal/review"
 	"github.com/gopher-launch/concoct/internal/roadmap"
 )
 
@@ -23,6 +24,7 @@ type Config struct {
 	Root       string
 	Policy     dispatch.State
 	Agent      Agent
+	Reviewer   review.Agent
 	OnEvent    func(codexapp.Event)
 	// GeneratedExclusions are explicit paths or patterns for build outputs.
 	GeneratedExclusions []string
@@ -190,6 +192,25 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 			}
 			result.Status = verdict.Disposition
 			result.Snapshot, err = store.Status()
+			reviewer := cfg.Reviewer
+			if reviewer == nil {
+				switch agent := cfg.Agent.(type) {
+				case CodexAgent:
+					reviewer = agent
+				case *CodexAgent:
+					reviewer = agent
+				}
+			}
+			if err == nil && reviewer != nil {
+				assessment, reviewErr := review.Run(ctx, review.Config{Agent: reviewer, OnEvent: cfg.OnEvent}, owner, store)
+				result.Status = assessment.Status
+				if assessment.Snapshot.Active {
+					result.Snapshot = assessment.Snapshot
+				} else {
+					result.Snapshot, _ = store.Status()
+				}
+				return result, reviewErr
+			}
 			return result, err
 		}
 		branch, err := gitOutput(workspace, "symbolic-ref", "--quiet", "--short", "HEAD")
