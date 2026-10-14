@@ -245,3 +245,80 @@ func TestPreexistingBranchCannotBeClaimed(t *testing.T) {
 		t.Fatalf("result: %+v, %v", result, err)
 	}
 }
+
+func TestDurableClaimWithoutReceiptCanBeAcknowledgedOnRetry(t *testing.T) {
+	repo, external, _ := testRepo(t)
+	store, err := activework.Open(repo, external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := inspectParent(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := readProject(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, err := owner.BeginSelection(activework.SelectionSpec{ParentBranch: parent.Branch, ParentCommit: parent.Commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := prepareWorkspace(store, runID, parent.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(workspace, "switch", "-qc", "work/app-002"); err != nil {
+		t.Fatal(err)
+	}
+	args := claimArguments{TaskID: "APP-002", TaskBranch: "work/app-002", SelectionRationale: "highest suitable priority", Objective: "implement the ready task.", Acceptance: "- Preserve the task boundary."}
+	spec := activework.StartSpec{TaskID: args.TaskID, TaskBranch: args.TaskBranch, ParentBranch: parent.Branch, ParentCommit: parent.Commit, SelectionRationale: args.SelectionRationale, Objective: args.Objective, Acceptance: args.Acceptance}
+	if err := owner.Claim(spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	owner, err = store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	session := &hostSession{owner: owner, store: store, project: project, workspace: workspace, parent: parent, existingBranches: map[string]bool{"main": true}}
+	changed := args
+	changed.SelectionRationale = "different rationale"
+	if err := session.claim("original-call", changed); err == nil || !strings.Contains(err.Error(), "differs") {
+		t.Fatalf("changed durable claim accepted: %v", err)
+	}
+	for _, callID := range []string{"original-call", "new-call"} {
+		if err := session.claim(callID, args); err != nil {
+			t.Fatalf("retry %s: %v", callID, err)
+		}
+		receipt, name, err := callReceipt("claim", callID, args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found, err := owner.CheckReceipt(name, receipt)
+		if err != nil || !found {
+			t.Fatalf("receipt %s missing: %v", callID, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "source.txt"), []byte("edited before a fresh acknowledgment\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	freshSession := &hostSession{owner: owner, store: store, project: project, workspace: workspace, parent: parent, existingBranches: map[string]bool{"main": true}}
+	if err := freshSession.claim("original-call", args); err == nil || !strings.Contains(err.Error(), "changed before claim") {
+		t.Fatalf("dirty checkout accepted on receipt retry: %v", err)
+	}
+	if session.taskID != "APP-002" || session.taskBranch != "work/app-002" {
+		t.Fatalf("binding changed: %+v", session)
+	}
+	snapshot, err := store.Status()
+	if err != nil || snapshot.TaskID != "APP-002" || snapshot.TaskBranch != "work/app-002" {
+		t.Fatalf("durable binding changed: %+v, %v", snapshot, err)
+	}
+}

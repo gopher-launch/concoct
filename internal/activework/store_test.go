@@ -416,6 +416,51 @@ func TestSelectionBeforeClaimAndInterruptedClaim(t *testing.T) {
 	}
 }
 
+func TestClaimReceiptInterruptedWriteRecoversExactBinding(t *testing.T) {
+	store, repo := testStore(t)
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := spec(t, repo)
+	if _, err := owner.BeginSelection(SelectionSpec{ParentBranch: binding.ParentBranch, ParentCommit: binding.ParentCommit}); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Claim(binding); err != nil {
+		t.Fatal(err)
+	}
+	owner.hook = func(stage string) error {
+		if stage == "write-intent" {
+			return errors.New("receipt write interrupted")
+		}
+		return nil
+	}
+	receipt := []byte("{\"task\":\"APP-001\"}")
+	if err := owner.RecordReceipt("claim-test", receipt); err == nil {
+		t.Fatal("receipt write did not stop")
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	owner, err = store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	found, err := owner.CheckReceipt("claim-test", receipt)
+	if err != nil || !found {
+		t.Fatalf("receipt not recovered: %v, %v", found, err)
+	}
+	if err := owner.ClaimOrConfirm(binding); err != nil {
+		t.Fatalf("exact durable claim not confirmed: %v", err)
+	}
+	different := binding
+	different.SelectionRationale = "changed rationale"
+	if err := owner.ClaimOrConfirm(different); err == nil {
+		t.Fatal("changed claim scope was confirmed")
+	}
+}
+
 func TestInvalidBindingsAndTamperedEvidence(t *testing.T) {
 	store, repo := testStore(t)
 	owner, err := store.Acquire()

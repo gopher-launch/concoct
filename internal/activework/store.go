@@ -249,6 +249,39 @@ func (o *Owner) Claim(spec StartSpec) error {
 	return o.transitionFileClaim(st, "evidence/task.md", renderTask(spec), spec.TaskID, spec.TaskBranch)
 }
 
+// ClaimOrConfirm binds an unclaimed selection or confirms the exact durable
+// claim left between binding and callback receipt persistence. It never
+// changes a task that is already bound.
+func (o *Owner) ClaimOrConfirm(spec StartSpec) error {
+	if err := o.validateStart(spec); err != nil {
+		return err
+	}
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	if st.ParentBranch != spec.ParentBranch || st.ParentCommit != spec.ParentCommit {
+		return fmt.Errorf("claim parent differs from active run")
+	}
+	if st.TaskID == "" {
+		if st.Phase != "selecting" {
+			return fmt.Errorf("unclaimed run is not selecting")
+		}
+		return o.transitionFileClaim(st, "evidence/task.md", renderTask(spec), spec.TaskID, spec.TaskBranch)
+	}
+	if st.Phase != "engineering" || st.TaskID != spec.TaskID || st.TaskBranch != spec.TaskBranch {
+		return fmt.Errorf("run already has a different task binding")
+	}
+	task, err := o.readBoundFile(st, "evidence/task.md")
+	if err != nil {
+		return err
+	}
+	if string(task) != renderTask(spec) {
+		return fmt.Errorf("durable claim scope or selection rationale differs")
+	}
+	return nil
+}
+
 func (o *Owner) validateStart(spec StartSpec) error {
 	if !taskPattern.MatchString(spec.TaskID) {
 		return fmt.Errorf("invalid task ID %q", spec.TaskID)

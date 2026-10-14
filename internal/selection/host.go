@@ -77,16 +77,12 @@ func (s *hostSession) claim(callID string, args claimArguments) error {
 	if err != nil {
 		return err
 	}
-	if exists {
-		if s.taskID != "" && (s.taskID != args.TaskID || s.taskBranch != args.TaskBranch) {
-			return fmt.Errorf("callback receipt conflicts with task binding")
-		}
-		s.taskID, s.taskBranch, s.claimedArgs = args.TaskID, args.TaskBranch, args
-		return nil
-	}
 	if s.taskID != "" {
 		if s.claimedArgs != args {
 			return fmt.Errorf("second or changed task claim is forbidden")
+		}
+		if exists {
+			return nil
 		}
 		return s.owner.RecordReceipt(name, receipt)
 	}
@@ -107,11 +103,13 @@ func (s *hostSession) claim(callID string, args claimArguments) error {
 	if err := verifyClaimWorkspace(s.store, s.workspace, s.parent, args.TaskBranch); err != nil {
 		return err
 	}
-	if err := s.owner.Claim(activework.StartSpec{TaskID: args.TaskID, ParentBranch: s.parent.Branch, ParentCommit: s.parent.Commit, TaskBranch: args.TaskBranch, Objective: objective, Acceptance: acceptance, SelectionRationale: args.SelectionRationale}); err != nil {
+	if err := s.owner.ClaimOrConfirm(activework.StartSpec{TaskID: args.TaskID, ParentBranch: s.parent.Branch, ParentCommit: s.parent.Commit, TaskBranch: args.TaskBranch, Objective: objective, Acceptance: acceptance, SelectionRationale: args.SelectionRationale}); err != nil {
 		return err
 	}
-	if err := s.owner.RecordReceipt(name, receipt); err != nil {
-		return err
+	if !exists {
+		if err := s.owner.RecordReceipt(name, receipt); err != nil {
+			return err
+		}
 	}
 	s.taskID, s.taskBranch, s.claimedArgs = args.TaskID, args.TaskBranch, args
 	return nil
