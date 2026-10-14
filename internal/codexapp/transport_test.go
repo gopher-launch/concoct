@@ -289,6 +289,76 @@ func TestRevertedSettingsZeroTurnLossAndUnsupportedRunner(t *testing.T) {
 	}
 }
 
+func TestZeroTurnResumePreservesOtherFailures(t *testing.T) {
+	t.Run("disconnect", func(t *testing.T) {
+		s := fake(t, func(s *fakeServer, msg envelope) {
+			if msg.Method == "thread/resume" {
+				_ = s.writer.Close()
+			}
+		})
+		_, err := s.client.ResumeThread(testContext(t), "thread-1", false, settings())
+		if !errors.Is(err, ErrDisconnected) || errors.Is(err, ErrProvisionalThread) {
+			t.Fatalf("zero-turn disconnect=%v", err)
+		}
+	})
+	t.Run("other provider error", func(t *testing.T) {
+		s := fake(t, func(s *fakeServer, msg envelope) {
+			if msg.Method == "thread/resume" {
+				s.rpcError(msg, "provider unavailable")
+			}
+		})
+		_, err := s.client.ResumeThread(testContext(t), "thread-1", false, settings())
+		var providerErr *rpcError
+		if !errors.As(err, &providerErr) || providerErr.Message != "provider unavailable" || errors.Is(err, ErrProvisionalThread) {
+			t.Fatalf("zero-turn provider error=%v", err)
+		}
+	})
+	t.Run("timeout", func(t *testing.T) {
+		s := fake(t, func(*fakeServer, envelope) {})
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		_, err := s.client.ResumeThread(ctx, "thread-1", false, settings())
+		if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrProvisionalThread) {
+			t.Fatalf("zero-turn timeout=%v", err)
+		}
+	})
+}
+
+func TestMalformedHostRequestCannotCompleteCleanly(t *testing.T) {
+	var rejected atomic.Bool
+	replied := make(chan struct{})
+	s := fake(t, func(s *fakeServer, msg envelope) {
+		switch msg.Method {
+		case "thread/resume":
+			s.reply(msg, threadReplyValue("dangerFullAccess"))
+		case "turn/start":
+			s.emit(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": "thread-1", "turn": map[string]string{"id": "turn-1"}}})
+			s.reply(msg, map[string]any{"turn": map[string]string{"id": "turn-1", "status": "inProgress"}})
+			s.emit(map[string]any{"id": 903, "method": "item/tool/call", "params": map[string]any{"threadId": 123, "turnId": "turn-1", "callId": "call-3", "tool": "checkpoint", "arguments": map[string]string{}}})
+		case "":
+			if len(msg.ID) > 0 {
+				var reply struct {
+					Success bool `json:"success"`
+				}
+				_ = json.Unmarshal(msg.Result, &reply)
+				rejected.Store(!reply.Success)
+				s.emit(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-1", "turn": map[string]string{"id": "turn-1", "status": "completed"}}})
+				close(replied)
+			}
+		}
+	})
+	bindTestThread(t, s)
+	_, err := s.client.RunTurn(testContext(t), "thread-1", "work", settings(), nil, nil)
+	select {
+	case <-replied:
+	case <-time.After(3 * time.Second):
+		t.Fatal("provider did not receive malformed callback rejection")
+	}
+	if err == nil || !strings.Contains(err.Error(), "malformed host request") || !rejected.Load() {
+		t.Fatalf("malformed callback error=%v rejected=%v", err, rejected.Load())
+	}
+}
+
 func TestProviderEOFAndFailedCallbackStayDistinct(t *testing.T) {
 	t.Run("EOF", func(t *testing.T) {
 		s := fake(t, func(s *fakeServer, msg envelope) {

@@ -99,8 +99,9 @@ func (c *Client) ResumeThread(ctx context.Context, id string, hadTurn bool, sett
 	params := map[string]any{"threadId": id, "model": settings.Model, "sandbox": settings.Sandbox, "approvalPolicy": settings.ApprovalPolicy}
 	var reply threadReply
 	if err := c.call(ctx, "thread/resume", params, &reply); err != nil {
-		if !hadTurn {
-			return Thread{}, fmt.Errorf("%w: %v", ErrProvisionalThread, err)
+		var providerErr *rpcError
+		if !hadTurn && errors.As(err, &providerErr) && providerErr.Code == -32000 && strings.TrimSpace(providerErr.Message) == "no rollout found" {
+			return Thread{}, fmt.Errorf("%w: %w", ErrProvisionalThread, err)
 		}
 		return Thread{}, err
 	}

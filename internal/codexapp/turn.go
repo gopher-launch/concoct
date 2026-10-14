@@ -288,6 +288,19 @@ func (c *Client) onRequest(msg envelope) {
 	}
 	var call ToolCall
 	if err := json.Unmarshal(msg.Params, &call); err != nil {
+		c.mu.Lock()
+		runs := make([]*turnRun, 0, 1)
+		if run := c.runs[call.ThreadID]; run != nil {
+			runs = append(runs, run)
+		} else {
+			for _, active := range c.runs {
+				runs = append(runs, active)
+			}
+		}
+		c.mu.Unlock()
+		for _, run := range runs {
+			run.emit(Event{Kind: "protocol/error", Err: fmt.Errorf("malformed host request %s: %w", id, err)})
+		}
 		c.replyTool(id, false, "invalid tool call payload")
 		return
 	}

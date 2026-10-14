@@ -33,6 +33,16 @@ type rpcReply struct {
 	Err error
 }
 
+type rpcError struct {
+	Method  string
+	Code    int
+	Message string
+}
+
+func (e *rpcError) Error() string {
+	return fmt.Sprintf("app-server %s: %d %s", e.Method, e.Code, e.Message)
+}
+
 type envelope struct {
 	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
@@ -180,7 +190,7 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 			return reply.Err
 		}
 		if reply.Error != nil {
-			return fmt.Errorf("app-server %s: %d %s", method, reply.Error.Code, reply.Error.Message)
+			return &rpcError{Method: method, Code: reply.Error.Code, Message: reply.Error.Message}
 		}
 		if len(reply.Result) == 0 {
 			return fmt.Errorf("app-server %s returned no result", method)
