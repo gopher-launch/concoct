@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ type Candidate struct {
 	Commit, Tree                 string
 	DiffSHA256, CheckpointSHA256 string
 	ChangedPaths                 []string
+	GeneratedOutputs             []string
 	TurnID                       string
 }
 
@@ -166,6 +168,7 @@ func (s *Store) Status() (Snapshot, error) {
 	if st.Candidate != nil {
 		copy := *st.Candidate
 		copy.ChangedPaths = append([]string(nil), st.Candidate.ChangedPaths...)
+		copy.GeneratedOutputs = append([]string(nil), st.Candidate.GeneratedOutputs...)
 		snapshot.Candidate = &copy
 	}
 	if st.Review != nil {
@@ -433,13 +436,27 @@ func (o *Owner) FreezeCandidate(candidate Candidate) error {
 	if candidate.BaselineCommit != st.ParentCommit || candidate.Commit == st.ParentCommit || candidate.CheckpointSHA256 != digest([]byte(checkpoint)) || candidate.TurnID == "" || !revisionPattern.MatchString(candidate.BaselineTree) || !revisionPattern.MatchString(candidate.Commit) || !revisionPattern.MatchString(candidate.Tree) || !isDigest(candidate.DiffSHA256) || len(candidate.ChangedPaths) == 0 {
 		return fmt.Errorf("candidate identity or checkpoint differs from active task")
 	}
+	var declaration struct{ GeneratedOutputs []string }
+	if err := json.Unmarshal([]byte(checkpoint), &declaration); err != nil {
+		return fmt.Errorf("candidate checkpoint has no valid generated-output declaration: %w", err)
+	}
+	slices.Sort(declaration.GeneratedOutputs)
+	if !slices.Equal(candidate.GeneratedOutputs, declaration.GeneratedOutputs) {
+		return fmt.Errorf("candidate generated-output paths differ from frozen checkpoint")
+	}
 	for index, path := range candidate.ChangedPaths {
 		if path == "" || filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, "..") || (index > 0 && candidate.ChangedPaths[index-1] >= path) {
 			return fmt.Errorf("invalid candidate path %q", path)
 		}
 	}
+	for index, path := range candidate.GeneratedOutputs {
+		if path == "" || filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, "..") || (index > 0 && candidate.GeneratedOutputs[index-1] >= path) || slices.Contains(candidate.ChangedPaths, path) {
+			return fmt.Errorf("invalid generated output path %q", path)
+		}
+	}
 	copy := candidate
 	copy.ChangedPaths = append([]string(nil), candidate.ChangedPaths...)
+	copy.GeneratedOutputs = append([]string(nil), candidate.GeneratedOutputs...)
 	st.Candidate = &copy
 	st.Phase = "ready-for-review"
 	st.Revision++

@@ -112,7 +112,7 @@ func TestReadyFreezeCapturesUntrackedSourceAndOrdinaryCommit(t *testing.T) {
 				t.Fatalf("missing progress or candidate: %+v", result)
 			}
 			candidate := result.Snapshot.Candidate
-			if candidate.BaselineCommit != base || candidate.Commit == base || candidate.TurnID != "one-turn" || !slices.Contains(candidate.ChangedPaths, "feature.go") || !slices.Contains(candidate.ChangedPaths, "feature.out") || slices.Contains(candidate.ChangedPaths, "concoct") {
+			if candidate.BaselineCommit != base || candidate.Commit == base || candidate.TurnID != "one-turn" || !slices.Contains(candidate.ChangedPaths, "feature.go") || !slices.Contains(candidate.ChangedPaths, "feature.out") || slices.Contains(candidate.ChangedPaths, "concoct") || !slices.Equal(candidate.GeneratedOutputs, []string{"concoct"}) {
 				t.Fatalf("candidate identity or paths: %+v", candidate)
 			}
 			baseTree, _ := gitOutput(repo, "rev-parse", base+"^{tree}")

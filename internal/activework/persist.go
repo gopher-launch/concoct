@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -35,6 +36,11 @@ func (s *Store) validateState(st state, id string) error {
 		for index, path := range candidate.ChangedPaths {
 			if path == "" || filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, "..") || (index > 0 && candidate.ChangedPaths[index-1] >= path) {
 				return fmt.Errorf("active state has malformed candidate path")
+			}
+		}
+		for index, path := range candidate.GeneratedOutputs {
+			if path == "" || filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, "..") || (index > 0 && candidate.GeneratedOutputs[index-1] >= path) || slices.Contains(candidate.ChangedPaths, path) {
+				return fmt.Errorf("active state has malformed generated output path")
 			}
 		}
 	}

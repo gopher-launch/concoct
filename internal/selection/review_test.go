@@ -141,7 +141,7 @@ func TestReviewInterruptionRetainsPendingNumberAndCheckpoint(t *testing.T) {
 }
 
 func TestReviewSourceDriftAndGenuineBlockerStayDistinct(t *testing.T) {
-	for _, tc := range []struct{ name, disposition string }{{"review checkout drift", "approved"}, {"task checkout drift", "approved"}, {"blocker", "decision_required"}} {
+	for _, tc := range []struct{ name, disposition string }{{"review checkout drift", "approved"}, {"task checkout drift", "approved"}, {"new task source", "approved"}, {"new ignored task source", "approved"}, {"blocker", "decision_required"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo, external, policy := testRepo(t)
 			reviewer := &fakeReviewer{}
@@ -151,7 +151,7 @@ func TestReviewSourceDriftAndGenuineBlockerStayDistinct(t *testing.T) {
 					if err := os.WriteFile(filepath.Join(reviewer.cwd, "source.txt"), []byte("reviewer edit\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
-				} else if tc.name == "task checkout drift" {
+				} else if tc.name == "task checkout drift" || tc.name == "new task source" || tc.name == "new ignored task source" {
 					store, err := activework.Open(repo, external)
 					if err != nil {
 						t.Fatal(err)
@@ -160,7 +160,13 @@ func TestReviewSourceDriftAndGenuineBlockerStayDistinct(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := os.WriteFile(filepath.Join(external, "workspaces", snapshot.RunID, "feature.go"), []byte("package changed\n"), 0600); err != nil {
+					name, content := "feature.go", "package changed\n"
+					if tc.name == "new task source" {
+						name, content = "newsource.go", "package feature\n"
+					} else if tc.name == "new ignored task source" {
+						name, content = "late.out", "ignored deliverable source\n"
+					}
+					if err := os.WriteFile(filepath.Join(external, "workspaces", snapshot.RunID, name), []byte(content), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -178,6 +184,31 @@ func TestReviewSourceDriftAndGenuineBlockerStayDistinct(t *testing.T) {
 				t.Fatalf("blocked review finalized: %+v", result.Snapshot)
 			}
 		})
+	}
+}
+
+func TestNewTaskSourceBeforeReviewDispatchIsRejected(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	ready, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true)})
+	if err != nil || ready.Status != "ready_for_review" || ready.Snapshot.Candidate == nil {
+		t.Fatalf("candidate freeze: %+v, %v", ready, err)
+	}
+	if err := os.WriteFile(filepath.Join(ready.Workspace, "late.go"), []byte("package feature\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := activework.Open(repo, external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	reviewer := &fakeReviewer{}
+	result, err := review.Run(context.Background(), review.Config{Agent: reviewer}, owner, store)
+	if err == nil || result.Status != "recovery_required" || result.Snapshot.Review == nil || result.Snapshot.Review.Verdict != "" || reviewer.starts != 0 || len(result.Snapshot.Dispatch.Attempts) != 1 {
+		t.Fatalf("new source passed pre-dispatch gate: %+v, %v", result, err)
 	}
 }
 

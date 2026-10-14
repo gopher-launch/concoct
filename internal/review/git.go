@@ -1,12 +1,14 @@
 package review
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/gopher-launch/concoct/internal/activework"
@@ -75,6 +77,17 @@ func verifyCandidate(store *activework.Store, snapshot activework.Snapshot, chec
 	}
 	if _, err := gitOutput(taskCheckout, "diff", "--cached", "--quiet"); err != nil {
 		return fmt.Errorf("task checkout index changed after freeze: %w", err)
+	}
+	// Git diff omits new source, including ignored paths. Freeze records each
+	// explicitly excluded generated output so only those exact paths may remain.
+	untracked, err := gitBytes(taskCheckout, "ls-files", "--others", "-z")
+	if err != nil {
+		return err
+	}
+	for _, path := range bytes.Split(untracked, []byte{0}) {
+		if len(path) > 0 && !slices.Contains(candidate.GeneratedOutputs, string(path)) {
+			return fmt.Errorf("task checkout gained untracked source after freeze: %q", path)
+		}
 	}
 	tree, err := gitOutput(store.Checkout, "rev-parse", candidate.Commit+"^{tree}")
 	if err != nil || tree != candidate.Tree {

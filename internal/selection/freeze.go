@@ -123,7 +123,9 @@ func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store
 	if err != nil {
 		return candidate, err
 	}
-	candidate = activework.Candidate{BaselineCommit: parent.Commit, BaselineTree: baselineTree, Commit: commit, Tree: tree, DiffSHA256: sha256Hex(diff), CheckpointSHA256: sha256Hex([]byte(checkpointText)), ChangedPaths: finalPaths, TurnID: outcome.TurnID}
+	generated := slices.Clone(checkpoint.GeneratedOutputs)
+	sort.Strings(generated)
+	candidate = activework.Candidate{BaselineCommit: parent.Commit, BaselineTree: baselineTree, Commit: commit, Tree: tree, DiffSHA256: sha256Hex(diff), CheckpointSHA256: sha256Hex([]byte(checkpointText)), ChangedPaths: finalPaths, GeneratedOutputs: generated, TurnID: outcome.TurnID}
 	if err := owner.FreezeCandidate(candidate); err != nil {
 		return activework.Candidate{}, err
 	}
