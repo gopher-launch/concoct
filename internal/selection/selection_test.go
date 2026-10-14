@@ -18,6 +18,8 @@ const testRoadmap = "## APP-001 — Delivered\n- Kind: task\n- Status: delivered
 type fakeAgent struct {
 	starts, turns int
 	run           func(string, codexapp.ToolHandler) (codexapp.TurnOutcome, error)
+	idle          func() error
+	event         *codexapp.Event
 }
 
 func (a *fakeAgent) StartThread(_ context.Context, cwd string, _ codexapp.RoleSettings, tools []codexapp.ToolSpec) (codexapp.Thread, error) {
@@ -27,9 +29,18 @@ func (a *fakeAgent) StartThread(_ context.Context, cwd string, _ codexapp.RoleSe
 	}
 	return codexapp.Thread{ID: "fresh-thread"}, nil
 }
-func (a *fakeAgent) RunTurn(_ context.Context, _ string, prompt string, _ codexapp.RoleSettings, handler codexapp.ToolHandler, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+func (a *fakeAgent) RunTurn(_ context.Context, _ string, prompt string, _ codexapp.RoleSettings, handler codexapp.ToolHandler, onEvent func(codexapp.Event)) (codexapp.TurnOutcome, error) {
 	a.turns++
+	if a.event != nil && onEvent != nil {
+		onEvent(*a.event)
+	}
 	return a.run(prompt, handler)
+}
+func (a *fakeAgent) Idle(context.Context, string) error {
+	if a.idle != nil {
+		return a.idle()
+	}
+	return nil
 }
 
 func testRepo(t *testing.T) (string, string, dispatch.State) {
@@ -42,7 +53,7 @@ func testRepo(t *testing.T) (string, string, dispatch.State) {
 	if _, err := gitOutput(repo, "init", "-q", "-b", "main"); err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"AGENTS.md": "Follow the current task only.\n", "roadmap.md": testRoadmap, "capabilities.md": "# Delivered capabilities\n\n## APP-001 — Delivered\n", "source.txt": "baseline\n"} {
+	for name, content := range map[string]string{"AGENTS.md": "Follow the current task only. For Go changes run `gofmt`, `go test ./...`, `go vet ./...`, `go build ./cmd/concoct`, and `git diff --check`. Run focused smoke checks for CLI behavior.\n", "roadmap.md": testRoadmap, "capabilities.md": "# Delivered capabilities\n\n## APP-001 — Delivered\n", "source.txt": "baseline\n", ".gitignore": "/concoct\n*.out\n"} {
 		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}

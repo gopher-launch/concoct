@@ -27,6 +27,17 @@ func (s *Store) validateState(st state, id string) error {
 	} else if !taskPattern.MatchString(st.TaskID) || st.TaskBranch == "" || st.Digests["evidence/task.md"] == "" {
 		return fmt.Errorf("active state has malformed task binding")
 	}
+	if st.Candidate != nil {
+		candidate := st.Candidate
+		if st.TaskID == "" || st.Phase == "selecting" || candidate.BaselineCommit != st.ParentCommit || candidate.Commit == st.ParentCommit || !revisionPattern.MatchString(candidate.BaselineTree) || !revisionPattern.MatchString(candidate.Commit) || !revisionPattern.MatchString(candidate.Tree) || !isDigest(candidate.DiffSHA256) || !isDigest(candidate.CheckpointSHA256) || candidate.TurnID == "" || len(candidate.ChangedPaths) == 0 {
+			return fmt.Errorf("active state has malformed candidate identity")
+		}
+		for index, path := range candidate.ChangedPaths {
+			if path == "" || filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, "..") || (index > 0 && candidate.ChangedPaths[index-1] >= path) {
+				return fmt.Errorf("active state has malformed candidate path")
+			}
+		}
+	}
 	if st.Dispatch != nil {
 		if err := st.Dispatch.Validate(); err != nil {
 			return fmt.Errorf("active dispatch state: %w", err)

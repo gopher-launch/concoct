@@ -43,4 +43,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - The reagent can create one task branch and call `claim_task` before source edits. The host validates eligibility, roadmap scope, unchanged parent and clean baseline checkout, then records the task binding and callback receipt before acknowledgment. The same turn can continue engineering and save bounded checkpoints without changing agreed scope.
 - Normal no-work removes the clean unclaimed checkout and releases the active pointer; a material question retains active work. Focused fake-agent and disposable Git tests cover one-turn continuation, competing claims and dirty prerequisites.
 
-The CLI workflow, candidate freezing, independent review controller, threshold-triggered interruption and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.
+## CON-048 — Internal candidate freeze
+
+- A completed reagent turn can request review readiness with a structured final checkpoint. The host checks each task criterion, required project checks with command and source paths, any explicitly accepted unavailable check, self-review and next action. Progress events still stream before verdict validation.
+- Readiness also requires resolved host callbacks, an idle provider background-terminal list and source documentation that marks the selected task delivered while preserving IDs and agreed scope. Invalid or uncertain results retain active work and do not create a candidate.
+- Candidate capture includes baseline and candidate revisions and trees, a binary diff digest, changed paths and the checkpoint digest. Existing reagent commits are preserved; dirty source can be staged and committed mechanically without another agent turn. Untracked deliverables are included even when ignored by Git; an omitted generated output must be individually declared and match an explicit exclusion.
+
+The CLI workflow, independent review controller, threshold-triggered interruption and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.

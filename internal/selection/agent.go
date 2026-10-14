@@ -3,6 +3,7 @@ package selection
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/gopher-launch/concoct/internal/codexapp"
 )
@@ -12,6 +13,7 @@ import (
 type Agent interface {
 	StartThread(context.Context, string, codexapp.RoleSettings, []codexapp.ToolSpec) (codexapp.Thread, error)
 	RunTurn(context.Context, string, string, codexapp.RoleSettings, codexapp.ToolHandler, func(codexapp.Event)) (codexapp.TurnOutcome, error)
+	Idle(context.Context, string) error
 }
 
 // CodexAgent adapts the verified app-server client to the selection controller.
@@ -24,6 +26,19 @@ func (a CodexAgent) StartThread(ctx context.Context, cwd string, settings codexa
 func (a CodexAgent) RunTurn(ctx context.Context, threadID, prompt string, settings codexapp.RoleSettings, handler codexapp.ToolHandler, onEvent func(codexapp.Event)) (codexapp.TurnOutcome, error) {
 	a.Client.SetToolHandler(handler)
 	return a.Client.RunTurn(ctx, threadID, prompt, settings, json.RawMessage(nil), onEvent)
+}
+
+// Idle requires both the completed turn's resolved callbacks and an empty
+// provider background-terminal list before source can be frozen.
+func (a CodexAgent) Idle(ctx context.Context, threadID string) error {
+	terminals, err := a.Client.BackgroundTerminals(ctx, threadID)
+	if err != nil {
+		return err
+	}
+	if len(terminals) != 0 {
+		return fmt.Errorf("reagent still has %d background terminals", len(terminals))
+	}
+	return nil
 }
 
 func toolSpecs() []codexapp.ToolSpec {

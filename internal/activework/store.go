@@ -47,6 +47,16 @@ type Operational struct {
 	Counters                    map[string]int
 }
 
+// Candidate identifies the exact source contents offered for independent
+// review. The checkpoint digest binds the verification evidence to this tree.
+type Candidate struct {
+	BaselineCommit, BaselineTree string
+	Commit, Tree                 string
+	DiffSHA256, CheckpointSHA256 string
+	ChangedPaths                 []string
+	TurnID                       string
+}
+
 type Snapshot struct {
 	ObservedAt     time.Time
 	Active         bool
@@ -67,6 +77,7 @@ type Snapshot struct {
 	RoleSettings   map[string]string
 	Counters       map[string]int
 	Dispatch       *dispatch.State
+	Candidate      *Candidate
 }
 
 type pointer struct {
@@ -90,6 +101,7 @@ type state struct {
 	Revision                                       uint64
 	Pending                                        *pendingWrite
 	Dispatch                                       *dispatch.State
+	Candidate                                      *Candidate
 }
 
 type startIntent struct {
@@ -138,6 +150,11 @@ func (s *Store) Status() (Snapshot, error) {
 			return snapshot, fmt.Errorf("copy dispatch state: %w", err)
 		}
 		snapshot.Dispatch = &copy
+	}
+	if st.Candidate != nil {
+		copy := *st.Candidate
+		copy.ChangedPaths = append([]string(nil), st.Candidate.ChangedPaths...)
+		snapshot.Candidate = &copy
 	}
 	return snapshot, nil
 }
@@ -340,6 +357,9 @@ func (o *Owner) SaveCheckpoint(content string) error {
 	if err != nil {
 		return err
 	}
+	if st.Candidate != nil {
+		return fmt.Errorf("frozen candidate checkpoint is immutable")
+	}
 	old, err := o.readBoundFile(st, "evidence/task.md")
 	if err != nil {
 		return err
@@ -349,6 +369,77 @@ func (o *Owner) SaveCheckpoint(content string) error {
 		return err
 	}
 	return o.transitionFile(st, "evidence/task.md", next)
+}
+
+// Checkpoint reads the integrity-checked reagent region of the current task.
+func (o *Owner) Checkpoint() (string, error) {
+	st, err := o.currentState()
+	if err != nil {
+		return "", err
+	}
+	if st.TaskID == "" {
+		return "", fmt.Errorf("unclaimed run has no engineering checkpoint")
+	}
+	body, err := o.readBoundFile(st, "evidence/task.md")
+	if err != nil {
+		return "", err
+	}
+	start := strings.Index(string(body), checkpointStart)
+	end := strings.Index(string(body), checkpointEnd)
+	if start < 0 || end <= start {
+		return "", fmt.Errorf("engineering checkpoint markers are missing or reordered")
+	}
+	return strings.TrimSpace(string(body)[start+len(checkpointStart) : end]), nil
+}
+
+// FreezeCandidate records one immutable source/evidence identity after the
+// controller has verified completed execution and the Git checkout.
+func (o *Owner) FreezeCandidate(candidate Candidate) error {
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	if st.TaskID == "" || st.Phase != "engineering" || st.Hold != "" || st.Candidate != nil {
+		return fmt.Errorf("run is not ready for candidate freeze")
+	}
+	if st.Dispatch == nil || len(st.Dispatch.Attempts) == 0 {
+		return fmt.Errorf("candidate has no recorded dispatch")
+	}
+	for _, attempt := range st.Dispatch.Attempts {
+		if attempt.Status == "reserved" || attempt.Status == "uncertain" {
+			return fmt.Errorf("candidate has unresolved dispatch")
+		}
+	}
+	checkpoint, err := o.Checkpoint()
+	if err != nil {
+		return err
+	}
+	if candidate.BaselineCommit != st.ParentCommit || candidate.Commit == st.ParentCommit || candidate.CheckpointSHA256 != digest([]byte(checkpoint)) || candidate.TurnID == "" || !revisionPattern.MatchString(candidate.BaselineTree) || !revisionPattern.MatchString(candidate.Commit) || !revisionPattern.MatchString(candidate.Tree) || !isDigest(candidate.DiffSHA256) || len(candidate.ChangedPaths) == 0 {
+		return fmt.Errorf("candidate identity or checkpoint differs from active task")
+	}
+	for index, path := range candidate.ChangedPaths {
+		if path == "" || filepath.IsAbs(path) || filepath.Clean(path) != path || strings.HasPrefix(path, "..") || (index > 0 && candidate.ChangedPaths[index-1] >= path) {
+			return fmt.Errorf("invalid candidate path %q", path)
+		}
+	}
+	copy := candidate
+	copy.ChangedPaths = append([]string(nil), candidate.ChangedPaths...)
+	st.Candidate = &copy
+	st.Phase = "ready-for-review"
+	st.Revision++
+	return writeJSON(o.store.statePath(st.RunID), st)
+}
+
+func isDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, ch := range value {
+		if !strings.ContainsRune("0123456789abcdef", ch) {
+			return false
+		}
+	}
+	return true
 }
 
 // RecordDecision is the host-owned path for appending an operator decision.
