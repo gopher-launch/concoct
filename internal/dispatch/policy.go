@@ -188,8 +188,6 @@ type State struct {
 	Quota           *QuotaObservation              `json:"quota,omitempty"`
 	Attempts        []Attempt                      `json:"attempts"`
 	Assessments     []Assessment                   `json:"assessments"`
-	RecoveryEpisode string                         `json:"recovery_episode,omitempty"`
-	RecoveryUsed    int                            `json:"recovery_used"`
 	Pending         *Authorization                 `json:"pending,omitempty"`
 	WatchdogElapsed time.Duration                  `json:"watchdog_elapsed,omitempty"`
 	WatchdogStall   time.Duration                  `json:"watchdog_stall,omitempty"`
@@ -209,10 +207,11 @@ func (s State) Validate() error {
 	if _, err := NewState(s.Profiles, s.Limits, s.Gates, s.QuotaPolicy); err != nil {
 		return err
 	}
-	if s.WatchdogElapsed < 0 || s.WatchdogStall < 0 || len(s.Attempts) > s.Limits.Dispatches || len(s.Assessments) > s.Limits.Assessments || s.RecoveryUsed < 0 || s.RecoveryUsed > s.Limits.Recovery {
+	if s.WatchdogElapsed < 0 || s.WatchdogStall < 0 || len(s.Attempts) > s.Limits.Dispatches || len(s.Assessments) > s.Limits.Assessments {
 		return fmt.Errorf("invalid persisted dispatch bounds")
 	}
 	ids := make(map[string]bool, len(s.Attempts))
+	recoveryByEpisode := make(map[string]int)
 	unresolved := 0
 	for _, attempt := range s.Attempts {
 		if attempt.ID == "" || ids[attempt.ID] || attempt.ReservedAt.IsZero() {
@@ -221,6 +220,12 @@ func (s State) Validate() error {
 		ids[attempt.ID] = true
 		if err := attempt.Binding.validate(); err != nil {
 			return err
+		}
+		if attempt.Binding.Activity == Recovery {
+			recoveryByEpisode[attempt.Binding.Episode]++
+			if recoveryByEpisode[attempt.Binding.Episode] > s.Limits.Recovery {
+				return fmt.Errorf("recovery allowance exceeded for episode %q", attempt.Binding.Episode)
+			}
 		}
 		if attempt.Tokens != nil && !attempt.Tokens.valid() {
 			return fmt.Errorf("invalid persisted token receipt")
@@ -413,8 +418,16 @@ func (s *State) Reserve(id string, binding Binding, now time.Time) (Decision, er
 	if binding.Activity == Review && len(s.Assessments) >= s.Limits.Assessments {
 		return Decision{}, fmt.Errorf("independent assessment allowance exhausted")
 	}
-	if binding.Activity == Recovery && s.RecoveryEpisode == binding.Episode && s.RecoveryUsed >= s.Limits.Recovery {
-		return Decision{}, fmt.Errorf("recovery allowance exhausted for episode %q", binding.Episode)
+	if binding.Activity == Recovery {
+		used := 0
+		for _, attempt := range s.Attempts {
+			if attempt.Binding.Activity == Recovery && attempt.Binding.Episode == binding.Episode {
+				used++
+			}
+		}
+		if used >= s.Limits.Recovery {
+			return Decision{}, fmt.Errorf("recovery allowance exhausted for episode %q", binding.Episode)
+		}
 	}
 	hold, warning := s.quotaDecision(now)
 	if s.Gates.requires(binding.Activity) && hold == "" {
@@ -434,12 +447,6 @@ func (s *State) Reserve(id string, binding Binding, now time.Time) (Decision, er
 		return Decision{Hold: s.Pending, Warning: warning}, nil
 	}
 	s.Pending = nil
-	if binding.Activity == Recovery {
-		if s.RecoveryEpisode != binding.Episode {
-			s.RecoveryEpisode, s.RecoveryUsed = binding.Episode, 0
-		}
-		s.RecoveryUsed++
-	}
 	s.Attempts = append(s.Attempts, Attempt{ID: id, Binding: binding, ReservedAt: now, Status: "reserved"})
 	return Decision{Attempt: &s.Attempts[len(s.Attempts)-1], Warning: warning, Dispatch: true}, nil
 }
