@@ -6,16 +6,16 @@ updated: 2026-10-13
 
 # Concoct implementation roadmap
 
-Implementation state 0.5 · CON-044 delivered
+Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-CON-044 has been independently reviewed, operator-approved and integrated. The CLI remains a buildable skeleton; the workflow remains planned. CON-045 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+The source tree includes the CON-045 app-server transport. The CLI remains a buildable skeleton; the workflow remains planned. CON-046 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-045` is ready after CON-044 integration. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-046` is ready after CON-045 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the unfinished runner to build itself. The reset CLI truthfully exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation. CON-055 completes the new operator interface.
@@ -131,27 +131,17 @@ Delivered store: an external active-work store binds one run to its repository a
 ## CON-045 — Implement the verified app-server transport
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F001
 - Depends on: CON-044
 
-**Objective:** provide a small local-stdio Codex client for the methods/events required by this workflow, including continuing-turn host callbacks.
-
-**Acceptance criteria:**
-
-- Support handshake/experimental capability negotiation, catalog/quota reads, thread start/resume, turn start/interrupt, background-terminal controls and lifecycle events using the verified 0.147.0 schema subset. Report that version as tested; diagnose unsupported runner/platform requirements before model work and do not invent broader minimum-version compatibility.
-- Accept resolved role settings from the caller. Explicitly reapply recorded model/full access/approval on resume and effort on each turn; validate returned settings. Metadata-only zero-turn identities remain provisional.
-- Process callback requests while the turn continues; validate `success`/`contentItems`/`inputText` response shape before host mutation. Correlate authoritative role/thread/turn/call IDs and acknowledge durable receipts.
-- Stream commentary/responses as they arrive. Preserve terminal results and available token receipts; unknown/interrupted usage remains unknown. Large ordinary output must not corrupt terminal-state parsing through the old whole-stream size cap.
-- Distinguish provider failure/disconnection, interrupted/completed turn, malformed role result and uncertain request acknowledgment. No persona choreography or generic protocol framework.
-
-**Verification:** deterministic fake app-server transcripts/process fixture, including interleaved callbacks/progress, malformed replies, restored tools, access reversion, EOF during dispatch and zero-turn loss. Reuse supplied probe evidence; no repeated billable capability investigation.
+Delivered transport: Linux Codex app-server 0.147.0 stdio handshake and version check, model/quota reads, explicit thread/turn settings, streaming lifecycle events, continuing-turn host callbacks, and interruption/background-terminal controls. Fake-server tests cover interleaved progress, malformed callbacks, settings mismatch, provider disconnect and zero-turn loss. This package does not implement controller policy or prove process cessation.
 
 ## CON-046 — Govern every agent dispatch and retain consumption
 
 - Kind: task
-- Status: planned
+- Status: ready
 - Priority: high
 - Parent: CON-F001
 - Depends on: CON-045
@@ -363,4 +353,4 @@ Delivered store: an external active-work store binds one run to its repository a
 
 ## Next task boundary
 
-CON-044 was integrated after independent review and operator acceptance of its exact candidate. CON-045 is the next ready task and has not begun. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-046 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.

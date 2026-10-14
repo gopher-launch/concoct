@@ -1,6 +1,6 @@
 # Delivered capabilities
 
-This ledger describes delivered behavior through the integrated CON-044 active-work store.
+This ledger describes implemented behavior in the source tree. Task IDs identify the delivery that introduced each capability.
 
 ## CON-043 — Buildable reset skeleton
 
@@ -22,4 +22,11 @@ This ledger describes delivered behavior through the integrated CON-044 active-w
 - Run/task metadata, checkpoints, operator decisions, pending/final reviews and bounded receipts use atomic file writes; interrupted cross-file writes reconcile on reopen.
 - Dedicated host methods protect agreed task scope and finalized reviews from ordinary checkpoint or review updates.
 
-No agent workflow, provider transport, review controller or integration operation is delivered. CON-042 remains a frozen, undelivered historical reference.
+## CON-045 — Codex app-server transport
+
+- A Linux stdio client checks for the locally verified Codex 0.147.0 runner, negotiates experimental API support and reads model catalog and rate-limit snapshots.
+- Thread start/resume applies explicit role settings and validates effective model, effort, full-access sandbox and approval policy. Zero-turn thread IDs remain provisional.
+- Turn execution streams progress and terminal results, retains observed token receipts, and handles bound host callbacks only after validating the response and committing its receipt.
+- Turn interruption and background-terminal list, terminate and clean methods are exposed. Process cessation verification and stop policy belong to later controller work.
+
+No agent workflow, dispatch policy, review controller or integration operation is delivered. CON-042 remains a frozen, undelivered historical reference.
