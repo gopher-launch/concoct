@@ -172,6 +172,34 @@ func (o *Owner) BeginSelection(spec SelectionSpec) (string, error) {
 	return o.begin(st, "")
 }
 
+// EndUnclaimedSelection retires a completed no-work selection. The run and its
+// receipts remain outside the product tree, while active ownership is freed.
+func (o *Owner) EndUnclaimedSelection(summary string) error {
+	if err := validateContent(summary); err != nil {
+		return err
+	}
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	if st.TaskID != "" || st.Phase != "selecting" || st.Dispatch == nil {
+		return fmt.Errorf("no-work completion requires an unclaimed selecting run")
+	}
+	for _, attempt := range st.Dispatch.Attempts {
+		if attempt.Status == "reserved" || attempt.Status == "uncertain" {
+			return fmt.Errorf("selection dispatch is unresolved")
+		}
+	}
+	receipt, err := json.Marshal(summary)
+	if err != nil {
+		return err
+	}
+	if err := o.RecordReceipt("no-suitable-work", receipt); err != nil {
+		return err
+	}
+	return removeSync(filepath.Join(o.store.dir, "active.json"))
+}
+
 func (o *Owner) begin(st state, task string) (string, error) {
 	if _, err := os.Stat(filepath.Join(o.store.dir, "active.json")); err == nil {
 		return "", fmt.Errorf("active run already exists")
@@ -353,6 +381,29 @@ func (o *Owner) FinalizeReview(number int) error {
 	st.FinalReviews[number] = true
 	st.Revision++
 	return writeJSON(o.store.statePath(st.RunID), st)
+}
+
+// CheckReceipt reports whether this exact callback receipt was already saved.
+// A reused name with different content is an error.
+func (o *Owner) CheckReceipt(name string, content []byte) (bool, error) {
+	if !namePattern.MatchString(name) || !json.Valid(content) || len(content) > maxEvidence/4 {
+		return false, fmt.Errorf("invalid receipt name or JSON content")
+	}
+	st, err := o.currentState()
+	if err != nil {
+		return false, err
+	}
+	path := "receipts/" + name + ".json"
+	if st.Digests[path] == "" {
+		return false, nil
+	}
+	if _, err := o.readBoundFile(st, path); err != nil {
+		return false, err
+	}
+	if st.Digests[path] != digest(content) {
+		return false, fmt.Errorf("receipt %s already has different content", name)
+	}
+	return true, nil
 }
 
 // RecordReceipt creates a bounded JSON receipt once. Repeating identical data

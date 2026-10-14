@@ -36,4 +36,11 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Twelve total dispatch attempts, three completed independent assessments and two recovery attempts per failure episode are starting bounds. Extensions raise ceilings without resetting consumption. Three reagent self-review passes per candidate cycle are guidance inside a turn, not a runtime dispatch counter.
 - Provider quota windows, reset times and observation timestamps are separate from per-attempt token receipts. Configured warnings and next-dispatch holds use observed percentages; unavailable or stale telemetry remains unknown. Watchdogs default off.
 
-No agent workflow, task selection, review controller, threshold-triggered interruption or integration operation is delivered. CON-042 remains a frozen, undelivered historical reference.
+## CON-047 — Internal selection and engineering controller
+
+- When no active work exists, the controller requires a clean named parent branch, captures its baseline and prepares an external detached checkout. Existing active work is reported before new selection.
+- A fresh reagent thread receives current repository instructions, roadmap and capabilities, eligible task context and an explicit parent binding. Dispatch is durably reserved before provider start.
+- The reagent can create one task branch and call `claim_task` before source edits. The host validates eligibility, roadmap scope, unchanged parent and clean baseline checkout, then records the task binding and callback receipt before acknowledgment. The same turn can continue engineering and save bounded checkpoints without changing agreed scope.
+- Normal no-work removes the clean unclaimed checkout and releases the active pointer; a material question retains active work. Focused fake-agent and disposable Git tests cover one-turn continuation, competing claims and dirty prerequisites.
+
+The CLI workflow, candidate freezing, independent review controller, threshold-triggered interruption and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.

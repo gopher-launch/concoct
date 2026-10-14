@@ -10,12 +10,12 @@ Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-The source tree includes the CON-045 app-server transport. The CLI remains a buildable skeleton; the workflow remains planned. CON-046 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+The source tree includes an internal selection and engineering controller. The CLI remains a buildable skeleton; the complete workflow remains planned. CON-048 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-046` is ready after CON-045 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-048` is ready after CON-047 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the unfinished runner to build itself. The reset CLI truthfully exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation. CON-055 completes the new operator interface.
@@ -151,7 +151,7 @@ Delivered policy: provider-catalog role resolution with explicit Concoct invocat
 ## CON-047 — Select, create the task branch and engineer in one turn
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F002
 - Depends on: CON-046
@@ -168,10 +168,12 @@ Delivered policy: provider-catalog role resolution with explicit Concoct invocat
 
 **Verification:** controller/fake-agent plus disposable Git tests proving claim → branch binding → engineering/checkpoint within one turn, prerequisite rejection without dispatch, two competing claims and normal no-work. No live turn required.
 
+Delivered internal controller: fresh reagent selection uses current instructions and roadmap context, a clean parent baseline and external task checkout. Host callbacks bind one eligible task after branch creation and before source changes, then persist engineering checkpoints in the same turn. Durable dispatch reservation precedes provider start. Normal no-work retires the unclaimed checkout and active pointer; decision requests retain active work. CLI workflow and candidate freezing remain later work.
+
 ## CON-048 — Freeze a verified and reconciled candidate
 
 - Kind: task
-- Status: planned
+- Status: ready
 - Priority: high
 - Parent: CON-F002
 - Depends on: CON-047
@@ -343,4 +345,4 @@ Delivered policy: provider-catalog role resolution with explicit Concoct invocat
 
 ## Next task boundary
 
-CON-046 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-048 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
