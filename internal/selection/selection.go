@@ -176,18 +176,17 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 		}
 	} else {
 		if verdict.Disposition != "engineering" && verdict.Disposition != "decision_required" && verdict.Disposition != "ready_for_review" {
-			return result, fmt.Errorf("claimed task returned %q", verdict.Disposition)
+			return invalidCompletedResult(owner, store, &result, "invalid-disposition", attemptID, fmt.Errorf("claimed task returned %q", verdict.Disposition))
 		}
 		if !session.checkpointSaved {
-			return result, fmt.Errorf("claimed task returned without an engineering checkpoint")
+			return invalidCompletedResult(owner, store, &result, "missing-checkpoint", attemptID, fmt.Errorf("claimed task returned without an engineering checkpoint"))
 		}
 		if err := verifyParentUnchanged(store, parent); err != nil {
 			return result, err
 		}
 		if verdict.Disposition == "ready_for_review" {
 			if _, err := freezeReady(ctx, cfg, owner, store, session, project, parent, outcome); err != nil {
-				result.Snapshot, _ = store.Status()
-				return result, fmt.Errorf("candidate not ready: %w", err)
+				return invalidCompletedResult(owner, store, &result, "invalid-ready-candidate", attemptID, fmt.Errorf("candidate not ready: %w", err))
 			}
 			result.Status = verdict.Disposition
 			result.Snapshot, err = store.Status()
@@ -206,6 +205,13 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 	}
 	result.Snapshot, err = store.Status()
 	return result, err
+}
+
+func invalidCompletedResult(owner *activework.Owner, store *activework.Store, result *Result, reason, attemptID string, cause error) (Result, error) {
+	if err := retainRecovery(owner, store, result, reason, attemptID); err != nil {
+		return *result, fmt.Errorf("%w; retain recovery: %v", cause, err)
+	}
+	return *result, cause
 }
 
 func retainRecovery(owner *activework.Owner, store *activework.Store, result *Result, reason, attemptID string) error {

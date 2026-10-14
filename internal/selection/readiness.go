@@ -166,11 +166,36 @@ func commandMatches(need, actual string, changed []string, workspace string) boo
 	case "cli-smoke":
 		return strings.Contains(actual, "concoct") && (strings.Contains(actual, "help") || strings.Contains(actual, "version"))
 	default:
-		if strings.HasPrefix(need, "go ") {
-			want, got := strings.Fields(need), strings.Fields(actual)
-			return len(got) >= 3 && len(want) == 3 && got[0] == want[0] && got[1] == want[1] && slices.Contains(got[2:], want[2])
+		return matchesGoCheck(need, actual)
+	}
+}
+
+// Match only options that preserve the work required by the project check.
+// An arbitrary Go flag can turn a successful command into a dry run or skip
+// every test while still naming the required package pattern.
+func matchesGoCheck(need, actual string) bool {
+	if actual == need {
+		return true
+	}
+	want, got := strings.Fields(need), strings.Fields(actual)
+	if len(want) != 3 || len(got) < 3 || want[0] != "go" || got[0] != "go" || got[1] != want[1] || got[len(got)-1] != want[2] {
+		return false
+	}
+	options := got[2 : len(got)-1]
+	switch want[1] {
+	case "test":
+		seen := map[string]bool{}
+		for _, option := range options {
+			if (option != "-count=1" && option != "-race") || seen[option] {
+				return false
+			}
+			seen[option] = true
 		}
-		return actual == need
+		return true
+	case "build":
+		return len(options) == 2 && options[0] == "-o" && options[1] != "" && !strings.HasPrefix(options[1], "-")
+	default:
+		return len(options) == 0
 	}
 }
 

@@ -139,7 +139,7 @@ func TestClaimAndEngineeringInOneTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "engineering" || result.TaskID != "APP-002" || result.Snapshot.TaskBranch != "work/app-002" || agent.starts != 1 || agent.turns != 1 {
+	if result.Status != "engineering" || result.Snapshot.Hold != "" || result.TaskID != "APP-002" || result.Snapshot.TaskBranch != "work/app-002" || agent.starts != 1 || agent.turns != 1 {
 		t.Fatalf("unexpected result: %+v, starts %d turns %d", result, agent.starts, agent.turns)
 	}
 	taskFiles, err := filepath.Glob(filepath.Join(external, "repos", "*", "runs", result.RunID, "evidence", "task.md"))

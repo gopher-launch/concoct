@@ -177,6 +177,16 @@ func TestReadyRejectsIncompleteChecksAndReconciliation(t *testing.T) {
 	}{
 		{name: "missing mandatory check", evidence: func() ReadyCheckpoint { e := readyEvidence(); e.Checks = e.Checks[:3]; return e }(), reconcile: true, want: "mandatory check"},
 		{name: "configured check", evidence: readyEvidence(), reconcile: true, want: "mandatory check", extra: []RequiredCheck{{Command: "make lint", Source: "AGENTS.md"}}},
+		{name: "skipped tests", evidence: func() ReadyCheckpoint {
+			e := readyEvidence()
+			e.Checks[1].Command = "go test -run '^$' ./..."
+			return e
+		}(), reconcile: true, want: "mandatory check"},
+		{name: "dry-run build", evidence: func() ReadyCheckpoint {
+			e := readyEvidence()
+			e.Checks[3].Command = "go build -n ./cmd/concoct"
+			return e
+		}(), reconcile: true, want: "mandatory check"},
 		{name: "unaccepted unavailable check", evidence: func() ReadyCheckpoint {
 			e := readyEvidence()
 			e.Checks[2].Result = "unavailable"
@@ -192,13 +202,87 @@ func TestReadyRejectsIncompleteChecksAndReconciliation(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected %s, got %+v, %v", tc.want, result, err)
 			}
-			if result.Snapshot.Candidate != nil || result.Snapshot.Phase != "engineering" {
+			if result.Status != "recovery_required" || result.Snapshot.Hold != "recovery-required" || result.Snapshot.PendingRequest == "" || result.Snapshot.Candidate != nil || result.Snapshot.Phase != "engineering" {
 				t.Fatalf("invalid readiness froze candidate: %+v", result.Snapshot)
+			}
+			if result.Snapshot.Dispatch == nil || len(result.Snapshot.Dispatch.Attempts) != 1 || result.Snapshot.Dispatch.Attempts[0].Status != "completed" {
+				t.Fatalf("invalid readiness lost completed dispatch: %+v", result.Snapshot.Dispatch)
 			}
 			if _, err := os.Stat(filepath.Join(result.Workspace, "feature.go")); err != nil {
 				t.Fatalf("unfinished work not retained: %v", err)
 			}
 		})
+	}
+}
+
+func TestCompletedClaimWithInvalidDispositionOrMissingCheckpointRetainsRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name, final, reason string
+		saveCheckpoint      bool
+	}{
+		{"unknown disposition", `{"disposition":"no_suitable_work","summary":"wrong after claim"}`, "invalid-disposition", true},
+		{"missing checkpoint", `{"disposition":"engineering","summary":"work in progress"}`, "missing-checkpoint", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, external, policy := testRepo(t)
+			agent := &fakeAgent{}
+			agent.run = func(_ string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+				store, err := activework.Open(repo, external)
+				if err != nil {
+					t.Fatal(err)
+				}
+				snapshot, err := store.Status()
+				if err != nil {
+					t.Fatal(err)
+				}
+				workspace := filepath.Join(external, "workspaces", snapshot.RunID)
+				if _, err := gitOutput(workspace, "switch", "-qc", "work/app-002"); err != nil {
+					t.Fatal(err)
+				}
+				if err := invoke(t, handler, "claim", "claim_task", claimArgs("APP-002", "work/app-002")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(workspace, "source.txt"), []byte("unfinished\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if tc.saveCheckpoint {
+					if err := invoke(t, handler, "checkpoint", "save_checkpoint", map[string]string{"content": "unfinished; next: recover"}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return codexapp.TurnOutcome{ThreadID: "fresh-thread", TurnID: "one-turn", Status: "completed", FinalText: tc.final}, nil
+			}
+			result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent})
+			if err == nil || result.Status != "recovery_required" || result.Snapshot.Phase != "engineering" || result.Snapshot.Hold != "recovery-required" || !strings.Contains(result.Snapshot.PendingRequest, tc.reason) || result.Snapshot.Candidate != nil {
+				t.Fatalf("invalid completed result was not retained: %+v, %v", result, err)
+			}
+			if result.Snapshot.Dispatch == nil || len(result.Snapshot.Dispatch.Attempts) != 1 || result.Snapshot.Dispatch.Attempts[0].Status != "completed" {
+				t.Fatalf("completed dispatch was not consumed: %+v", result.Snapshot.Dispatch)
+			}
+			if content, readErr := os.ReadFile(filepath.Join(result.Workspace, "source.txt")); readErr != nil || string(content) != "unfinished\n" {
+				t.Fatalf("unfinished work lost: %q, %v", content, readErr)
+			}
+		})
+	}
+}
+
+func TestMandatoryGoCommandEquivalence(t *testing.T) {
+	for _, tc := range []struct {
+		need, actual string
+		matches      bool
+	}{
+		{"go test ./...", "GOTOOLCHAIN=local go test -count=1 -race ./...", true},
+		{"go build ./cmd/concoct", "go build -o /tmp/concoct ./cmd/concoct", true},
+		{"go test ./...", "go test -run '^$' ./...", false},
+		{"go test ./...", "go test -list . ./...", false},
+		{"go test ./...", "go test -count=1 ./... -run '^$'", false},
+		{"go build ./cmd/concoct", "go build -n ./cmd/concoct", false},
+		{"go build ./cmd/concoct", "go build -o /tmp/concoct -n ./cmd/concoct", false},
+		{"go vet ./...", "go vet -n ./...", false},
+	} {
+		if got := commandMatches(tc.need, tc.actual, nil, ""); got != tc.matches {
+			t.Errorf("commandMatches(%q, %q) = %v, want %v", tc.need, tc.actual, got, tc.matches)
+		}
 	}
 }
 
