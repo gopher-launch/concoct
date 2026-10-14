@@ -21,10 +21,12 @@ The `internal/activework` package provides an external active-run store for futu
 
 The `internal/codexapp` package speaks the locally verified Linux Codex app-server 0.147.0 stdio subset. It checks the runner version before starting, negotiates experimental capability, applies explicit role settings, streams turn events and handles validated host callbacks. It exposes model/quota reads and background-terminal controls to later controller work. It does not execute the Concoct workflow on its own.
 
+The `internal/dispatch` package resolves explicit Concoct role settings against the provider catalog and evaluates dispatch grants, bounds and quota observations. `internal/activework` persists its reservations and authorization waits under the repository execution lock. These packages provide policy and durable state for a future controller; no CLI dispatch command uses them yet.
+
 No initialization, task selection, agent execution, review, integration or release command is implemented in this baseline.
 
 ## Construction
 
-Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Implement from current source and the accepted design, record active task evidence outside the repository under `$HOME/.concoct/manual/<task-id>/`, and commit a reviewable candidate on a task branch. An independent review and explicit operator acceptance precede local integration. Git history, including the CON-042 branch, is reference material for selective future harvesting. CON-046 is the next ready task in the intended post-integration state.
+Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Implement from current source and the accepted design, record active task evidence outside the repository under `$HOME/.concoct/manual/<task-id>/`, and commit a reviewable candidate on a task branch. An independent review and explicit operator acceptance precede local integration. Git history, including the CON-042 branch, is reference material for selective future harvesting. CON-047 is the next ready task in the intended post-integration state.
 
 The first planned runtime scope is Linux with Codex. The broader workflow and its operator commands remain future tasks; see `capabilities.md` for behavior delivered by this skeleton.

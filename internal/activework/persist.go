@@ -27,6 +27,11 @@ func (s *Store) validateState(st state, id string) error {
 	} else if !taskPattern.MatchString(st.TaskID) || st.TaskBranch == "" || st.Digests["evidence/task.md"] == "" {
 		return fmt.Errorf("active state has malformed task binding")
 	}
+	if st.Dispatch != nil {
+		if err := st.Dispatch.Validate(); err != nil {
+			return fmt.Errorf("active dispatch state: %w", err)
+		}
+	}
 	return nil
 }
 

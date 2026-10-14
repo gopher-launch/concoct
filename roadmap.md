@@ -141,27 +141,17 @@ Delivered transport: Linux Codex app-server 0.147.0 stdio handshake and version 
 ## CON-046 — Govern every agent dispatch and retain consumption
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F001
 - Depends on: CON-045
 
-**Objective:** centralize resolved settings, authorization and consumed allowances before every new provider turn.
-
-**Acceptance criteria:**
-
-- Resolve invocation overrides, project/user Concoct defaults and provider-recommended role defaults. Default reagent medium/iragent high; unrelated ambient VSCode/Codex values cannot silently substitute. Validate supported pairs and retain them for active work.
-- Initial `run` grant covers selection, engineering, independent review and correction. Configured dispatch gates produce durable task/role/activity/candidate-bound authorization waits. The first iragent has no default gate; plain rerun does not satisfy an explicit pending gate.
-- Reserve/persist each turn attempt before dispatch. Defaults are 12 total dispatches, 3 self-review passes per candidate cycle, 3 completed independent assessments per task and 2 recovery attempts per failure episode. Resume/answers/recovery never reset parent consumption.
-- Extensions change ceilings while preserving consumption. Internal self-review limits are instructions/checkpoint evidence, not fabricated hard execution ceilings or forced per-pass handoffs.
-- Record quota windows/reset times/observation age and token receipts separately. Support configured warnings/next-dispatch holds and unknown-telemetry fallback; no exact task-spend or currency inference. Watchdogs are optional and initially disabled.
-
-**Verification:** fake-provider/state tests for each dispatch route, grant matching/staleness, exhausted/extended bounds, reset/stale/unknown telemetry and resumed settings. Threshold-triggered interruption is connected to CON-051, not claimed effective here.
+Delivered policy: provider-catalog role resolution with explicit Concoct invocation/project/user precedence, supported model/effort validation, and retained full-access settings. The active-work owner exposes a durable pre-dispatch reservation and exact authorization wait method. Default grants cover selection, engineering, review and correction; configured gates bind task, role, activity and candidate. The state retains dispatch, assessment and recovery consumption across resume, supports upward limit extensions, and keeps provider quota windows and token receipts separate. Quota warnings, next-dispatch holds and unknown-telemetry fallback are available; watchdogs default off. Controller routing and threshold-triggered interruption remain later work.
 
 ## CON-047 — Select, create the task branch and engineer in one turn
 
 - Kind: task
-- Status: planned
+- Status: ready
 - Priority: high
 - Parent: CON-F002
 - Depends on: CON-046

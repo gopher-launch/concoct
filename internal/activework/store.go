@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/gopher-launch/concoct/internal/dispatch"
 )
 
 const (
@@ -64,6 +66,7 @@ type Snapshot struct {
 	RoleIDs        map[string]string
 	RoleSettings   map[string]string
 	Counters       map[string]int
+	Dispatch       *dispatch.State
 }
 
 type pointer struct {
@@ -86,6 +89,7 @@ type state struct {
 	FinalReviews                                   map[int]bool
 	Revision                                       uint64
 	Pending                                        *pendingWrite
+	Dispatch                                       *dispatch.State
 }
 
 type startIntent struct {
@@ -128,6 +132,13 @@ func (s *Store) Status() (Snapshot, error) {
 	snapshot.Phase, snapshot.Hold, snapshot.PendingRequest = st.Phase, st.Hold, st.PendingRequest
 	snapshot.Revision, snapshot.PendingWrite = st.Revision, st.Pending != nil
 	snapshot.RoleIDs, snapshot.RoleSettings, snapshot.Counters = cloneStrings(st.RoleIDs), cloneStrings(st.RoleSettings), cloneInts(st.Counters)
+	if st.Dispatch != nil {
+		copy, err := st.Dispatch.Clone()
+		if err != nil {
+			return snapshot, fmt.Errorf("copy dispatch state: %w", err)
+		}
+		snapshot.Dispatch = &copy
+	}
 	return snapshot, nil
 }
 

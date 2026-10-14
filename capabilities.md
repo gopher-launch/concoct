@@ -29,4 +29,11 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Turn execution streams progress and terminal results, retains observed token receipts, and handles bound host callbacks only after validating the response and committing its receipt.
 - Turn interruption and background-terminal list, terminate and clean methods are exposed. Process cessation verification and stop policy belong to later controller work.
 
-No agent workflow, dispatch policy, review controller or integration operation is delivered. CON-042 remains a frozen, undelivered historical reference.
+## CON-046 — Dispatch governance
+
+- Internal policy resolves reagent and iragent model/effort pairs from explicit Concoct invocation, project and user choices over the provider-recommended model; it validates supported efforts and retains full-access settings with active work. Default efforts are medium and high respectively.
+- The active-work owner exposes a pre-dispatch reservation method that persists an attempt or a task/role/activity/candidate-bound authorization wait before returning dispatch permission. Default policy grants ordinary selection, engineering, review and correction without a first-review gate; configured gates require explicit matching authorization.
+- Twelve total dispatch attempts, three completed independent assessments and two recovery attempts per failure episode are starting bounds. Extensions raise ceilings without resetting consumption. Three reagent self-review passes per candidate cycle are guidance inside a turn, not a runtime dispatch counter.
+- Provider quota windows, reset times and observation timestamps are separate from per-attempt token receipts. Configured warnings and next-dispatch holds use observed percentages; unavailable or stale telemetry remains unknown. Watchdogs default off.
+
+No agent workflow, task selection, review controller, threshold-triggered interruption or integration operation is delivered. CON-042 remains a frozen, undelivered historical reference.
