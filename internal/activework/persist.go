@@ -44,6 +44,12 @@ func (s *Store) validateState(st state, id string) error {
 			}
 		}
 	}
+	if st.FreezeIntent != nil {
+		intent := st.FreezeIntent
+		if st.TaskID == "" || (st.Phase != "engineering" && st.Phase != "correcting") || intent.TurnID == "" || !isDigest(intent.CheckpointSHA256) || len(intent.ChangedPaths) == 0 || (st.Candidate != nil && intent.PriorCommit != st.Candidate.Commit) || (st.Candidate == nil && intent.PriorCommit != "") {
+			return fmt.Errorf("active state has malformed candidate freeze intent")
+		}
+	}
 	if st.Review != nil {
 		review := st.Review
 		if st.Candidate == nil || st.Dispatch == nil || review.Number < 1 || review.Number > st.Dispatch.Limits.Assessments || (review.Verdict == "" && review.Candidate != st.Candidate.Commit) || (st.Phase == "changes-requested" && review.Candidate != st.Candidate.Commit) || !isDigest(review.ScopeSHA256) || !namePattern.MatchString(review.AttemptID) || len(review.ThreadID) > 256 || len(review.TurnID) > 256 {
@@ -54,6 +60,38 @@ func (s *Store) validateState(st state, id string) error {
 		}
 		if (review.Verdict != "") != st.FinalReviews[review.Number] {
 			return fmt.Errorf("active review finalization differs from verdict")
+		}
+	}
+	if st.Stop != nil {
+		stop := st.Stop
+		if st.Dispatch == nil || (stop.Role != "reagent" && stop.Role != "iragent") || stop.ThreadID == "" || st.RoleIDs[stop.Role] != stop.ThreadID || stop.AttemptID == "" || (stop.Status != "requested" && stop.Status != "stopped_safely" && stop.Status != "stopped_abnormally") || len(stop.Problem) > 1024 || len(stop.Owned) > 1024 || len(stop.Handles) > 1024 {
+			return fmt.Errorf("active state has malformed stop binding")
+		}
+		found := false
+		for _, attempt := range st.Dispatch.Attempts {
+			if attempt.ID == stop.AttemptID && string(attempt.Binding.Role) == stop.Role {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("stop lacks a bound dispatch")
+		}
+	}
+	if len(st.StopHistory) > 0 && (st.Dispatch == nil || len(st.StopHistory) > st.Dispatch.Limits.Dispatches) {
+		return fmt.Errorf("active stop history exceeds dispatch bound")
+	}
+	for _, stopped := range st.StopHistory {
+		if stopped.Status != "stopped_safely" || stopped.AttemptID == "" || stopped.ThreadID == "" || (stopped.Role != "reagent" && stopped.Role != "iragent") {
+			return fmt.Errorf("active stop history has invalid evidence")
+		}
+		bound := false
+		for _, attempt := range st.Dispatch.Attempts {
+			if attempt.ID == stopped.AttemptID && attempt.ThreadID == stopped.ThreadID && string(attempt.Binding.Role) == stopped.Role && (attempt.Status == "completed" || attempt.Status == "reconciled" || attempt.Status == "failed") {
+				bound = true
+			}
+		}
+		if !bound {
+			return fmt.Errorf("active stop history lacks a reconciled dispatch")
 		}
 	}
 	if st.Dispatch != nil {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gopher-launch/concoct/internal/dispatch"
+	"github.com/gopher-launch/concoct/internal/stop"
 )
 
 const (
@@ -59,6 +60,11 @@ type Candidate struct {
 	TurnID                       string
 }
 
+type CandidateFreezeIntent struct {
+	TurnID, CheckpointSHA256, PriorCommit string
+	ChangedPaths, GeneratedOutputs        []string
+}
+
 // PendingReview binds one independent assessment to immutable candidate
 // source, agreed scope and one reserved dispatch.
 type PendingReview struct {
@@ -66,6 +72,14 @@ type PendingReview struct {
 	Candidate, ScopeSHA256      string
 	AttemptID, ThreadID, TurnID string
 	Verdict                     string
+}
+
+type StopRecord struct {
+	Role, ThreadID, TurnID, AttemptID string
+	Status, Problem                   string
+	ObservedStatus, ObservedFinalText string
+	Owned                             []stop.Identity
+	Handles                           []string
 }
 
 type Snapshot struct {
@@ -89,7 +103,10 @@ type Snapshot struct {
 	Counters       map[string]int
 	Dispatch       *dispatch.State
 	Candidate      *Candidate
+	FreezeIntent   *CandidateFreezeIntent
 	Review         *PendingReview
+	Stop           *StopRecord
+	StopHistory    []StopRecord
 }
 
 type pointer struct {
@@ -114,7 +131,10 @@ type state struct {
 	Pending                                        *pendingWrite
 	Dispatch                                       *dispatch.State
 	Candidate                                      *Candidate
+	FreezeIntent                                   *CandidateFreezeIntent
 	Review                                         *PendingReview
+	Stop                                           *StopRecord
+	StopHistory                                    []StopRecord
 }
 
 type startIntent struct {
@@ -170,10 +190,23 @@ func (s *Store) Status() (Snapshot, error) {
 		copy.GeneratedOutputs = append([]string(nil), st.Candidate.GeneratedOutputs...)
 		snapshot.Candidate = &copy
 	}
+	if st.FreezeIntent != nil {
+		copy := *st.FreezeIntent
+		copy.ChangedPaths = append([]string(nil), copy.ChangedPaths...)
+		copy.GeneratedOutputs = append([]string(nil), copy.GeneratedOutputs...)
+		snapshot.FreezeIntent = &copy
+	}
 	if st.Review != nil {
 		copy := *st.Review
 		snapshot.Review = &copy
 	}
+	if st.Stop != nil {
+		copy := *st.Stop
+		copy.Owned = append([]stop.Identity(nil), copy.Owned...)
+		copy.Handles = append([]string(nil), copy.Handles...)
+		snapshot.Stop = &copy
+	}
+	snapshot.StopHistory = append([]StopRecord(nil), st.StopHistory...)
 	return snapshot, nil
 }
 
@@ -375,7 +408,7 @@ func (o *Owner) SaveCheckpoint(content string) error {
 	if err != nil {
 		return err
 	}
-	if st.Candidate != nil && st.Phase != "correcting" {
+	if st.FreezeIntent != nil || (st.Candidate != nil && st.Phase != "correcting") {
 		return fmt.Errorf("frozen candidate checkpoint is immutable")
 	}
 	old, err := o.readBoundFile(st, "evidence/task.md")
@@ -420,6 +453,9 @@ func (o *Owner) FreezeCandidate(candidate Candidate) error {
 	if st.TaskID == "" || (st.Phase != "engineering" && st.Phase != "correcting") || st.Hold != "" || (st.Candidate != nil && (st.Phase != "correcting" || st.Review == nil || st.Review.Verdict != "changes_requested" || st.Candidate.Commit == candidate.Commit)) {
 		return fmt.Errorf("run is not ready for candidate freeze")
 	}
+	if st.FreezeIntent == nil || st.FreezeIntent.TurnID != candidate.TurnID || st.FreezeIntent.CheckpointSHA256 != candidate.CheckpointSHA256 || !slices.Equal(st.FreezeIntent.ChangedPaths, candidate.ChangedPaths) || !slices.Equal(st.FreezeIntent.GeneratedOutputs, candidate.GeneratedOutputs) {
+		return fmt.Errorf("candidate freeze differs from durable intent")
+	}
 	if st.Dispatch == nil || len(st.Dispatch.Attempts) == 0 {
 		return fmt.Errorf("candidate has no recorded dispatch")
 	}
@@ -457,6 +493,7 @@ func (o *Owner) FreezeCandidate(candidate Candidate) error {
 	copy.ChangedPaths = append([]string(nil), candidate.ChangedPaths...)
 	copy.GeneratedOutputs = append([]string(nil), candidate.GeneratedOutputs...)
 	st.Candidate = &copy
+	st.FreezeIntent = nil
 	st.Phase = "ready-for-review"
 	st.Revision++
 	return writeJSON(o.store.statePath(st.RunID), st)
@@ -566,6 +603,35 @@ func (o *Owner) CheckReceipt(name string, content []byte) (bool, error) {
 		return false, fmt.Errorf("receipt %s already has different content", name)
 	}
 	return true, nil
+}
+
+// VerifiedTurnReceipt finds a committed host callback for exact turn and
+// content, including after a restart. Pending evidence alone is insufficient.
+func (o *Owner) VerifiedTurnReceipt(kind, turnID, content string) (bool, error) {
+	if (kind != "checkpoint" && kind != "assessment") || turnID == "" {
+		return false, fmt.Errorf("invalid turn receipt query")
+	}
+	st, err := o.currentState()
+	if err != nil {
+		return false, err
+	}
+	for path := range st.Digests {
+		if !strings.HasPrefix(path, "receipts/"+kind+"-") || !strings.HasSuffix(path, ".json") {
+			continue
+		}
+		body, err := o.readBoundFile(st, path)
+		if err != nil {
+			return false, err
+		}
+		var receipt struct{ CallID, TurnID, Content string }
+		if err := json.Unmarshal(body, &receipt); err != nil {
+			return false, err
+		}
+		if receipt.TurnID == turnID && strings.TrimSpace(receipt.Content) == strings.TrimSpace(content) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // RecordReceipt creates a bounded JSON receipt once. Repeating identical data

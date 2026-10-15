@@ -116,6 +116,15 @@ type Process struct {
 	input io.Closer
 }
 
+// PID identifies this dedicated Concoct app-server process. Provider terminal
+// handles are unrelated and must never be passed to host process controls.
+func (p *Process) PID() int {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}
+
 func (p *Process) Close() error {
 	if p == nil {
 		return nil

@@ -192,6 +192,46 @@ func (c *Client) ReadThread(ctx context.Context, id string) (json.RawMessage, er
 	return reply.Thread, nil
 }
 
+// ObservedTurn is the provider's currently visible terminal evidence. It does
+// not imply that host callbacks or source mutations were fully acknowledged.
+type ObservedTurn struct {
+	ID, Status, FinalText string
+}
+
+func (c *Client) ReadTurn(ctx context.Context, threadID, turnID string) (ObservedTurn, error) {
+	if turnID == "" {
+		return ObservedTurn{}, fmt.Errorf("turn ID is required")
+	}
+	body, err := c.ReadThread(ctx, threadID)
+	if err != nil {
+		return ObservedTurn{}, err
+	}
+	var thread struct {
+		ID    string `json:"id"`
+		Turns []struct {
+			ID     string                               `json:"id"`
+			Status string                               `json:"status"`
+			Items  []struct{ Type, Text, Phase string } `json:"items"`
+		} `json:"turns"`
+	}
+	if err := json.Unmarshal(body, &thread); err != nil || thread.ID != threadID {
+		return ObservedTurn{}, fmt.Errorf("thread/read identity or turn data invalid: %v", err)
+	}
+	for _, turn := range thread.Turns {
+		if turn.ID != turnID {
+			continue
+		}
+		observed := ObservedTurn{ID: turn.ID, Status: turn.Status}
+		for _, item := range turn.Items {
+			if item.Type == "agentMessage" && (item.Phase == "final" || item.Phase == "") {
+				observed.FinalText = item.Text
+			}
+		}
+		return observed, nil
+	}
+	return ObservedTurn{}, fmt.Errorf("turn %s is not visible in thread %s", turnID, threadID)
+}
+
 func (c *Client) Interrupt(ctx context.Context, threadID, turnID string) error {
 	if threadID == "" || turnID == "" {
 		return fmt.Errorf("thread and turn IDs are required")
@@ -258,3 +298,8 @@ func (c *Client) CleanBackgroundTerminals(ctx context.Context, threadID string) 
 }
 
 func IsProvisionalThread(err error) bool { return errors.Is(err, ErrProvisionalThread) }
+
+func IsMissingRollout(err error) bool {
+	var providerErr *rpcError
+	return errors.As(err, &providerErr) && providerErr.Code == -32000 && strings.TrimSpace(providerErr.Message) == "no rollout found"
+}

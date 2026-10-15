@@ -158,12 +158,18 @@ func Receipt(usage *codexapp.Usage) *TokenReceipt {
 }
 
 type Attempt struct {
-	ID         string        `json:"id"`
-	Binding    Binding       `json:"binding"`
-	ReservedAt time.Time     `json:"reserved_at"`
-	Status     string        `json:"status"` // reserved, uncertain, completed, failed, reconciled
-	Tokens     *TokenReceipt `json:"tokens,omitempty"`
-	Resolution string        `json:"resolution,omitempty"`
+	ID            string        `json:"id"`
+	Binding       Binding       `json:"binding"`
+	ThreadID      string        `json:"thread_id,omitempty"`
+	TurnID        string        `json:"turn_id,omitempty"`
+	TurnRequested bool          `json:"turn_requested,omitempty"`
+	FinalStatus   string        `json:"final_status,omitempty"`
+	FinalText     string        `json:"final_text,omitempty"`
+	Applied       bool          `json:"applied,omitempty"`
+	ReservedAt    time.Time     `json:"reserved_at"`
+	Status        string        `json:"status"` // reserved, uncertain, completed, failed, reconciled
+	Tokens        *TokenReceipt `json:"tokens,omitempty"`
+	Resolution    string        `json:"resolution,omitempty"`
 }
 
 type Authorization struct {
@@ -217,6 +223,12 @@ func (s State) Validate() error {
 		if attempt.ID == "" || ids[attempt.ID] || attempt.ReservedAt.IsZero() {
 			return fmt.Errorf("invalid persisted dispatch attempt")
 		}
+		if len(attempt.ThreadID) > 256 || len(attempt.TurnID) > 256 || (attempt.TurnID != "" && attempt.ThreadID == "") || (attempt.TurnRequested && attempt.ThreadID == "") || len(attempt.FinalText) > 65536 || len(attempt.FinalStatus) > 32 {
+			return fmt.Errorf("invalid persisted provider turn binding")
+		}
+		if attempt.Applied && (attempt.Status != "completed" || attempt.FinalStatus != "completed") {
+			return fmt.Errorf("applied dispatch lacks completed result")
+		}
 		ids[attempt.ID] = true
 		if err := attempt.Binding.validate(); err != nil {
 			return err
@@ -254,7 +266,7 @@ func (s State) Validate() error {
 		assessedAttempts[assessment.AttemptID] = true
 		found := false
 		for _, attempt := range s.Attempts {
-			if attempt.ID == assessment.AttemptID && attempt.Binding.Activity == Review && attempt.Binding.Candidate == assessment.Candidate && attempt.Status == "completed" {
+			if attempt.ID == assessment.AttemptID && (attempt.Binding.Activity == Review || (attempt.Binding.Activity == Recovery && attempt.Binding.Role == Iragent)) && attempt.Binding.Candidate == assessment.Candidate && attempt.Status == "completed" {
 				found = true
 				break
 			}
@@ -282,6 +294,96 @@ func (s State) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (s *State) BindThread(id, threadID string) error {
+	if threadID == "" || len(threadID) > 256 {
+		return fmt.Errorf("invalid dispatch thread identity")
+	}
+	for i := range s.Attempts {
+		a := &s.Attempts[i]
+		if a.ID != id {
+			continue
+		}
+		if a.Status != "reserved" || (a.ThreadID != "" && a.ThreadID != threadID) {
+			return fmt.Errorf("dispatch thread binding changed")
+		}
+		a.ThreadID = threadID
+		return nil
+	}
+	return fmt.Errorf("unknown dispatch attempt %q", id)
+}
+
+func (s *State) ObserveTurn(id, turnID string) error {
+	if turnID == "" || len(turnID) > 256 {
+		return fmt.Errorf("invalid dispatch turn identity")
+	}
+	for i := range s.Attempts {
+		a := &s.Attempts[i]
+		if a.ID != id {
+			continue
+		}
+		if a.ThreadID == "" || (a.Status != "reserved" && a.Status != "uncertain") || (a.TurnID != "" && a.TurnID != turnID) {
+			return fmt.Errorf("dispatch turn binding changed")
+		}
+		a.TurnID = turnID
+		return nil
+	}
+	return fmt.Errorf("unknown dispatch attempt %q", id)
+}
+
+func (s *State) MarkTurnRequested(id string) error {
+	for i := range s.Attempts {
+		a := &s.Attempts[i]
+		if a.ID != id {
+			continue
+		}
+		if a.ThreadID == "" || a.Status != "reserved" || a.TurnRequested {
+			return fmt.Errorf("dispatch turn request is not ready")
+		}
+		a.TurnRequested = true
+		return nil
+	}
+	return fmt.Errorf("unknown dispatch attempt %q", id)
+}
+
+func (s *State) RecordOutcome(id, threadID, turnID, status, finalText string) error {
+	if threadID == "" || turnID == "" || (status != "completed" && status != "interrupted" && status != "failed") || len(finalText) > 65536 {
+		return fmt.Errorf("invalid provider outcome")
+	}
+	for i := range s.Attempts {
+		a := &s.Attempts[i]
+		if a.ID != id {
+			continue
+		}
+		if a.ThreadID != threadID || !a.TurnRequested || (a.TurnID != "" && a.TurnID != turnID) {
+			return fmt.Errorf("provider outcome differs from dispatch")
+		}
+		if a.FinalStatus != "" && (a.FinalStatus != status || a.FinalText != finalText) {
+			return fmt.Errorf("provider outcome changed")
+		}
+		a.TurnID, a.FinalStatus, a.FinalText = turnID, status, finalText
+		return nil
+	}
+	return fmt.Errorf("unknown dispatch attempt %q", id)
+}
+
+func (s *State) MarkApplied(id string) error {
+	for i := range s.Attempts {
+		a := &s.Attempts[i]
+		if a.ID != id {
+			continue
+		}
+		if a.Applied {
+			return nil
+		}
+		if a.Status != "completed" || a.FinalStatus != "completed" {
+			return fmt.Errorf("dispatch result is not completed")
+		}
+		a.Applied = true
+		return nil
+	}
+	return fmt.Errorf("unknown dispatch attempt %q", id)
 }
 
 func NewState(profiles map[Role]codexapp.RoleSettings, limits Limits, gates GatePolicy, quota QuotaPolicy) (State, error) {
@@ -498,6 +600,50 @@ func (s *State) Reconcile(id, evidence string) error {
 	return fmt.Errorf("no uncertain dispatch %q", id)
 }
 
+func (s *State) MarkUncertain(id string) error {
+	for i := range s.Attempts {
+		a := &s.Attempts[i]
+		if a.ID != id {
+			continue
+		}
+		if a.Status == "uncertain" {
+			return nil
+		}
+		if a.Status != "reserved" {
+			return fmt.Errorf("dispatch is not unresolved")
+		}
+		a.Status = "uncertain"
+		return nil
+	}
+	return fmt.Errorf("unknown dispatch attempt %q", id)
+}
+
+// ReconcileCompleted consumes one provider-observed completed turn. The
+// caller must verify its exact thread/turn, callback receipts and source.
+func (s *State) ReconcileCompleted(id, threadID, turnID, evidence string) error {
+	if evidence == "" || len(evidence) > 1024 || threadID == "" || turnID == "" {
+		return fmt.Errorf("completed reconciliation lacks exact evidence")
+	}
+	for i := range s.Attempts {
+		a := &s.Attempts[i]
+		if a.ID != id {
+			continue
+		}
+		if a.ThreadID != threadID || a.TurnID != turnID || !a.TurnRequested {
+			return fmt.Errorf("completed turn differs from reserved dispatch")
+		}
+		if a.Status == "completed" {
+			return nil
+		}
+		if a.Status != "reserved" && a.Status != "uncertain" {
+			return fmt.Errorf("dispatch cannot be completed twice")
+		}
+		a.Status, a.Resolution = "completed", evidence
+		return nil
+	}
+	return fmt.Errorf("unknown dispatch attempt %q", id)
+}
+
 func (s *State) RecordAssessment(id, attemptID string) error {
 	if id == "" || len(id) > 128 {
 		return fmt.Errorf("invalid assessment ID")
@@ -517,7 +663,7 @@ func (s *State) RecordAssessment(id, attemptID string) error {
 		return fmt.Errorf("independent assessment allowance exhausted")
 	}
 	for _, attempt := range s.Attempts {
-		if attempt.ID == attemptID && attempt.Binding.Activity == Review && attempt.Status == "completed" {
+		if attempt.ID == attemptID && (attempt.Binding.Activity == Review || (attempt.Binding.Activity == Recovery && attempt.Binding.Role == Iragent)) && attempt.Status == "completed" {
 			s.Assessments = append(s.Assessments, Assessment{ID: id, AttemptID: attemptID, Candidate: attempt.Binding.Candidate})
 			return nil
 		}

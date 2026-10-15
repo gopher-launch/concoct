@@ -82,6 +82,45 @@ func (o *Owner) BeginReview(attemptID string) (PendingReview, error) {
 	return review, nil
 }
 
+// RenewReviewAttempt keeps the interrupted assessment number and evidence,
+// while binding one new recovery dispatch after the old attempt is resolved.
+func (o *Owner) RenewReviewAttempt(attemptID string) error {
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	if st.Review == nil || st.Review.Verdict != "" || st.Phase != "reviewing" || st.Dispatch == nil || !namePattern.MatchString(attemptID) {
+		return fmt.Errorf("no pending assessment for recovery")
+	}
+	old := st.Review.AttemptID
+	resolved := false
+	for _, attempt := range st.Dispatch.Attempts {
+		if attempt.ID == old && (attempt.Status == "reconciled" || attempt.Status == "failed") {
+			resolved = true
+		}
+	}
+	if !resolved {
+		return fmt.Errorf("prior review attempt is not reconciled")
+	}
+	st.Review.AttemptID = attemptID
+	st.Hold, st.PendingRequest = "", ""
+	st.Revision++
+	return writeJSON(o.store.statePath(st.RunID), st)
+}
+
+func (o *Owner) ReplaceLostReviewThread(number int, priorID, nextID string) error {
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	if st.Review == nil || st.Review.Number != number || st.Review.Verdict != "" || st.Review.ThreadID != priorID || st.RoleIDs["iragent"] != priorID || nextID == "" || nextID == priorID || nextID == st.RoleIDs["reagent"] {
+		return fmt.Errorf("review thread replacement is not bound")
+	}
+	st.Review.ThreadID, st.RoleIDs["iragent"] = nextID, nextID
+	st.Revision++
+	return writeJSON(o.store.statePath(st.RunID), st)
+}
+
 // BeginCorrection retains the reviewed candidate and findings while opening
 // the checkpoint for a new revision. Repeated calls do not reset evidence.
 func (o *Owner) BeginCorrection() error {

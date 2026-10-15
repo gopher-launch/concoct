@@ -17,6 +17,7 @@ import (
 	"github.com/gopher-launch/concoct/internal/activework"
 	"github.com/gopher-launch/concoct/internal/codexapp"
 	"github.com/gopher-launch/concoct/internal/dispatch"
+	"github.com/gopher-launch/concoct/internal/turnstop"
 )
 
 type Agent interface {
@@ -30,8 +31,11 @@ type resumer interface {
 }
 
 type Config struct {
-	Agent   Agent
-	OnEvent func(codexapp.Event)
+	Agent              Agent
+	OnEvent            func(codexapp.Event)
+	StopTrigger        func(codexapp.Event) bool
+	RecoveryEpisode    string // nonempty only for a reconciled interrupted assessment
+	AllowFreshRecovery bool
 }
 
 type Result struct {
@@ -92,7 +96,11 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		}
 		return holdRecovery(owner, store, &result, "prior review dispatch requires reconciliation", fmt.Errorf("review attempt %s is %s", prior.ID, prior.Status))
 	}
-	decision, err := owner.ReserveDispatch(binding.AttemptID, dispatch.Binding{TaskID: snapshot.TaskID, Role: dispatch.Iragent, Activity: dispatch.Review, Candidate: binding.Candidate}, time.Now().UTC())
+	activity := dispatch.Review
+	if cfg.RecoveryEpisode != "" {
+		activity = dispatch.Recovery
+	}
+	decision, err := owner.ReserveDispatch(binding.AttemptID, dispatch.Binding{TaskID: snapshot.TaskID, Role: dispatch.Iragent, Activity: activity, Candidate: binding.Candidate, Episode: cfg.RecoveryEpisode}, time.Now().UTC())
 	if err != nil {
 		if strings.Contains(err.Error(), "allowance exhausted") {
 			return holdLimit(owner, store, &result, err)
@@ -116,8 +124,14 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		if err := cfg.Agent.Idle(ctx, snapshot.RoleIDs["iragent"]); err != nil {
 			return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("prior reviewer is not idle: %w", err))
 		}
-		if err := advanceCheckout(store, snapshot, result.Checkout); err != nil {
-			return failLaunch(owner, store, &result, binding.AttemptID, err)
+		head, headErr := gitOutput(result.Checkout, "rev-parse", "HEAD")
+		if headErr != nil {
+			return failLaunch(owner, store, &result, binding.AttemptID, headErr)
+		}
+		if head != binding.Candidate {
+			if err := advanceCheckout(store, snapshot, result.Checkout); err != nil {
+				return failLaunch(owner, store, &result, binding.AttemptID, err)
+			}
 		}
 	} else if err := prepareCheckout(store, snapshot, result.Checkout); err != nil {
 		return failLaunch(owner, store, &result, binding.AttemptID, err)
@@ -130,15 +144,23 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("reviewer settings are not explicitly resolved for full access"))
 	}
 	var thread codexapp.Thread
-	if binding.Number == 1 {
+	if binding.ThreadID == "" && binding.Number == 1 {
 		thread, err = cfg.Agent.StartThread(ctx, result.Checkout, settings, toolSpecs())
 	} else {
 		resuming, ok := cfg.Agent.(resumer)
 		if !ok || snapshot.RoleIDs["iragent"] == "" {
 			return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("existing reviewer thread cannot be resumed"))
 		}
+		replaced := false
 		thread, err = resuming.ResumeThread(ctx, snapshot.RoleIDs["iragent"], true, settings)
-		if err == nil && thread.ID != snapshot.RoleIDs["iragent"] {
+		if err != nil && cfg.AllowFreshRecovery && codexapp.IsMissingRollout(err) {
+			thread, err = cfg.Agent.StartThread(ctx, result.Checkout, settings, toolSpecs())
+			if err == nil {
+				err = owner.ReplaceLostReviewThread(binding.Number, snapshot.RoleIDs["iragent"], thread.ID)
+				replaced = err == nil
+			}
+		}
+		if err == nil && thread.ID != snapshot.RoleIDs["iragent"] && !replaced {
 			err = fmt.Errorf("resumed reviewer identity changed")
 		}
 	}
@@ -151,12 +173,20 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	if err := owner.BindReviewThread(binding.Number, thread.ID); err != nil {
 		return failLaunch(owner, store, &result, binding.AttemptID, err)
 	}
+	if err := owner.BindDispatchThread(binding.AttemptID, thread.ID); err != nil {
+		return failLaunch(owner, store, &result, binding.AttemptID, err)
+	}
 	task, err := owner.TaskEvidence()
 	if err != nil {
 		return failLaunch(owner, store, &result, binding.AttemptID, err)
 	}
 	session := &hostSession{owner: owner, review: binding, threadID: thread.ID}
 	reviewPrompt := prompt(snapshot, binding, task, result.Checkout)
+	if binding.ThreadID != "" {
+		if pending, readErr := owner.ReviewEvidence(binding.Number); readErr == nil {
+			reviewPrompt += "\n\nPending assessment from this same review number:\n" + pending
+		}
+	}
 	if binding.Number > 1 {
 		previous, priorErr := owner.ReviewEvidence(binding.Number - 1)
 		if priorErr != nil {
@@ -164,12 +194,47 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		}
 		reviewPrompt += fmt.Sprintf("\n\nPrior completed assessment and findings:\n%s\nCorrected candidate is %s; inspect its exact diff from prior candidate and reassess all criteria.\n", previous, binding.Candidate)
 	}
-	outcome, turnErr := cfg.Agent.RunTurn(ctx, thread.ID, reviewPrompt, settings, session.handle, cfg.OnEvent)
+	if err := owner.MarkTurnRequested(binding.AttemptID); err != nil {
+		return result, err
+	}
+	turnCtx, cancelTurn, stopEvent := turnstop.Context(ctx, snapshot.Dispatch.WatchdogElapsed, snapshot.Dispatch.WatchdogStall, cfg.StopTrigger)
+	defer cancelTurn()
+	var observeErr error
+	outcome, turnErr := cfg.Agent.RunTurn(turnCtx, thread.ID, reviewPrompt, settings, session.handle, func(event codexapp.Event) {
+		stopEvent(event)
+		if event.Kind == "turn/started" && event.TurnID != "" && observeErr == nil {
+			observeErr = owner.ObserveDispatchTurn(binding.AttemptID, event.TurnID)
+			if observeErr != nil {
+				cancelTurn()
+			}
+		}
+		if cfg.OnEvent != nil {
+			cfg.OnEvent(event)
+		}
+	})
+	if outcome.TurnID != "" && observeErr == nil {
+		observeErr = owner.ObserveDispatchTurn(binding.AttemptID, outcome.TurnID)
+	}
+	if outcome.TurnID != "" && outcome.Status != "" && observeErr == nil {
+		if outcome.ThreadID != "" && outcome.ThreadID != thread.ID {
+			observeErr = fmt.Errorf("provider outcome thread differs from reviewer binding")
+		} else {
+			observeErr = owner.RecordDispatchOutcome(binding.AttemptID, thread.ID, outcome.TurnID, outcome.Status, outcome.FinalText)
+		}
+	}
+	if observeErr != nil && turnErr == nil {
+		turnErr = observeErr
+	}
 	finish := "completed"
 	if turnErr != nil || outcome.Status != "completed" {
 		finish = "uncertain"
 	}
 	if err := owner.FinishDispatch(binding.AttemptID, finish, dispatch.Receipt(outcome.Usage)); err != nil {
+		return result, err
+	}
+	if turnCtx.Err() != nil && turnErr != nil {
+		result.Status, err = turnstop.Handle(owner, cfg.Agent, "iragent", thread.ID, outcome.TurnID, binding.AttemptID)
+		result.Snapshot, _ = store.Status()
 		return result, err
 	}
 	if turnErr != nil || outcome.Status != "completed" {
@@ -192,6 +257,9 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		if err := owner.HoldReview(verdict.Summary); err != nil {
 			return result, err
 		}
+		if err := owner.MarkDispatchApplied(binding.AttemptID); err != nil {
+			return result, err
+		}
 		result.Status = "decision_required"
 		result.Snapshot, err = store.Status()
 		return result, err
@@ -207,6 +275,9 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	}
 	if err := owner.FinishAssessment(binding.Number, verdict.Disposition, outcome.TurnID); err != nil {
 		return holdRecovery(owner, store, &result, "review verdict could not be recorded", err)
+	}
+	if err := owner.MarkDispatchApplied(binding.AttemptID); err != nil {
+		return result, err
 	}
 	result.Status = verdict.Disposition
 	result.Snapshot, err = store.Status()
@@ -276,6 +347,60 @@ func holdLimit(owner *activework.Owner, store *activework.Store, result *Result,
 
 func prompt(snapshot activework.Snapshot, binding activework.PendingReview, task, checkout string) string {
 	return fmt.Sprintf("You are iragent, an independent reviewer. Follow AGENTS.md and current repository sources. Review the agreed task and frozen candidate without editing source, branch, index or untracked files. Your separate checkout is %s, pinned to candidate %s with tree %s. The parent baseline is %s; the agreed scope SHA-256 is %s. Assess all acceptance criteria and candidate verification evidence from the active task below. Inspect source and relevant design; do not read unrelated archives or run a separate task. Stream concise progress. Save a pending assessment with save_assessment before returning a structured JSON result. Include specific findings, evidence and checks. Return disposition approved only if the exact candidate meets the scope, changes_requested for actionable source findings, or decision_required for a genuine blocker. Provider completion alone does not approve the candidate. Do not integrate, push or publish.\n\nActive task and verification record:\n%s", checkout, binding.Candidate, snapshot.Candidate.Tree, snapshot.ParentCommit, binding.ScopeSHA256, task)
+}
+
+// ReconcileCompleted finalizes one provider-observed completed assessment
+// only when its exact callback receipt and frozen source still match.
+func ReconcileCompleted(owner *activework.Owner, store *activework.Store, observed codexapp.ObservedTurn) (Result, error) {
+	var result Result
+	snapshot, err := store.Status()
+	if err != nil {
+		return result, err
+	}
+	if snapshot.Review == nil || snapshot.Review.Verdict != "" || snapshot.Candidate == nil || snapshot.Review.Candidate != snapshot.Candidate.Commit || observed.ID == "" || observed.Status != "completed" {
+		return result, fmt.Errorf("no pending exact assessment to reconcile")
+	}
+	result.Checkout = filepath.Join(store.Root, "workspaces", snapshot.RunID+"-review")
+	if err := verifyCandidate(store, snapshot, result.Checkout, true); err != nil {
+		return result, err
+	}
+	verdict, err := codexapp.ParseRoleResult(observed.FinalText)
+	if err != nil || (verdict.Disposition != "approved" && verdict.Disposition != "changes_requested") {
+		return result, fmt.Errorf("completed reviewer has no actionable verdict: %v", err)
+	}
+	content, err := owner.ReviewEvidence(snapshot.Review.Number)
+	if err != nil {
+		return result, err
+	}
+	session := &hostSession{owner: owner, review: *snapshot.Review, threadID: snapshot.Review.ThreadID, turnID: observed.ID, saved: true}
+	if !strings.HasPrefix(content, session.header()) {
+		return result, fmt.Errorf("pending assessment belongs to another candidate or scope")
+	}
+	body := strings.TrimPrefix(content, session.header())
+	if suffix := fmt.Sprintf("\n\nVerdict: %s\nReviewer turn: %s\n", verdict.Disposition, observed.ID); strings.HasSuffix(body, suffix) {
+		body = strings.TrimSuffix(body, suffix)
+	}
+	receipted, err := owner.VerifiedTurnReceipt("assessment", observed.ID, strings.TrimSpace(body))
+	if err != nil || !receipted {
+		return result, fmt.Errorf("completed assessment lacks exact host receipt: %v", err)
+	}
+	if err := owner.ReconcileCompletedDispatch(snapshot.Review.AttemptID, snapshot.Review.ThreadID, observed.ID, "provider completed exact review turn"); err != nil {
+		return result, err
+	}
+	if !strings.HasSuffix(content, fmt.Sprintf("\nVerdict: %s\nReviewer turn: %s\n", verdict.Disposition, observed.ID)) {
+		if err := session.finalizeEvidence(verdict.Disposition, observed.ID); err != nil {
+			return result, err
+		}
+	}
+	if err := owner.FinishAssessment(snapshot.Review.Number, verdict.Disposition, observed.ID); err != nil {
+		return result, err
+	}
+	if err := owner.MarkDispatchApplied(snapshot.Review.AttemptID); err != nil {
+		return result, err
+	}
+	result.Status = verdict.Disposition
+	result.Snapshot, err = store.Status()
+	return result, err
 }
 
 func toolSpecs() []codexapp.ToolSpec {

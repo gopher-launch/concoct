@@ -59,7 +59,7 @@ func (s *hostSession) handle(_ context.Context, call codexapp.ToolCall) (codexap
 			return codexapp.PreparedToolResponse{}, err
 		}
 		return codexapp.PreparedToolResponse{Success: true, Text: "Checkpoint saved.", Commit: func(context.Context) error {
-			return s.checkpoint(call.CallID, args.Content)
+			return s.checkpoint(call.CallID, call.TurnID, args.Content)
 		}}, nil
 	default:
 		return codexapp.PreparedToolResponse{}, fmt.Errorf("unsupported selection tool %q", call.Tool)
@@ -115,13 +115,13 @@ func (s *hostSession) claim(callID string, args claimArguments) error {
 	return nil
 }
 
-func (s *hostSession) checkpoint(callID, content string) error {
+func (s *hostSession) checkpoint(callID, turnID, content string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.taskID == "" {
 		return fmt.Errorf("checkpoint requires an acknowledged task claim")
 	}
-	receipt, name, err := callReceipt("checkpoint", callID, content)
+	receipt, name, err := callReceipt("checkpoint", callID, struct{ CallID, TurnID, Content string }{callID, turnID, content})
 	if err != nil {
 		return err
 	}

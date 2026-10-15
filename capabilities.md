@@ -27,7 +27,7 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - A Linux stdio client checks for the locally verified Codex 0.147.0 runner, negotiates experimental API support and reads model catalog and rate-limit snapshots.
 - Thread start/resume applies explicit role settings and validates effective model, effort, full-access sandbox and approval policy. Zero-turn thread IDs remain provisional.
 - Turn execution streams progress and terminal results, retains observed token receipts, and handles bound host callbacks only after validating the response and committing its receipt.
-- Turn interruption and background-terminal list, terminate and clean methods are exposed. Process cessation verification and stop policy belong to later controller work.
+- Turn interruption and background-terminal list, terminate and clean methods are exposed. CON-051 binds these controls to exact owned-process cessation checks.
 
 ## CON-046 — Dispatch governance
 
@@ -53,7 +53,7 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 
 - A frozen candidate can flow directly into a candidate-bound iragent dispatch under the recorded policy. The reviewer gets a separate thread with explicit resolved settings and a detached checkout pinned to the candidate. The host instructions require source-read-only review and supply the agreed task, verification evidence, candidate identity and reviewer responsibility.
 - The active record binds review 01 to the candidate and agreed scope digest. Pending assessment text and the same review number survive interrupted or uncertain turns. Source or branch drift, unresolved tool activity, an invalid result or missing assessment cannot produce approval.
-- A completed approved or changes-requested result finalizes one external review-01.md with candidate, scope and verdict bindings and consumes one assessment. A genuine blocker retains the pending review. Configured authorization can pause the initial dispatch. Interrupted-turn reconciliation remains later work.
+- A completed approved or changes-requested result finalizes one external review-01.md with candidate, scope and verdict bindings and consumes one assessment. A genuine blocker retains the pending review. Configured authorization can pause the initial dispatch. CON-051 reconciles interrupted and observed completed turns before continuation.
 
 ## CON-050 — Internal review correction loop
 
@@ -61,4 +61,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Once the prior reviewer is idle, its clean detached checkout advances from the assessed candidate to the corrected commit. The same iragent thread receives the revised identity, prior findings and current validation evidence; completed reassessments receive successive review numbers.
 - Recorded dispatch and completed-assessment limits govern each cycle. An exhausted allowance or uncertain turn retains the current task, candidate and findings with a continuation request. Routine correction and reassessment use the recorded role settings and policy without automatic escalation.
 
-The CLI workflow, interrupted-turn reconciliation, threshold-triggered interruption and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.
+## CON-051 — Stop, reconcile and resume active work
+
+- Internal reagent and reviewer turns persist dispatch intent, thread and turn identities, callback receipts and observed outcomes. Candidate freeze has a durable pre-commit intent. Restart inspects the exact pending turn and applies verified completion once; a missing start acknowledgment or rollout holds work for reconciliation.
+- Cancellation and configured stop triggers request provider interruption, list/terminate/clean the bound thread's opaque background-terminal handles, then require exact owned Linux process identities to cease through a stable grace interval. Unrelated processes are excluded; failed or uncertain cleanup retains an abnormal stop record. Automatic host signaling is disabled.
+- The active controller continues the bound task and role with recorded model, effort and full-access settings. Verified interrupted turns consume a bounded recovery dispatch without resetting prior consumption. Known zero-turn threads may be recreated; lost sessions reconstruct from current active task, review and source evidence. The controller does not select new work while an active run awaits reconciliation.
+
+The CLI workflow, operator answers/defer, broader threshold intervention and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.

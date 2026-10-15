@@ -69,6 +69,19 @@ func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store
 	if err := validateReconciliation(project, session.workspace, entry); err != nil {
 		return candidate, err
 	}
+	generated := slices.Clone(checkpoint.GeneratedOutputs)
+	sort.Strings(generated)
+	prior := ""
+	snapshot, err := store.Status()
+	if err != nil {
+		return candidate, err
+	}
+	if snapshot.Candidate != nil {
+		prior = snapshot.Candidate.Commit
+	}
+	if err := owner.BeginCandidateFreeze(activework.CandidateFreezeIntent{TurnID: outcome.TurnID, CheckpointSHA256: sha256Hex([]byte(checkpointText)), PriorCommit: prior, ChangedPaths: changed, GeneratedOutputs: generated}); err != nil {
+		return candidate, err
+	}
 	stagedTree, err := stageSource(session.workspace, untracked, changed)
 	if err != nil {
 		return candidate, err
@@ -123,8 +136,6 @@ func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store
 	if err != nil {
 		return candidate, err
 	}
-	generated := slices.Clone(checkpoint.GeneratedOutputs)
-	sort.Strings(generated)
 	candidate = activework.Candidate{BaselineCommit: parent.Commit, BaselineTree: baselineTree, Commit: commit, Tree: tree, DiffSHA256: sha256Hex(diff), CheckpointSHA256: sha256Hex([]byte(checkpointText)), ChangedPaths: finalPaths, GeneratedOutputs: generated, TurnID: outcome.TurnID}
 	if err := owner.FreezeCandidate(candidate); err != nil {
 		return activework.Candidate{}, err

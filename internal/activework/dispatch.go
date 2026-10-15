@@ -92,12 +92,89 @@ func (o *Owner) FinishDispatch(id, status string, tokens *dispatch.TokenReceipt)
 	return o.saveDispatch(st, policy)
 }
 
+func (o *Owner) BindDispatchThread(id, threadID string) error {
+	st, policy, err := o.dispatchState()
+	if err != nil {
+		return err
+	}
+	if err := policy.BindThread(id, threadID); err != nil {
+		return err
+	}
+	return o.saveDispatch(st, policy)
+}
+
+func (o *Owner) ObserveDispatchTurn(id, turnID string) error {
+	st, policy, err := o.dispatchState()
+	if err != nil {
+		return err
+	}
+	if err := policy.ObserveTurn(id, turnID); err != nil {
+		return err
+	}
+	return o.saveDispatch(st, policy)
+}
+
+func (o *Owner) MarkTurnRequested(id string) error {
+	st, policy, err := o.dispatchState()
+	if err != nil {
+		return err
+	}
+	if err := policy.MarkTurnRequested(id); err != nil {
+		return err
+	}
+	return o.saveDispatch(st, policy)
+}
+
+func (o *Owner) RecordDispatchOutcome(id, threadID, turnID, status, finalText string) error {
+	st, policy, err := o.dispatchState()
+	if err != nil {
+		return err
+	}
+	if err := policy.RecordOutcome(id, threadID, turnID, status, finalText); err != nil {
+		return err
+	}
+	return o.saveDispatch(st, policy)
+}
+
+func (o *Owner) MarkDispatchApplied(id string) error {
+	st, policy, err := o.dispatchState()
+	if err != nil {
+		return err
+	}
+	if err := policy.MarkApplied(id); err != nil {
+		return err
+	}
+	return o.saveDispatch(st, policy)
+}
+
 func (o *Owner) ReconcileDispatch(id, evidence string) error {
 	st, policy, err := o.dispatchState()
 	if err != nil {
 		return err
 	}
 	if err := policy.Reconcile(id, evidence); err != nil {
+		return err
+	}
+	return o.saveDispatch(st, policy)
+}
+
+func (o *Owner) MarkDispatchUncertain(id string) error {
+	st, policy, err := o.dispatchState()
+	if err != nil {
+		return err
+	}
+	if err := policy.MarkUncertain(id); err != nil {
+		return err
+	}
+	return o.saveDispatch(st, policy)
+}
+
+func (o *Owner) ReconcileCompletedDispatch(id, threadID, turnID, evidence string) error {
+	st, policy, err := o.dispatchState()
+	if err != nil {
+		return err
+	}
+	if err := policy.ReconcileCompleted(id, threadID, turnID, evidence); err != nil {
 		return err
 	}
 	return o.saveDispatch(st, policy)

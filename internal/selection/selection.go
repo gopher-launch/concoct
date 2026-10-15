@@ -15,17 +15,19 @@ import (
 	"github.com/gopher-launch/concoct/internal/dispatch"
 	"github.com/gopher-launch/concoct/internal/review"
 	"github.com/gopher-launch/concoct/internal/roadmap"
+	"github.com/gopher-launch/concoct/internal/turnstop"
 )
 
 // Config contains explicit controller inputs; it never inherits an ambient
 // agent thread or inferred dispatch profile.
 type Config struct {
-	Repository string
-	Root       string
-	Policy     dispatch.State
-	Agent      Agent
-	Reviewer   review.Agent
-	OnEvent    func(codexapp.Event)
+	Repository  string
+	Root        string
+	Policy      dispatch.State
+	Agent       Agent
+	Reviewer    review.Agent
+	OnEvent     func(codexapp.Event)
+	StopTrigger func(codexapp.Event) bool
 	// GeneratedExclusions are explicit paths or patterns for build outputs.
 	GeneratedExclusions []string
 	// AcceptedUnavailable records operator acceptance of exact check commands.
@@ -124,14 +126,52 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 	if err := owner.UpdateOperational(activework.Operational{Phase: "selecting", RoleIDs: map[string]string{"reagent": thread.ID}, RoleSettings: map[string]string{"reagent-model": settings.Model, "reagent-effort": settings.Effort}}); err != nil {
 		return result, err
 	}
+	if err := owner.BindDispatchThread(attemptID, thread.ID); err != nil {
+		return result, err
+	}
 	session := &hostSession{owner: owner, store: store, project: project, workspace: workspace, parent: parent, existingBranches: existingBranches, threadID: thread.ID}
-	outcome, turnErr := cfg.Agent.RunTurn(ctx, thread.ID, selectionPrompt(project, parent, workspace, cfg.RequiredChecks, cfg.GeneratedExclusions), settings, session.handle, cfg.OnEvent)
+	if err := owner.MarkTurnRequested(attemptID); err != nil {
+		return result, err
+	}
+	turnCtx, cancelTurn, stopEvent := turnstop.Context(ctx, cfg.Policy.WatchdogElapsed, cfg.Policy.WatchdogStall, cfg.StopTrigger)
+	defer cancelTurn()
+	var observeErr error
+	outcome, turnErr := cfg.Agent.RunTurn(turnCtx, thread.ID, selectionPrompt(project, parent, workspace, cfg.RequiredChecks, cfg.GeneratedExclusions), settings, session.handle, func(event codexapp.Event) {
+		stopEvent(event)
+		if event.Kind == "turn/started" && event.TurnID != "" && observeErr == nil {
+			observeErr = owner.ObserveDispatchTurn(attemptID, event.TurnID)
+			if observeErr != nil {
+				cancelTurn()
+			}
+		}
+		if cfg.OnEvent != nil {
+			cfg.OnEvent(event)
+		}
+	})
+	if outcome.TurnID != "" && observeErr == nil {
+		observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
+	}
+	if outcome.TurnID != "" && outcome.Status != "" && observeErr == nil {
+		if outcome.ThreadID != "" && outcome.ThreadID != thread.ID {
+			observeErr = fmt.Errorf("provider outcome thread differs from reagent binding")
+		} else {
+			observeErr = owner.RecordDispatchOutcome(attemptID, thread.ID, outcome.TurnID, outcome.Status, outcome.FinalText)
+		}
+	}
+	if observeErr != nil && turnErr == nil {
+		turnErr = observeErr
+	}
 	finish := "completed"
 	if turnErr != nil || outcome.Status != "completed" {
 		finish = "uncertain"
 	}
 	tokens := dispatch.Receipt(outcome.Usage)
 	if err := owner.FinishDispatch(attemptID, finish, tokens); err != nil {
+		return result, err
+	}
+	if turnCtx.Err() != nil && turnErr != nil {
+		result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID)
+		result.Snapshot, _ = store.Status()
 		return result, err
 	}
 	if turnErr != nil {
@@ -164,6 +204,11 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 			if err := removeCleanWorkspace(store, workspace); err != nil {
 				return result, err
 			}
+			if outcome.TurnID != "" {
+				if err := owner.MarkDispatchApplied(attemptID); err != nil {
+					return result, err
+				}
+			}
 			if err := owner.EndUnclaimedSelection(verdict.Summary); err != nil {
 				return result, err
 			}
@@ -190,6 +235,11 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 			if _, err := freezeReady(ctx, cfg, owner, store, session, project, parent, outcome); err != nil {
 				return invalidCompletedResult(owner, store, &result, "invalid-ready-candidate", attemptID, fmt.Errorf("candidate not ready: %w", err))
 			}
+			if outcome.TurnID != "" {
+				if err := owner.MarkDispatchApplied(attemptID); err != nil {
+					return result, err
+				}
+			}
 			result.Status = verdict.Disposition
 			result.Snapshot, err = store.Status()
 			reviewer := cfg.Reviewer
@@ -202,7 +252,7 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 				}
 			}
 			if err == nil && reviewer != nil {
-				assessment, reviewErr := review.Run(ctx, review.Config{Agent: reviewer, OnEvent: cfg.OnEvent}, owner, store)
+				assessment, reviewErr := review.Run(ctx, review.Config{Agent: reviewer, OnEvent: cfg.OnEvent, StopTrigger: cfg.StopTrigger}, owner, store)
 				result.Status = assessment.Status
 				if assessment.Snapshot.Active {
 					result.Snapshot = assessment.Snapshot
@@ -226,6 +276,11 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 			}
 		}
 		result.Status = verdict.Disposition
+	}
+	if result.Status != "no_suitable_work" && outcome.TurnID != "" && outcome.Status == "completed" {
+		if err := owner.MarkDispatchApplied(attemptID); err != nil {
+			return result, err
+		}
 	}
 	result.Snapshot, err = store.Status()
 	return result, err

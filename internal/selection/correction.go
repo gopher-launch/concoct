@@ -11,6 +11,7 @@ import (
 	"github.com/gopher-launch/concoct/internal/codexapp"
 	"github.com/gopher-launch/concoct/internal/dispatch"
 	"github.com/gopher-launch/concoct/internal/review"
+	"github.com/gopher-launch/concoct/internal/turnstop"
 )
 
 type threadResumer interface {
@@ -51,6 +52,12 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 		if err != nil {
 			return result, err
 		}
+		if prior.Dispatch.Pending != nil {
+			if prior.Dispatch.Pending.Binding.Activity != dispatch.Correction || prior.Dispatch.Pending.Binding.Candidate != prior.Candidate.Commit || !prior.Dispatch.Pending.Authorized {
+				return correctionHold(owner, store, result, "dispatch-authorization", "authorize existing bound correction dispatch")
+			}
+			attemptID = prior.Dispatch.Pending.ID
+		}
 		decision, err := owner.ReserveDispatch(attemptID, dispatch.Binding{TaskID: prior.TaskID, Role: dispatch.Reagent, Activity: dispatch.Correction, Candidate: prior.Candidate.Commit}, time.Now().UTC())
 		if err != nil {
 			if !strings.Contains(err.Error(), "allowance exhausted") {
@@ -69,14 +76,46 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 		if err != nil || thread.ID != prior.RoleIDs["reagent"] {
 			return correctionUncertain(owner, store, result, attemptID, fmt.Errorf("reagent thread resume changed identity: %v", err))
 		}
+		if err := owner.BindDispatchThread(attemptID, thread.ID); err != nil {
+			return result, err
+		}
 		project, err := readProject(store.Checkout)
 		if err != nil {
 			return correctionUncertain(owner, store, result, attemptID, err)
 		}
 		workspace := filepath.Join(store.Root, "workspaces", prior.RunID)
 		session := &hostSession{owner: owner, store: store, project: project, workspace: workspace, parent: parentBinding{Branch: prior.ParentBranch, Commit: prior.ParentCommit}, threadID: thread.ID, taskID: prior.TaskID, taskBranch: prior.TaskBranch}
+		if err := owner.MarkTurnRequested(attemptID); err != nil {
+			return result, err
+		}
 		prompt := fmt.Sprintf("You are the bound reagent continuing %s on the existing task branch in %s. Address the completed independent assessment below within the agreed task scope. Preserve the parent baseline %s and review findings. Correct source, validate affected behavior, self-review within the recorded limit, reconcile product documentation for the intended integrated state, and save a new ready checkpoint with save_checkpoint. Return ready_for_review only after a completed correction. Do not integrate, push, publish or start another task.\n\nPrior candidate: %s\nPrior assessment:\n%s\nActive task:\n%s", prior.TaskID, workspace, prior.ParentCommit, prior.Candidate.Commit, findings, task)
-		outcome, turnErr := cfg.Agent.RunTurn(ctx, thread.ID, prompt, settings, session.handle, cfg.OnEvent)
+		turnCtx, cancelTurn, stopEvent := turnstop.Context(ctx, prior.Dispatch.WatchdogElapsed, prior.Dispatch.WatchdogStall, cfg.StopTrigger)
+		var observeErr error
+		outcome, turnErr := cfg.Agent.RunTurn(turnCtx, thread.ID, prompt, settings, session.handle, func(event codexapp.Event) {
+			stopEvent(event)
+			if event.Kind == "turn/started" && event.TurnID != "" && observeErr == nil {
+				observeErr = owner.ObserveDispatchTurn(attemptID, event.TurnID)
+				if observeErr != nil {
+					cancelTurn()
+				}
+			}
+			if cfg.OnEvent != nil {
+				cfg.OnEvent(event)
+			}
+		})
+		if outcome.TurnID != "" && observeErr == nil {
+			observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
+		}
+		if outcome.TurnID != "" && outcome.Status != "" && observeErr == nil {
+			if outcome.ThreadID != "" && outcome.ThreadID != thread.ID {
+				observeErr = fmt.Errorf("provider outcome thread differs from reagent binding")
+			} else {
+				observeErr = owner.RecordDispatchOutcome(attemptID, thread.ID, outcome.TurnID, outcome.Status, outcome.FinalText)
+			}
+		}
+		if observeErr != nil && turnErr == nil {
+			turnErr = observeErr
+		}
 		finish := "completed"
 		if turnErr != nil || outcome.Status != "completed" {
 			finish = "uncertain"
@@ -84,6 +123,13 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 		if err := owner.FinishDispatch(attemptID, finish, dispatch.Receipt(outcome.Usage)); err != nil {
 			return result, err
 		}
+		if turnCtx.Err() != nil && turnErr != nil {
+			result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID)
+			result.Snapshot, _ = store.Status()
+			cancelTurn()
+			return result, err
+		}
+		cancelTurn()
 		if turnErr != nil || outcome.Status != "completed" || outcome.ThreadID != thread.ID || outcome.TurnID == "" {
 			return correctionHold(owner, store, result, "recovery-required", "correction turn interrupted or has invalid identity; reconcile recorded attempt "+attemptID)
 		}
@@ -104,7 +150,10 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 		if candidate.Commit == prior.Candidate.Commit {
 			return correctionHold(owner, store, result, "recovery-required", "corrected candidate did not change")
 		}
-		assessment, err := review.Run(ctx, review.Config{Agent: reviewer, OnEvent: cfg.OnEvent}, owner, store)
+		if err := owner.MarkDispatchApplied(attemptID); err != nil {
+			return result, err
+		}
+		assessment, err := review.Run(ctx, review.Config{Agent: reviewer, OnEvent: cfg.OnEvent, StopTrigger: cfg.StopTrigger}, owner, store)
 		result.Status, result.Snapshot = assessment.Status, assessment.Snapshot
 		if err != nil {
 			return result, err
