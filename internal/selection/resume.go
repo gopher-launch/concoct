@@ -131,8 +131,25 @@ func Continue(ctx context.Context, cfg Config) (Result, error) {
 			return applyCompleted(ctx, cfg, owner, store, result, last, codexapp.ObservedTurn{ID: last.TurnID, Status: "completed", FinalText: last.FinalText})
 		}
 	}
-	if snapshot.Question != nil && snapshot.Question.AnswerMode != "" && snapshot.Hold == "" {
-		return routeAnswered(ctx, cfg, owner, store, result, snapshot)
+	if snapshot.Question != nil && snapshot.Question.AnswerMode != "" {
+		if snapshot.Hold == "recovery-required" {
+			ready, err := retryAnsweredFailedLaunch(ctx, cfg, owner, snapshot)
+			if err != nil {
+				return result, err
+			}
+			if !ready {
+				result.Status = "recovery_required"
+				return result, nil
+			}
+			snapshot, err = store.Status()
+			if err != nil {
+				return result, err
+			}
+			result.Snapshot = snapshot
+		}
+		if snapshot.Hold == "" {
+			return routeAnswered(ctx, cfg, owner, store, result, snapshot)
+		}
 	}
 	return continueAfterResolved(ctx, cfg, owner, store, result, "", false)
 }
@@ -414,7 +431,10 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 	if threadID != "" {
 		resumer, ok := cfg.Agent.(threadResumer)
 		if !ok {
-			return holdContinuation(owner, store, result, "recovery-required", "bound reagent thread cannot be resumed")
+			if err := owner.FinishDispatch(attemptID, "failed", nil); err != nil {
+				return result, err
+			}
+			return holdContinuation(owner, store, result, "recovery-required", "reagent thread could not be reconstructed: provider cannot resume bound thread")
 		}
 		thread, err = resumer.ResumeThread(ctx, threadID, hadTurn, settings)
 		if err != nil && (codexapp.IsProvisionalThread(err) && !hadTurn || codexapp.IsMissingRollout(err) && len(snapshot.StopHistory) > 0) {

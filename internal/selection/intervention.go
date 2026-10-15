@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gopher-launch/concoct/internal/activework"
+	"github.com/gopher-launch/concoct/internal/dispatch"
 	"github.com/gopher-launch/concoct/internal/review"
 )
 
@@ -64,7 +66,8 @@ func routeAnswered(ctx context.Context, cfg Config, owner *activework.Owner, sto
 	var err error
 	switch q.Requester {
 	case "reagent":
-		result, err = runReagentContinuation(ctx, cfg, owner, store, result, "", false)
+		episode, retry := answeredFailedLaunch(snapshot)
+		result, err = runReagentContinuation(ctx, cfg, owner, store, result, episode, retry)
 	case "iragent":
 		reviewer := reviewerFor(cfg)
 		if reviewer == nil {
@@ -116,6 +119,44 @@ func routeAnswered(ctx context.Context, cfg Config, owner *activework.Owner, sto
 		result.Snapshot, err = store.Status()
 	}
 	return result, err
+}
+
+// A known failed pre-turn launch is safe to retry after requester idleness is
+// confirmed. The retry consumes a recovery attempt in the same failure episode.
+func answeredFailedLaunch(snapshot activework.Snapshot) (string, bool) {
+	if snapshot.Question == nil || snapshot.Question.Requester != "reagent" || snapshot.Question.AnswerMode == "" || snapshot.Dispatch == nil || snapshot.Dispatch.Pending != nil || len(snapshot.Dispatch.Attempts) < 2 || snapshot.Stop != nil {
+		return "", false
+	}
+	last := snapshot.Dispatch.Attempts[len(snapshot.Dispatch.Attempts)-1]
+	if last.ID == snapshot.Question.OriginAttemptID || last.Status != "failed" || last.TurnRequested || last.Binding.Role != dispatch.Reagent || last.Binding.TaskID != snapshot.TaskID {
+		return "", false
+	}
+	originFound := false
+	for _, attempt := range snapshot.Dispatch.Attempts[:len(snapshot.Dispatch.Attempts)-1] {
+		if attempt.ID == snapshot.Question.OriginAttemptID && attempt.Status == "completed" && attempt.Applied {
+			originFound = true
+		}
+	}
+	if !originFound {
+		return "", false
+	}
+	if last.Binding.Activity == dispatch.Recovery {
+		return last.Binding.Episode, last.Binding.Episode != ""
+	}
+	return last.ID, true
+}
+
+func retryAnsweredFailedLaunch(ctx context.Context, cfg Config, owner *activework.Owner, snapshot activework.Snapshot) (bool, error) {
+	if snapshot.Hold != "recovery-required" || !strings.HasPrefix(snapshot.PendingRequest, "reagent thread could not be reconstructed:") {
+		return false, nil
+	}
+	if _, ok := answeredFailedLaunch(snapshot); !ok || cfg.Agent == nil || snapshot.RoleIDs["reagent"] == "" {
+		return false, nil
+	}
+	if err := cfg.Agent.Idle(ctx, snapshot.RoleIDs["reagent"]); err != nil {
+		return false, nil
+	}
+	return true, owner.UpdateOperational(activework.Operational{Phase: snapshot.Phase, RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters})
 }
 
 func retire(ctx context.Context, cfg Config, taskID, kind, reason string) (Result, error) {

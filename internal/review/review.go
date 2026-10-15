@@ -280,6 +280,11 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	}
 	if verdict.Disposition == "decision_required" || verdict.Disposition == "blocker" {
 		if verdict.Question != nil {
+			if verdict.Question.SourceChange {
+				if err := session.verifyPendingEvidence(outcome.TurnID); err != nil {
+					return holdRecovery(owner, store, &result, "source-changing reviewer question lacks candidate-bound findings", err)
+				}
+			}
 			if _, err := owner.AskRoleQuestion("iragent", binding.AttemptID, verdict.Question); err != nil {
 				return holdRecovery(owner, store, &result, "reviewer blocker lacks usable question context", err)
 			}
@@ -628,4 +633,31 @@ func (s *hostSession) finalizeEvidence(verdict, turnID string) error {
 		return fmt.Errorf("pending assessment belongs to another candidate or scope")
 	}
 	return s.owner.SaveReview(s.review.Number, strings.TrimRight(content, "\n")+fmt.Sprintf("\n\nVerdict: %s\nReviewer turn: %s\n", verdict, turnID))
+}
+
+func (s *hostSession) verifyPendingEvidence(turnID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.saved || s.turnID != turnID {
+		return fmt.Errorf("no assessment saved by the requesting reviewer turn")
+	}
+	content, err := s.owner.ReviewEvidence(s.review.Number)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(content, s.header()) {
+		return fmt.Errorf("pending assessment belongs to another candidate or scope")
+	}
+	body := strings.TrimSpace(strings.TrimPrefix(content, s.header()))
+	if body == "" {
+		return fmt.Errorf("pending assessment contains no findings")
+	}
+	receipted, err := s.owner.VerifiedTurnReceipt("assessment", turnID, body)
+	if err != nil {
+		return err
+	}
+	if !receipted {
+		return fmt.Errorf("pending assessment lacks exact reviewer callback receipt")
+	}
+	return nil
 }

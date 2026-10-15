@@ -102,6 +102,29 @@ func TestReagentQuestionAnswerDurableBeforeFailedResume(t *testing.T) {
 		t.Fatal("stale answer accepted")
 	}
 	owner.Close()
+	failedID := snapshot.Dispatch.Attempts[len(snapshot.Dispatch.Attempts)-1].ID
+	retrying := &continuingAgent{fakeAgent: agent}
+	agent.idle = func() error { return errors.New("requester still busy") }
+	cfg.Agent = retrying
+	stalled, err := Continue(context.Background(), cfg)
+	if err != nil || stalled.Status != "recovery_required" || len(stalled.Snapshot.Dispatch.Attempts) != len(snapshot.Dispatch.Attempts) {
+		t.Fatalf("non-idle requester was retried: %+v, %v", stalled, err)
+	}
+	agent.idle = nil
+	agent.run = func(prompt string, _ codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+		if !strings.Contains(prompt, "Operator answer to "+q.ID) || !strings.Contains(prompt, "safe") {
+			t.Fatal("retry did not receive the durable answer")
+		}
+		return codexapp.TurnOutcome{ThreadID: "fresh-thread", TurnID: "retry-turn", Status: "completed", FinalText: `{"disposition":"engineering","summary":"verified answer"}`}, nil
+	}
+	retried, err := Continue(context.Background(), cfg)
+	if err != nil || retried.Status != "engineering" || retried.Snapshot.Question != nil || len(retried.Snapshot.Dispatch.Attempts) != len(snapshot.Dispatch.Attempts)+1 || retrying.resumes != 1 {
+		t.Fatalf("answered requester did not retry: %+v, %v", retried, err)
+	}
+	last := retried.Snapshot.Dispatch.Attempts[len(retried.Snapshot.Dispatch.Attempts)-1]
+	if last.Binding.Activity != dispatch.Recovery || last.Binding.Episode != failedID {
+		t.Fatalf("retry did not preserve bounded recovery episode: %+v", last)
+	}
 }
 
 func TestReviewerQuestionRoutesToReviewerAfterAnswer(t *testing.T) {
@@ -142,6 +165,31 @@ func TestReviewerQuestionRoutesToReviewerAfterAnswer(t *testing.T) {
 	}
 }
 
+func TestAnsweredLaunchRetryObeysRecoveryLimit(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	policy.Limits.Recovery = 1
+	agent := &fakeAgent{}
+	claimedBlocker(t, repo, external, agent)
+	cfg := Config{Repository: repo, Root: external, Policy: policy, Agent: agent}
+	result, err := Execute(context.Background(), cfg)
+	if err != nil || result.Snapshot.Question == nil {
+		t.Fatalf("setup: %+v, %v", result, err)
+	}
+	cfg.Agent = &failedResumeAgent{agent}
+	result, err = Answer(context.Background(), cfg, AnswerInput{QuestionID: result.Snapshot.Question.ID, Text: "safe"})
+	if err != nil || result.Status != "recovery_required" {
+		t.Fatalf("initial failure: %+v, %v", result, err)
+	}
+	result, err = Continue(context.Background(), cfg)
+	if err != nil || result.Status != "recovery_required" || len(result.Snapshot.Dispatch.Attempts) != 3 {
+		t.Fatalf("bounded recovery attempt: %+v, %v", result, err)
+	}
+	result, err = Continue(context.Background(), cfg)
+	if err != nil || result.Status != "recovery_required" || len(result.Snapshot.Dispatch.Attempts) != 3 || result.Snapshot.Question == nil || result.Snapshot.Question.AnswerText != "safe" {
+		t.Fatalf("recovery limit bypassed or answer lost: %+v, %v", result, err)
+	}
+}
+
 func TestReviewerSourceChangeAnswerRoutesThroughReagent(t *testing.T) {
 	repo, external, policy := testRepo(t)
 	reviewer := &continuingReviewer{fakeReviewer: &fakeReviewer{}}
@@ -162,6 +210,28 @@ func TestReviewerSourceChangeAnswerRoutesThroughReagent(t *testing.T) {
 	if err != nil || snapshot.Review == nil || snapshot.Review.Verdict != "changes_requested" || len(snapshot.Dispatch.Assessments) != 1 || snapshot.Question == nil || snapshot.Question.AnswerMode != "text" {
 		t.Fatalf("answer did not route through reagent: %+v, %v", snapshot, err)
 	}
+}
+
+func TestSourceChangeQuestionRequiresReceiptedAssessment(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	reviewer := &fakeReviewer{}
+	reviewer.run = func(_ string, _ codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: blockerResult(true)}, nil
+	}
+	cfg := Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer}
+	result, err := Execute(context.Background(), cfg)
+	if err == nil || result.Status != "recovery_required" || result.Snapshot.Question != nil || result.Snapshot.Hold != "recovery-required" || result.Snapshot.Review == nil || result.Snapshot.Review.Verdict != "" {
+		t.Fatalf("unreceipted source-changing question accepted: %+v, %v", result, err)
+	}
+	store, _ := activework.Open(repo, external)
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.AnswerQuestion("missing-question", "text", "change source"); err == nil {
+		t.Fatal("answer accepted without routable question")
+	}
+	owner.Close()
 }
 
 func TestQuestionAnswerDoesNotAuthorizeNextDispatch(t *testing.T) {
