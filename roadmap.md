@@ -10,12 +10,12 @@ Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-The source tree includes internal selection, engineering, candidate freezing and initial independent review. The CLI remains a buildable skeleton; the complete workflow remains planned. CON-050 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+The source tree includes internal selection, engineering, candidate freezing and bounded independent review/correction. The CLI remains a buildable skeleton; the complete workflow remains planned. CON-051 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-050` is ready after CON-049 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-051` is ready after CON-050 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the unfinished runner to build itself. The reset CLI truthfully exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation. CON-055 completes the new operator interface.
@@ -211,12 +211,12 @@ Delivered internal freeze path: a completed reagent turn with resolved callbacks
 
 **Verification:** fake role/provider tests for thread separation, candidate/scope binding, source drift, interrupted assessment reuse and valid verdict routing. Reviewer/high real execution is covered in CON-056, not another standalone probe.
 
-Delivered internal initial review: after candidate freeze, the controller can automatically reserve the candidate-bound iragent dispatch and start a separate explicitly configured reviewer thread in a detached checkout. The active record binds the pending assessment to candidate and agreed scope, retaining its number and checkpoint through interruption. The host checks candidate source integrity and completed, idle reviewer execution before finalizing review-01.md as approved or changes requested; a genuine blocker remains pending. Configured dispatch authorization still applies. Correction routing, interrupted-turn reconciliation and live reviewer execution remain later work.
+Delivered internal initial review: after candidate freeze, the controller can automatically reserve the candidate-bound iragent dispatch and start a separate explicitly configured reviewer thread in a detached checkout. The active record binds the pending assessment to candidate and agreed scope, retaining its number and checkpoint through interruption. The host checks candidate source integrity and completed, idle reviewer execution before finalizing review-01.md as approved or changes requested; a genuine blocker remains pending. Configured dispatch authorization still applies. Correction routing is delivered in CON-050; interrupted-turn reconciliation and live reviewer execution remain later work.
 
 ## CON-050 — Close the bounded review/correction loop
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F002
 - Depends on: CON-049
@@ -232,10 +232,12 @@ Delivered internal initial review: after candidate freeze, the controller can au
 
 **Verification:** an integrated fake-agent cycle with a real disposable Git candidate change, followed by same-reviewer approval; tests for stale approval, interrupted assessment counting, source changes during review and exhausted parent allowance.
 
+Delivered internal correction flow: completed findings return to the existing reagent thread, and a new validated checkpoint freezes a distinct candidate. Once the prior reviewer is idle, its detached checkout advances to that candidate and the same iragent thread reassesses it with the prior findings. Each completed verdict consumes one numbered assessment; recorded dispatch limits can retain the task and findings for an explicit extension. Stop/restart reconciliation remains in CON-051.
+
 ## CON-051 — Stop, reconcile and resume actual work safely
 
 - Kind: task
-- Status: planned
+- Status: ready
 - Priority: high
 - Parent: CON-F003
 - Depends on: CON-050
@@ -349,4 +351,4 @@ Delivered internal initial review: after candidate freeze, the controller can au
 
 ## Next task boundary
 
-CON-050 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-051 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.

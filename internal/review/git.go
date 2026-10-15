@@ -41,6 +41,41 @@ func prepareCheckout(store *activework.Store, snapshot activework.Snapshot, chec
 	return err
 }
 
+func advanceCheckout(store *activework.Store, snapshot activework.Snapshot, checkout string) error {
+	if snapshot.Dispatch == nil || len(snapshot.Dispatch.Assessments) == 0 {
+		return fmt.Errorf("corrected review has no prior assessment")
+	}
+	prior := snapshot.Dispatch.Assessments[len(snapshot.Dispatch.Assessments)-1].Candidate
+	if prior == snapshot.Candidate.Commit {
+		return fmt.Errorf("corrected candidate is unchanged")
+	}
+	common, err := gitOutput(checkout, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	common, err = filepath.EvalSymlinks(common)
+	if err != nil || filepath.Clean(common) != store.CommonDir {
+		return fmt.Errorf("review checkout belongs to another repository")
+	}
+	if branch, err := gitOutput(checkout, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil || branch != "" {
+		return fmt.Errorf("review checkout is not detached")
+	}
+	if head, err := gitOutput(checkout, "rev-parse", "HEAD"); err != nil || head != prior {
+		return fmt.Errorf("review checkout left prior candidate")
+	}
+	if status, err := gitOutput(checkout, "status", "--porcelain=v1", "--untracked-files=all"); err != nil || status != "" {
+		return fmt.Errorf("review checkout changed before revision: %s: %v", status, err)
+	}
+	_, err = gitOutput(checkout, "switch", "--detach", snapshot.Candidate.Commit)
+	return err
+}
+
+// VerifyFrozen checks the completed candidate and both bound checkouts before
+// correction may change the task branch.
+func VerifyFrozen(store *activework.Store, snapshot activework.Snapshot) error {
+	return verifyCandidate(store, snapshot, filepath.Join(store.Root, "workspaces", snapshot.RunID+"-review"), true)
+}
+
 func verifyCandidate(store *activework.Store, snapshot activework.Snapshot, checkout string, reviewExists bool) error {
 	candidate := snapshot.Candidate
 	if candidate == nil || candidate.BaselineCommit != snapshot.ParentCommit {

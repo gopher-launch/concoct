@@ -50,7 +50,7 @@ func reviewCheckpoint(t *testing.T, handler codexapp.ToolHandler, content string
 }
 
 func TestAutomaticInitialReviewVerdicts(t *testing.T) {
-	for _, tc := range []struct{ disposition, phase string }{{"approved", "ready-for-acceptance"}, {"changes_requested", "changes-requested"}} {
+	for _, tc := range []struct{ disposition, status, phase string }{{"approved", "approved", "ready-for-acceptance"}, {"changes_requested", "recovery_required", "changes-requested"}} {
 		t.Run(tc.disposition, func(t *testing.T) {
 			repo, external, policy := testRepo(t)
 			base, _ := gitOutput(repo, "rev-parse", "HEAD")
@@ -77,7 +77,7 @@ func TestAutomaticInitialReviewVerdicts(t *testing.T) {
 				return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"` + tc.disposition + `","summary":"independent assessment complete"}`}, nil
 			}
 			result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
-			if err != nil || result.Status != tc.disposition || result.Snapshot.Phase != tc.phase || result.Snapshot.Review == nil || result.Snapshot.Review.Verdict != tc.disposition || result.Snapshot.Review.Number != 1 || reviewer.starts != 1 {
+			if err != nil || result.Status != tc.status || result.Snapshot.Phase != tc.phase || result.Snapshot.Review == nil || result.Snapshot.Review.Verdict != tc.disposition || result.Snapshot.Review.Number != 1 || reviewer.starts != 1 {
 				t.Fatalf("automatic independent review: %+v, %v", result, err)
 			}
 			if len(result.Snapshot.Dispatch.Assessments) != 1 || result.Snapshot.Dispatch.Assessments[0].Candidate != result.Snapshot.Candidate.Commit {

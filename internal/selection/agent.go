@@ -19,6 +19,10 @@ type Agent interface {
 // CodexAgent adapts the verified app-server client to the selection controller.
 type CodexAgent struct{ Client *codexapp.Client }
 
+func (a CodexAgent) ResumeThread(ctx context.Context, id string, hadTurn bool, settings codexapp.RoleSettings) (codexapp.Thread, error) {
+	return a.Client.ResumeThread(ctx, id, hadTurn, settings)
+}
+
 func (a CodexAgent) StartThread(ctx context.Context, cwd string, settings codexapp.RoleSettings, tools []codexapp.ToolSpec) (codexapp.Thread, error) {
 	return a.Client.StartThread(ctx, cwd, settings, tools)
 }

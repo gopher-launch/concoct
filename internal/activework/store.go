@@ -59,9 +59,8 @@ type Candidate struct {
 	TurnID                       string
 }
 
-// PendingReview binds the first independent assessment to immutable candidate
-// source, agreed scope and one reserved dispatch. Later review cycles are
-// handled by the correction controller.
+// PendingReview binds one independent assessment to immutable candidate
+// source, agreed scope and one reserved dispatch.
 type PendingReview struct {
 	Number                      int
 	Candidate, ScopeSHA256      string
@@ -376,7 +375,7 @@ func (o *Owner) SaveCheckpoint(content string) error {
 	if err != nil {
 		return err
 	}
-	if st.Candidate != nil {
+	if st.Candidate != nil && st.Phase != "correcting" {
 		return fmt.Errorf("frozen candidate checkpoint is immutable")
 	}
 	old, err := o.readBoundFile(st, "evidence/task.md")
@@ -418,7 +417,7 @@ func (o *Owner) FreezeCandidate(candidate Candidate) error {
 	if err != nil {
 		return err
 	}
-	if st.TaskID == "" || st.Phase != "engineering" || st.Hold != "" || st.Candidate != nil {
+	if st.TaskID == "" || (st.Phase != "engineering" && st.Phase != "correcting") || st.Hold != "" || (st.Candidate != nil && (st.Phase != "correcting" || st.Review == nil || st.Review.Verdict != "changes_requested" || st.Candidate.Commit == candidate.Commit)) {
 		return fmt.Errorf("run is not ready for candidate freeze")
 	}
 	if st.Dispatch == nil || len(st.Dispatch.Attempts) == 0 {

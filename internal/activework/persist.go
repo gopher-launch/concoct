@@ -46,7 +46,7 @@ func (s *Store) validateState(st state, id string) error {
 	}
 	if st.Review != nil {
 		review := st.Review
-		if st.Candidate == nil || review.Number != 1 || review.Candidate != st.Candidate.Commit || !isDigest(review.ScopeSHA256) || !namePattern.MatchString(review.AttemptID) || len(review.ThreadID) > 256 || len(review.TurnID) > 256 {
+		if st.Candidate == nil || st.Dispatch == nil || review.Number < 1 || review.Number > st.Dispatch.Limits.Assessments || (review.Verdict == "" && review.Candidate != st.Candidate.Commit) || (st.Phase == "changes-requested" && review.Candidate != st.Candidate.Commit) || !isDigest(review.ScopeSHA256) || !namePattern.MatchString(review.AttemptID) || len(review.ThreadID) > 256 || len(review.TurnID) > 256 {
 			return fmt.Errorf("active state has malformed review binding")
 		}
 		if review.Verdict != "" && review.Verdict != "approved" && review.Verdict != "changes_requested" {

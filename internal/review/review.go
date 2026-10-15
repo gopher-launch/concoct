@@ -1,5 +1,4 @@
-// Package review runs the first independent assessment of a frozen candidate.
-// Correction routing and later review cycles belong to the bounded loop task.
+// Package review runs a bound independent assessment of a frozen candidate.
 package review
 
 import (
@@ -24,6 +23,10 @@ type Agent interface {
 	StartThread(context.Context, string, codexapp.RoleSettings, []codexapp.ToolSpec) (codexapp.Thread, error)
 	RunTurn(context.Context, string, string, codexapp.RoleSettings, codexapp.ToolHandler, func(codexapp.Event)) (codexapp.TurnOutcome, error)
 	Idle(context.Context, string) error
+}
+
+type resumer interface {
+	ResumeThread(context.Context, string, bool, codexapp.RoleSettings) (codexapp.Thread, error)
 }
 
 type Config struct {
@@ -91,10 +94,13 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	}
 	decision, err := owner.ReserveDispatch(binding.AttemptID, dispatch.Binding{TaskID: snapshot.TaskID, Role: dispatch.Iragent, Activity: dispatch.Review, Candidate: binding.Candidate}, time.Now().UTC())
 	if err != nil {
-		return result, err
+		if strings.Contains(err.Error(), "allowance exhausted") {
+			return holdLimit(owner, store, &result, err)
+		}
+		return holdRecovery(owner, store, &result, "review dispatch requires reconciliation", err)
 	}
 	if !decision.Dispatch {
-		if err := owner.UpdateOperational(activework.Operational{Phase: "reviewing", Hold: "dispatch-authorization", PendingRequest: "authorize initial independent review of " + binding.Candidate, RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters}); err != nil {
+		if err := owner.UpdateOperational(activework.Operational{Phase: "reviewing", Hold: "dispatch-authorization", PendingRequest: "authorize independent review of " + binding.Candidate, RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters}); err != nil {
 			return result, err
 		}
 		result.Status = "authorization_required"
@@ -106,7 +112,14 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 			return result, err
 		}
 	}
-	if err := prepareCheckout(store, snapshot, result.Checkout); err != nil {
+	if binding.Number > 1 {
+		if err := cfg.Agent.Idle(ctx, snapshot.RoleIDs["iragent"]); err != nil {
+			return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("prior reviewer is not idle: %w", err))
+		}
+		if err := advanceCheckout(store, snapshot, result.Checkout); err != nil {
+			return failLaunch(owner, store, &result, binding.AttemptID, err)
+		}
+	} else if err := prepareCheckout(store, snapshot, result.Checkout); err != nil {
 		return failLaunch(owner, store, &result, binding.AttemptID, err)
 	}
 	if err := verifyCandidate(store, snapshot, result.Checkout, true); err != nil {
@@ -116,7 +129,19 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	if settings.Role != "iragent" || settings.Model == "" || settings.Effort == "" || settings.Sandbox != "danger-full-access" || settings.ApprovalPolicy != "never" {
 		return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("reviewer settings are not explicitly resolved for full access"))
 	}
-	thread, err := cfg.Agent.StartThread(ctx, result.Checkout, settings, toolSpecs())
+	var thread codexapp.Thread
+	if binding.Number == 1 {
+		thread, err = cfg.Agent.StartThread(ctx, result.Checkout, settings, toolSpecs())
+	} else {
+		resuming, ok := cfg.Agent.(resumer)
+		if !ok || snapshot.RoleIDs["iragent"] == "" {
+			return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("existing reviewer thread cannot be resumed"))
+		}
+		thread, err = resuming.ResumeThread(ctx, snapshot.RoleIDs["iragent"], true, settings)
+		if err == nil && thread.ID != snapshot.RoleIDs["iragent"] {
+			err = fmt.Errorf("resumed reviewer identity changed")
+		}
+	}
 	if err != nil {
 		return failLaunch(owner, store, &result, binding.AttemptID, err)
 	}
@@ -131,7 +156,15 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		return failLaunch(owner, store, &result, binding.AttemptID, err)
 	}
 	session := &hostSession{owner: owner, review: binding, threadID: thread.ID}
-	outcome, turnErr := cfg.Agent.RunTurn(ctx, thread.ID, prompt(snapshot, binding, task, result.Checkout), settings, session.handle, cfg.OnEvent)
+	reviewPrompt := prompt(snapshot, binding, task, result.Checkout)
+	if binding.Number > 1 {
+		previous, priorErr := owner.ReviewEvidence(binding.Number - 1)
+		if priorErr != nil {
+			return failLaunch(owner, store, &result, binding.AttemptID, priorErr)
+		}
+		reviewPrompt += fmt.Sprintf("\n\nPrior completed assessment and findings:\n%s\nCorrected candidate is %s; inspect its exact diff from prior candidate and reassess all criteria.\n", previous, binding.Candidate)
+	}
+	outcome, turnErr := cfg.Agent.RunTurn(ctx, thread.ID, reviewPrompt, settings, session.handle, cfg.OnEvent)
 	finish := "completed"
 	if turnErr != nil || outcome.Status != "completed" {
 		finish = "uncertain"
@@ -218,6 +251,27 @@ func holdRecovery(owner *activework.Owner, store *activework.Store, result *Resu
 		cause = fmt.Errorf("%s", reason)
 	}
 	return *result, cause
+}
+
+func holdLimit(owner *activework.Owner, store *activework.Store, result *Result, cause error) (Result, error) {
+	snapshot, err := store.Status()
+	if err != nil {
+		return *result, err
+	}
+	action := cause.Error()
+	if snapshot.Dispatch != nil {
+		if strings.Contains(action, "dispatch allowance") {
+			action = fmt.Sprintf("extend dispatch allowance to %d to assess %s candidate %s", len(snapshot.Dispatch.Attempts)+1, snapshot.TaskID, snapshot.Candidate.Commit)
+		} else if strings.Contains(action, "assessment allowance") {
+			action = fmt.Sprintf("extend assessment allowance to %d to assess %s candidate %s", len(snapshot.Dispatch.Assessments)+1, snapshot.TaskID, snapshot.Candidate.Commit)
+		}
+	}
+	if err := owner.UpdateOperational(activework.Operational{Phase: "reviewing", Hold: "limit-exhausted", PendingRequest: action, RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters}); err != nil {
+		return *result, err
+	}
+	result.Status = "decision_required"
+	result.Snapshot, err = store.Status()
+	return *result, err
 }
 
 func prompt(snapshot activework.Snapshot, binding activework.PendingReview, task, checkout string) string {

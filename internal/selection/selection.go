@@ -209,6 +209,9 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 				} else {
 					result.Snapshot, _ = store.Status()
 				}
+				if reviewErr == nil && result.Status == "changes_requested" {
+					return correctionLoop(ctx, cfg, owner, store, reviewer, result)
+				}
 				return result, reviewErr
 			}
 			return result, err

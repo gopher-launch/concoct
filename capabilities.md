@@ -53,6 +53,12 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 
 - A frozen candidate can flow directly into a candidate-bound iragent dispatch under the recorded policy. The reviewer gets a separate thread with explicit resolved settings and a detached checkout pinned to the candidate. The host instructions require source-read-only review and supply the agreed task, verification evidence, candidate identity and reviewer responsibility.
 - The active record binds review 01 to the candidate and agreed scope digest. Pending assessment text and the same review number survive interrupted or uncertain turns. Source or branch drift, unresolved tool activity, an invalid result or missing assessment cannot produce approval.
-- A completed approved or changes-requested result finalizes one external review-01.md with candidate, scope and verdict bindings and consumes one assessment. A genuine blocker retains the pending review. Configured authorization can pause the initial dispatch. Correction routing and interrupted-turn reconciliation remain later work.
+- A completed approved or changes-requested result finalizes one external review-01.md with candidate, scope and verdict bindings and consumes one assessment. A genuine blocker retains the pending review. Configured authorization can pause the initial dispatch. Interrupted-turn reconciliation remains later work.
 
-The CLI workflow, correction loop, threshold-triggered interruption and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.
+## CON-050 — Internal review correction loop
+
+- Completed findings and the active task record are sent to the bound reagent thread. A correction turn updates the checkpoint and freezes a distinct candidate against the original baseline after the same readiness checks.
+- Once the prior reviewer is idle, its clean detached checkout advances from the assessed candidate to the corrected commit. The same iragent thread receives the revised identity, prior findings and current validation evidence; completed reassessments receive successive review numbers.
+- Recorded dispatch and completed-assessment limits govern each cycle. An exhausted allowance or uncertain turn retains the current task, candidate and findings with a continuation request. Routine correction and reassessment use the recorded role settings and policy without automatic escalation.
+
+The CLI workflow, interrupted-turn reconciliation, threshold-triggered interruption and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.

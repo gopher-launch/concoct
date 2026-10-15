@@ -27,8 +27,8 @@ func scopeDigest(task string) (string, error) {
 	return digest([]byte(before)), nil
 }
 
-// BeginReview is idempotent across an interrupted initial assessment. It
-// never assigns a second review number to the same frozen candidate.
+// BeginReview is idempotent for a pending assessment and numbers each new
+// frozen candidate after the last completed assessment.
 func (o *Owner) BeginReview(attemptID string) (PendingReview, error) {
 	st, err := o.currentState()
 	if err != nil {
@@ -37,7 +37,7 @@ func (o *Owner) BeginReview(attemptID string) (PendingReview, error) {
 	if st.Candidate == nil {
 		return PendingReview{}, fmt.Errorf("review requires a frozen candidate")
 	}
-	if st.Review != nil {
+	if st.Review != nil && st.Review.Verdict == "" {
 		if st.Review.Candidate != st.Candidate.Commit {
 			return PendingReview{}, fmt.Errorf("pending review belongs to another candidate")
 		}
@@ -62,7 +62,17 @@ func (o *Owner) BeginReview(attemptID string) (PendingReview, error) {
 	if err != nil {
 		return PendingReview{}, err
 	}
-	review := PendingReview{Number: 1, Candidate: st.Candidate.Commit, ScopeSHA256: scope, AttemptID: attemptID}
+	number := 1
+	if st.Review != nil {
+		if st.Review.Verdict != "changes_requested" || st.Review.Candidate == st.Candidate.Commit {
+			return PendingReview{}, fmt.Errorf("new review requires a corrected candidate")
+		}
+		number = st.Review.Number + 1
+	}
+	if st.Dispatch == nil || number > st.Dispatch.Limits.Assessments || number > 99 {
+		return PendingReview{}, fmt.Errorf("independent assessment allowance exhausted")
+	}
+	review := PendingReview{Number: number, Candidate: st.Candidate.Commit, ScopeSHA256: scope, AttemptID: attemptID}
 	st.Review = &review
 	st.Phase = "reviewing"
 	st.Revision++
@@ -70,6 +80,27 @@ func (o *Owner) BeginReview(attemptID string) (PendingReview, error) {
 		return PendingReview{}, err
 	}
 	return review, nil
+}
+
+// BeginCorrection retains the reviewed candidate and findings while opening
+// the checkpoint for a new revision. Repeated calls do not reset evidence.
+func (o *Owner) BeginCorrection() error {
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	if st.Phase == "correcting" && st.Review != nil && st.Review.Verdict == "changes_requested" {
+		return nil
+	}
+	if st.Phase != "changes-requested" || st.Hold != "" || st.Candidate == nil || st.Review == nil || st.Review.Verdict != "changes_requested" || st.Review.Candidate != st.Candidate.Commit {
+		return fmt.Errorf("run has no completed changes-requested assessment")
+	}
+	if _, err := o.ReviewEvidence(st.Review.Number); err != nil {
+		return err
+	}
+	st.Phase = "correcting"
+	st.Revision++
+	return writeJSON(o.store.statePath(st.RunID), st)
 }
 
 func (o *Owner) BindReviewThread(number int, id string) error {
@@ -94,7 +125,7 @@ func (o *Owner) ReviewEvidence(number int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if st.Review == nil || st.Review.Number != number {
+	if st.Review == nil || (st.Review.Number != number && !st.FinalReviews[number]) {
 		return "", fmt.Errorf("review %02d is not pending", number)
 	}
 	body, err := o.readBoundFile(st, fmt.Sprintf("evidence/review-%02d.md", number))
