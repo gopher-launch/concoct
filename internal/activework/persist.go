@@ -99,6 +99,9 @@ func (s *Store) validateState(st state, id string) error {
 			return fmt.Errorf("active dispatch state: %w", err)
 		}
 	}
+	if err := validateQuestionState(st.Question, st); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -117,6 +120,9 @@ func (o *Owner) after(stage string) error {
 }
 
 func (o *Owner) recover() error {
+	if err := o.recoverReactivation(); err != nil {
+		return err
+	}
 	var intent startIntent
 	err := readJSON(filepath.Join(o.store.dir, "start.json"), &intent)
 	if err == nil {
@@ -145,9 +151,11 @@ func (o *Owner) recover() error {
 		return err
 	}
 	if st.Pending != nil {
-		return o.recoverPending(st)
+		if err := o.recoverPending(st); err != nil {
+			return err
+		}
 	}
-	return nil
+	return o.recoverInterventions()
 }
 
 func (o *Owner) finishStart(intent startIntent) error {

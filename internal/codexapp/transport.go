@@ -350,8 +350,26 @@ func (c *Client) onNotification(msg envelope) {
 // RoleResult is the minimal structured result; detailed disposition policy
 // belongs to the later controller.
 type RoleResult struct {
-	Disposition string `json:"disposition"`
-	Summary     string `json:"summary"`
+	Disposition string        `json:"disposition"`
+	Summary     string        `json:"summary"`
+	Question    *RoleQuestion `json:"question,omitempty"`
+}
+
+type RoleQuestion struct {
+	Objective    string               `json:"objective"`
+	Evidence     string               `json:"evidence"`
+	Missing      string               `json:"missing"`
+	SafeWork     string               `json:"safe_work"`
+	NextStep     string               `json:"next_step"`
+	Options      []RoleQuestionOption `json:"options,omitempty"`
+	SourceChange bool                 `json:"source_change,omitempty"`
+	ScopeChange  bool                 `json:"scope_change,omitempty"`
+}
+
+type RoleQuestionOption struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Tradeoff    string `json:"tradeoff"`
 }
 
 // ParseRoleResult keeps provider completion distinct from a valid role verdict.

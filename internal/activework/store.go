@@ -82,6 +82,17 @@ type StopRecord struct {
 	Handles                           []string
 }
 
+type QuestionOption struct {
+	ID, Description, Tradeoff string
+}
+
+type Question struct {
+	ID, Requester, OriginAttemptID, Objective, Evidence, Missing, SafeWork, NextStep string
+	Options                                                                          []QuestionOption
+	SourceChange, ScopeChange                                                        bool
+	AnswerMode, AnswerChoice, AnswerText                                             string
+}
+
 type Snapshot struct {
 	ObservedAt     time.Time
 	Active         bool
@@ -107,6 +118,7 @@ type Snapshot struct {
 	Review         *PendingReview
 	Stop           *StopRecord
 	StopHistory    []StopRecord
+	Question       *Question
 }
 
 type pointer struct {
@@ -135,6 +147,7 @@ type state struct {
 	Review                                         *PendingReview
 	Stop                                           *StopRecord
 	StopHistory                                    []StopRecord
+	Question                                       *Question
 }
 
 type startIntent struct {
@@ -207,6 +220,11 @@ func (s *Store) Status() (Snapshot, error) {
 		snapshot.Stop = &copy
 	}
 	snapshot.StopHistory = append([]StopRecord(nil), st.StopHistory...)
+	if st.Question != nil {
+		copy := *st.Question
+		copy.Options = append([]QuestionOption(nil), st.Question.Options...)
+		snapshot.Question = &copy
+	}
 	return snapshot, nil
 }
 
@@ -353,6 +371,16 @@ func (o *Owner) ClaimOrConfirm(spec StartSpec) error {
 func (o *Owner) validateStart(spec StartSpec) error {
 	if !taskPattern.MatchString(spec.TaskID) {
 		return fmt.Errorf("invalid task ID %q", spec.TaskID)
+	}
+	if _, err := os.Stat(filepath.Join(o.store.dir, "deferred", spec.TaskID+".json")); err == nil {
+		return fmt.Errorf("task %s is deferred and requires explicit reactivation", spec.TaskID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(o.store.dir, "abandoned", spec.TaskID+".json")); err == nil {
+		return fmt.Errorf("task %s was abandoned", spec.TaskID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	if spec.TaskBranch == "" || len(spec.TaskBranch) > 200 || strings.ContainsAny(spec.TaskBranch, " \t\r\n\x00") || strings.HasPrefix(spec.TaskBranch, "-") || strings.Contains(spec.TaskBranch, "..") {
 		return fmt.Errorf("invalid task branch binding %q", spec.TaskBranch)

@@ -131,6 +131,9 @@ func Continue(ctx context.Context, cfg Config) (Result, error) {
 			return applyCompleted(ctx, cfg, owner, store, result, last, codexapp.ObservedTurn{ID: last.TurnID, Status: "completed", FinalText: last.FinalText})
 		}
 	}
+	if snapshot.Question != nil && snapshot.Question.AnswerMode != "" && snapshot.Hold == "" {
+		return routeAnswered(ctx, cfg, owner, store, result, snapshot)
+	}
 	return continueAfterResolved(ctx, cfg, owner, store, result, "", false)
 }
 
@@ -208,7 +211,7 @@ func applyCompleted(ctx context.Context, cfg Config, owner *activework.Owner, st
 			return result, err
 		}
 	}
-	applied, err := applyReagentVerdict(ctx, cfg, owner, store, result, attempt.ThreadID, attempt.TurnID, verdict)
+	applied, err := applyReagentVerdict(ctx, cfg, owner, store, result, attempt.ID, attempt.ThreadID, attempt.TurnID, verdict)
 	if err == nil && applied.Status != "recovery_required" && applied.Status != "stopped_abnormally" && applied.Status != "no_suitable_work" {
 		err = owner.MarkDispatchApplied(attempt.ID)
 	}
@@ -335,6 +338,8 @@ func holdContinuation(owner *activework.Owner, store *activework.Store, result R
 	result.Status = "recovery_required"
 	if hold == "abnormal-stop" {
 		result.Status = "stopped_abnormally"
+	} else if hold == "dispatch-authorization" {
+		result.Status = "authorization_required"
 	}
 	result.Snapshot, err = store.Status()
 	return result, err
@@ -365,6 +370,8 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 	activity := dispatch.Engineering
 	if snapshot.TaskID == "" {
 		activity = dispatch.Selection
+	} else if snapshot.Phase == "correcting" && snapshot.Candidate != nil {
+		activity = dispatch.Correction
 	}
 	if recovering {
 		activity = dispatch.Recovery
@@ -379,7 +386,7 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 		return result, err
 	}
 	binding := dispatch.Binding{TaskID: snapshot.TaskID, Role: dispatch.Reagent, Activity: activity, Episode: episode}
-	if recovering && snapshot.Candidate != nil {
+	if (recovering || activity == dispatch.Correction) && snapshot.Candidate != nil {
 		binding.Candidate = snapshot.Candidate.Commit
 	}
 	if snapshot.Dispatch.Pending != nil {
@@ -447,13 +454,17 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 		branches[branch] = true
 	}
 	session := &hostSession{owner: owner, store: store, project: project, workspace: workspace, parent: parent, existingBranches: branches, threadID: thread.ID, taskID: snapshot.TaskID, taskBranch: snapshot.TaskBranch}
-	prompt := selectionPrompt(project, parent, workspace, cfg.RequiredChecks, cfg.GeneratedExclusions)
+	deferred, err := store.UnavailableTaskIDs()
+	if err != nil {
+		return result, err
+	}
+	prompt := selectionPrompt(project, parent, workspace, cfg.RequiredChecks, cfg.GeneratedExclusions, deferred)
 	if snapshot.TaskID != "" {
 		task, err := owner.TaskEvidence()
 		if err != nil {
 			return result, err
 		}
-		prompt = fmt.Sprintf("Continue the bound reagent task %s in %s using current source and active evidence. Preserve parent %s and task branch %s. Reconcile any interrupted work before editing or running commands; never replay an uncertain command. Validate and save_checkpoint before a ready result. Do not select another task, read archives, integrate or publish.\n\n%s", snapshot.TaskID, workspace, parent.Commit, snapshot.TaskBranch, task)
+		prompt = fmt.Sprintf("Continue the bound reagent task %s in %s using current source and active evidence. Preserve parent %s and task branch %s. Reconcile any interrupted work before editing or running commands; never replay an uncertain command. Validate and save_checkpoint before a ready result. For a genuine blocker return decision_required with a question object containing objective, evidence, missing, safe_work, next_step and optional stable-ID options/tradeoffs. Do not select another task, read archives, integrate or publish.\n\n%s", snapshot.TaskID, workspace, parent.Commit, snapshot.TaskBranch, task)
 		if snapshot.Review != nil && snapshot.Review.Verdict == "changes_requested" {
 			findings, err := owner.ReviewEvidence(snapshot.Review.Number)
 			if err != nil {
@@ -461,6 +472,9 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 			}
 			prompt += "\n\nCompleted review findings:\n" + findings
 		}
+	}
+	if snapshot.Question != nil && snapshot.Question.AnswerMode != "" {
+		prompt += fmt.Sprintf("\n\nOperator answer to %s (%s): %s\nVerify any material condition or external action yourself. This answer grants no unrelated dispatch authorization and does not change the agreed scope.\n", snapshot.Question.ID, snapshot.Question.AnswerMode, snapshot.Question.AnswerText)
 	}
 	if err := owner.MarkTurnRequested(attemptID); err != nil {
 		return result, err
@@ -508,7 +522,7 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 	if err != nil {
 		return holdContinuation(owner, store, result, "recovery-required", "invalid reagent continuation result")
 	}
-	applied, err := applyReagentVerdict(ctx, cfg, owner, store, result, thread.ID, outcome.TurnID, verdict)
+	applied, err := applyReagentVerdict(ctx, cfg, owner, store, result, attemptID, thread.ID, outcome.TurnID, verdict)
 	if err == nil && applied.Status != "recovery_required" && applied.Status != "stopped_abnormally" && applied.Status != "no_suitable_work" && outcome.TurnID != "" {
 		err = owner.MarkDispatchApplied(attemptID)
 	}
@@ -544,7 +558,7 @@ func verifyResumeWorkspace(store *activework.Store, snapshot activework.Snapshot
 	return nil
 }
 
-func applyReagentVerdict(ctx context.Context, cfg Config, owner *activework.Owner, store *activework.Store, result Result, threadID, turnID string, verdict codexapp.RoleResult) (Result, error) {
+func applyReagentVerdict(ctx context.Context, cfg Config, owner *activework.Owner, store *activework.Store, result Result, attemptID, threadID, turnID string, verdict codexapp.RoleResult) (Result, error) {
 	snapshot, err := store.Status()
 	if err != nil {
 		return result, err
@@ -564,6 +578,14 @@ func applyReagentVerdict(ctx context.Context, cfg Config, owner *activework.Owne
 		return result, nil
 	}
 	if verdict.Disposition == "decision_required" {
+		if verdict.Question != nil {
+			if _, err := owner.AskRoleQuestion("reagent", attemptID, verdict.Question); err != nil {
+				return result, err
+			}
+			result.Status = "decision_required"
+			result.Snapshot, err = store.Status()
+			return result, err
+		}
 		return holdContinuation(owner, store, result, "operator-decision", verdict.Summary)
 	}
 	if verdict.Disposition == "engineering" {

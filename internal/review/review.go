@@ -279,11 +279,17 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		return holdRecovery(owner, store, &result, "invalid reviewer result", err)
 	}
 	if verdict.Disposition == "decision_required" || verdict.Disposition == "blocker" {
-		if err := owner.HoldReview(verdict.Summary); err != nil {
-			return result, err
-		}
-		if err := owner.MarkDispatchApplied(binding.AttemptID); err != nil {
-			return result, err
+		if verdict.Question != nil {
+			if _, err := owner.AskRoleQuestion("iragent", binding.AttemptID, verdict.Question); err != nil {
+				return holdRecovery(owner, store, &result, "reviewer blocker lacks usable question context", err)
+			}
+		} else {
+			if err := owner.HoldReview(verdict.Summary); err != nil {
+				return result, err
+			}
+			if err := owner.MarkDispatchApplied(binding.AttemptID); err != nil {
+				return result, err
+			}
 		}
 		result.Status = "decision_required"
 		result.Snapshot, err = store.Status()
@@ -420,7 +426,7 @@ func holdLimit(owner *activework.Owner, store *activework.Store, result *Result,
 }
 
 func prompt(snapshot activework.Snapshot, binding activework.PendingReview, task, checkout string) string {
-	return fmt.Sprintf("You are iragent, an independent reviewer. Follow AGENTS.md and current repository sources. Review the agreed task and frozen candidate without editing source, branch, index or untracked files. Your separate checkout is %s, pinned to candidate %s with tree %s. The parent baseline is %s; the agreed scope SHA-256 is %s. Assess all acceptance criteria and candidate verification evidence from the active task below. Inspect source and relevant design; do not read unrelated archives or run a separate task. Stream concise progress. Save a pending assessment with save_assessment before returning a structured JSON result. Include specific findings, evidence and checks. Return disposition approved only if the exact candidate meets the scope, changes_requested for actionable source findings, or decision_required for a genuine blocker. Provider completion alone does not approve the candidate. Do not integrate, push or publish.\n\nActive task and verification record:\n%s", checkout, binding.Candidate, snapshot.Candidate.Tree, snapshot.ParentCommit, binding.ScopeSHA256, task)
+	return fmt.Sprintf("You are iragent, an independent reviewer. Follow AGENTS.md and current repository sources. Review the agreed task and frozen candidate without editing source, branch, index or untracked files. Your separate checkout is %s, pinned to candidate %s with tree %s. The parent baseline is %s; the agreed scope SHA-256 is %s. Assess all acceptance criteria and candidate verification evidence from the active task below. Inspect source and relevant design; do not read unrelated archives or run a separate task. Stream concise progress. Save a pending assessment with save_assessment before returning a structured JSON result. Include specific findings, evidence and checks. Return disposition approved only if the exact candidate meets the scope, changes_requested for actionable source findings, or decision_required for a genuine blocker. A blocker result includes a question object with objective, evidence, missing, safe_work, next_step, optional stable-ID options/tradeoffs, and source_change or scope_change flags when applicable. A source-changing answer stays within the agreed scope unless separately authorized. Provider completion alone does not approve the candidate. Do not integrate, push or publish.\n\nActive task and verification record:\n%s", checkout, binding.Candidate, snapshot.Candidate.Tree, snapshot.ParentCommit, binding.ScopeSHA256, task)
 }
 
 // ReconcileCompleted finalizes one provider-observed completed assessment
@@ -479,6 +485,63 @@ func ReconcileCompleted(ctx context.Context, agent Agent, owner *activework.Owne
 		return result, err
 	}
 	result.Status = verdict.Disposition
+	result.Snapshot, err = store.Status()
+	return result, err
+}
+
+// RouteAnsweredChange turns a completed reviewer source-change blocker into
+// candidate-bound findings after the operator answer is durably recorded.
+// The reagent then makes the change and a fresh assessment reviews its tree.
+func RouteAnsweredChange(ctx context.Context, agent Agent, owner *activework.Owner, store *activework.Store, questionID string) (Result, error) {
+	var result Result
+	snapshot, err := store.Status()
+	if err != nil {
+		return result, err
+	}
+	q := snapshot.Question
+	if q == nil || q.ID != questionID || q.Requester != "iragent" || !q.SourceChange || q.ScopeChange || q.AnswerMode == "" || snapshot.Hold != "" || snapshot.Review == nil || snapshot.Review.Verdict != "" || snapshot.Review.AttemptID != q.OriginAttemptID || agent == nil {
+		return result, fmt.Errorf("answered source-change question is not bound to a pending review")
+	}
+	var attempt *dispatch.Attempt
+	for i := range snapshot.Dispatch.Attempts {
+		if snapshot.Dispatch.Attempts[i].ID == q.OriginAttemptID {
+			attempt = &snapshot.Dispatch.Attempts[i]
+		}
+	}
+	if attempt == nil || attempt.Status != "completed" || !attempt.Applied || attempt.FinalStatus != "completed" || attempt.TurnID == "" || attempt.ThreadID != snapshot.Review.ThreadID {
+		return result, fmt.Errorf("reviewer source-change turn lacks completed identity")
+	}
+	verdict, err := codexapp.ParseRoleResult(attempt.FinalText)
+	if err != nil || verdict.Question == nil || !verdict.Question.SourceChange || (verdict.Disposition != "decision_required" && verdict.Disposition != "blocker") {
+		return result, fmt.Errorf("reviewer did not request a source-changing decision")
+	}
+	if err := agent.Idle(ctx, attempt.ThreadID); err != nil {
+		return result, fmt.Errorf("reviewer execution is not idle: %w", err)
+	}
+	result.Checkout = filepath.Join(store.Root, "workspaces", snapshot.RunID+"-review")
+	if err := verifyCandidate(store, snapshot, result.Checkout, true); err != nil {
+		return result, err
+	}
+	content, err := owner.ReviewEvidence(snapshot.Review.Number)
+	if err != nil {
+		return result, err
+	}
+	session := &hostSession{owner: owner, review: *snapshot.Review, threadID: attempt.ThreadID, turnID: attempt.TurnID, saved: true}
+	if !strings.HasPrefix(content, session.header()) {
+		return result, fmt.Errorf("pending assessment belongs to another candidate or scope")
+	}
+	body := strings.TrimSpace(strings.TrimPrefix(content, session.header()))
+	receipted, err := owner.VerifiedTurnReceipt("assessment", attempt.TurnID, body)
+	if err != nil || !receipted {
+		return result, fmt.Errorf("reviewer source-change findings lack exact receipt: %v", err)
+	}
+	if err := session.finalizeEvidence("changes_requested", attempt.TurnID); err != nil {
+		return result, err
+	}
+	if err := owner.FinishAssessment(snapshot.Review.Number, "changes_requested", attempt.TurnID); err != nil {
+		return result, err
+	}
+	result.Status = "changes_requested"
 	result.Snapshot, err = store.Status()
 	return result, err
 }

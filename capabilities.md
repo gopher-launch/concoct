@@ -67,4 +67,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Cancellation and configured stop triggers request provider interruption, list/terminate/clean the bound thread's opaque background-terminal handles, then require exact owned Linux process identities to cease through a stable grace interval. Unrelated processes are excluded; failed or uncertain cleanup retains an abnormal stop record. Automatic host signaling is disabled.
 - The active controller continues the bound task and role with recorded model, effort and full-access settings. Verified interrupted turns consume a bounded recovery dispatch without resetting prior consumption. Known zero-turn threads may be recreated; lost sessions reconstruct from current active task, review and source evidence. The controller does not select new work while an active run awaits reconciliation.
 
-The CLI workflow, operator answers/defer, broader threshold intervention and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.
+## CON-052 — Internal operator questions and task disposition
+
+- Structured reagent and reviewer blockers persist a question ID, requesting role and attempt, objective, evidence, missing action, options with tradeoffs, safe work and next step. Unanswered questions hold the active run without polling or new task selection.
+- Choice, text and answer-file contents are recorded in external task evidence before requester continuation. A source-changing reviewer decision within the agreed scope becomes candidate-bound findings for reagent correction and renewed independent review. Scope-changing questions require separate explicit authority; an answer does not grant dispatch authorization or verify an external action.
+- An idle active task can be deferred or abandoned with retained evidence and released ownership. Deferred work requires explicit reactivation with its recorded settings and consumption; abandoned work is terminal and excluded from automatic selection.
+
+The CLI workflow, broader threshold intervention and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.

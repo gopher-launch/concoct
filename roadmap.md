@@ -10,12 +10,12 @@ Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-The source tree includes internal selection, engineering, candidate freezing, bounded independent review/correction and stop/reconciliation/resume. The CLI remains a buildable skeleton; the complete workflow remains planned. CON-052 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+The source tree includes internal selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume and operator interventions. The CLI remains a buildable skeleton; the complete workflow remains planned. CON-053 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-052` is ready after CON-051 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-053` is ready after CON-052 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the unfinished runner to build itself. The reset CLI truthfully exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation. CON-055 completes the new operator interface.
@@ -259,7 +259,7 @@ Delivered internal stop/recovery: canceled or configured-triggered turns record 
 ## CON-052 — Route genuine answers and preserve deferred work
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F003
 - Depends on: CON-051
@@ -275,10 +275,12 @@ Delivered internal stop/recovery: canceled or configured-triggered turns record 
 
 **Verification:** both-role blocker routing, durable answer before failed launch, stale/wrong question rejection, remaining authorization wait, deferred reactivation and terminal abandon tests.
 
+Delivered internal intervention handling: structured reagent/reviewer questions bind the requesting attempt and retain context in active evidence. Choice, text and file contents persist before requester continuation; source-changing reviewer answers within the agreed scope become findings for reagent correction and renewed review. Questions that request scope revision remain held for separate explicit authority. Answers do not authorize pending dispatches or prove external actions. Idle-only defer and abandon release active ownership while retaining records; deferred tasks require explicit reactivation, and abandoned tasks remain unavailable to automatic selection.
+
 ## CON-053 — Integrate only the exact operator-accepted candidate
 
 - Kind: task
-- Status: planned
+- Status: ready
 - Priority: high
 - Parent: CON-F004
 - Depends on: CON-052
@@ -353,4 +355,4 @@ Delivered internal stop/recovery: canceled or configured-triggered turns record 
 
 ## Next task boundary
 
-CON-052 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-053 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
