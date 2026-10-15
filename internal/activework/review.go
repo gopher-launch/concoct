@@ -113,7 +113,7 @@ func (o *Owner) ReplaceLostReviewThread(number int, priorID, nextID string) erro
 	if err != nil {
 		return err
 	}
-	if st.Review == nil || st.Review.Number != number || st.Review.Verdict != "" || st.Review.ThreadID != priorID || st.RoleIDs["iragent"] != priorID || nextID == "" || nextID == priorID || nextID == st.RoleIDs["reagent"] {
+	if st.Review == nil || st.Review.Number != number || st.Review.Verdict != "" || (st.Review.ThreadID != priorID && !(number > 1 && st.Review.ThreadID == "")) || st.RoleIDs["iragent"] != priorID || nextID == "" || nextID == priorID || nextID == st.RoleIDs["reagent"] {
 		return fmt.Errorf("review thread replacement is not bound")
 	}
 	st.Review.ThreadID, st.RoleIDs["iragent"] = nextID, nextID

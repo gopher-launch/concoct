@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gopher-launch/concoct/internal/activework"
 	"github.com/gopher-launch/concoct/internal/codexapp"
@@ -28,6 +32,16 @@ type stoppedReviewer struct {
 type observedReviewer struct {
 	*fakeReviewer
 	turns, reads int
+	busy         bool
+	idleChecks   int
+}
+
+func (a *observedReviewer) Idle(_ context.Context, id string) error {
+	a.idleChecks++
+	if id != "reviewer-thread" || a.busy {
+		return errors.New("reviewer background work remains active")
+	}
+	return nil
 }
 
 func (a *observedReviewer) RunTurn(_ context.Context, id, prompt string, settings codexapp.RoleSettings, handler codexapp.ToolHandler, onEvent func(codexapp.Event)) (codexapp.TurnOutcome, error) {
@@ -67,6 +81,202 @@ func TestObservedCompletedReviewFinalizedOnceWithoutReplay(t *testing.T) {
 	second, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
 	if err != nil || second.Status != "approved" || len(second.Snapshot.Dispatch.Assessments) != 1 || reviewer.turns != 1 {
 		t.Fatalf("completed turn was replayed: %+v, %v", second, err)
+	}
+}
+
+func TestObservedCompletedReviewWaitsForReviewerIdle(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	reviewer := &observedReviewer{fakeReviewer: &fakeReviewer{}, busy: true}
+	first, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
+	if err == nil || first.Status != "recovery_required" {
+		t.Fatalf("lost response: %+v, %v", first, err)
+	}
+	blocked, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
+	if err != nil || blocked.Status != "recovery_required" || blocked.Snapshot.Review.Verdict != "" || len(blocked.Snapshot.Dispatch.Assessments) != 0 || reviewer.turns != 1 {
+		t.Fatalf("busy reviewer was finalized or replayed: %+v, %v", blocked, err)
+	}
+	reviewer.busy = false
+	completed, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
+	if err != nil || completed.Status != "approved" || len(completed.Snapshot.Dispatch.Assessments) != 1 || reviewer.turns != 1 || reviewer.idleChecks < 2 {
+		t.Fatalf("quiescent reviewer did not finalize once: %+v, %v", completed, err)
+	}
+}
+
+type zeroTurnReviewer struct {
+	*fakeReviewer
+	resumes, turns int
+}
+
+func (a *zeroTurnReviewer) ResumeThread(_ context.Context, id string, hadTurn bool, settings codexapp.RoleSettings) (codexapp.Thread, error) {
+	a.resumes++
+	if id != "reviewer-thread" || hadTurn || settings.Role != "iragent" || settings.Effort != "high" {
+		return codexapp.Thread{}, errors.New("zero-turn reviewer binding changed")
+	}
+	return codexapp.Thread{}, codexapp.ErrProvisionalThread
+}
+
+func (a *zeroTurnReviewer) StartThread(ctx context.Context, cwd string, settings codexapp.RoleSettings, tools []codexapp.ToolSpec) (codexapp.Thread, error) {
+	if _, err := a.fakeReviewer.StartThread(ctx, cwd, settings, tools); err != nil {
+		return codexapp.Thread{}, err
+	}
+	return codexapp.Thread{ID: "replacement-reviewer"}, nil
+}
+
+func (a *zeroTurnReviewer) RunTurn(_ context.Context, id, _ string, _ codexapp.RoleSettings, handler codexapp.ToolHandler, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+	a.turns++
+	if id != "replacement-reviewer" {
+		return codexapp.TurnOutcome{}, errors.New("wrong reviewer thread dispatched")
+	}
+	body, _ := json.Marshal(map[string]string{"content": "Reconstructed reviewer assessed exact candidate."})
+	response, err := handler(context.Background(), codexapp.ToolCall{Role: "iragent", ThreadID: id, TurnID: "recovered-review-turn", CallID: "recovered-assessment", Tool: "save_assessment", Arguments: body})
+	if err != nil {
+		return codexapp.TurnOutcome{}, err
+	}
+	if err := response.Commit(context.Background()); err != nil {
+		return codexapp.TurnOutcome{}, err
+	}
+	return codexapp.TurnOutcome{ThreadID: id, TurnID: "recovered-review-turn", Status: "completed", FinalText: `{"disposition":"approved","summary":"checked"}`}, nil
+}
+
+func TestZeroTurnReviewerRecreatedWithSameAssessment(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	first, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true)})
+	if err != nil || first.Status != "ready_for_review" || first.Snapshot.Candidate == nil {
+		t.Fatalf("candidate setup: %+v, %v", first, err)
+	}
+	store, err := activework.Open(repo, external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := owner.BeginReview("zero-turn-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = owner.ReserveDispatch(binding.AttemptID, dispatch.Binding{TaskID: first.TaskID, Role: dispatch.Iragent, Activity: dispatch.Review, Candidate: first.Snapshot.Candidate.Commit}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.BindReviewThread(binding.Number, "reviewer-thread"); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.BindDispatchThread(binding.AttemptID, "reviewer-thread"); err != nil {
+		t.Fatal(err)
+	}
+	owner.Close() // crash before turn/start intent
+	reviewer := &zeroTurnReviewer{fakeReviewer: &fakeReviewer{}}
+	result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
+	if err != nil || result.Status != "approved" || result.Snapshot.Candidate.Commit != first.Snapshot.Candidate.Commit || result.Snapshot.Review.Number != 1 || result.Snapshot.Review.ThreadID != "replacement-reviewer" || reviewer.starts != 1 || reviewer.resumes != 1 || reviewer.turns != 1 || len(result.Snapshot.Dispatch.Assessments) != 1 {
+		t.Fatalf("zero-turn reviewer recovery: %+v, %v", result, err)
+	}
+	attempts := result.Snapshot.Dispatch.Attempts
+	if len(attempts) != 3 || attempts[1].Status != "failed" || attempts[2].Binding.Activity != dispatch.Recovery || attempts[2].Binding.Episode != attempts[1].ID {
+		t.Fatalf("zero-turn recovery reset dispatch history: %+v", attempts)
+	}
+}
+
+type lostCorrectionReviewer struct {
+	*fakeReviewer
+	reagent      *fakeAgent
+	turns        int
+	quietCalls   int
+	idleCalls    int
+	quietBlocked bool
+}
+
+func (a *lostCorrectionReviewer) StartThread(ctx context.Context, cwd string, settings codexapp.RoleSettings, tools []codexapp.ToolSpec) (codexapp.Thread, error) {
+	if _, err := a.fakeReviewer.StartThread(ctx, cwd, settings, tools); err != nil {
+		return codexapp.Thread{}, err
+	}
+	return codexapp.Thread{ID: fmt.Sprintf("reviewer-%d", a.starts)}, nil
+}
+
+func (a *lostCorrectionReviewer) ResumeThread(_ context.Context, id string, hadTurn bool, settings codexapp.RoleSettings) (codexapp.Thread, error) {
+	if id != "reviewer-1" || !hadTurn || settings.Role != "iragent" {
+		return codexapp.Thread{}, errors.New("lost reviewer binding changed")
+	}
+	return codexapp.Thread{}, codexapp.ErrMissingRollout
+}
+
+func (a *lostCorrectionReviewer) Idle(_ context.Context, id string) error {
+	if id == "reviewer-1" {
+		a.idleCalls++
+		if a.idleCalls > 1 {
+			return codexapp.ErrMissingRollout
+		}
+	}
+	return nil
+}
+
+func (a *lostCorrectionReviewer) OwnedQuiet(context.Context) error {
+	a.quietCalls++
+	if a.quietBlocked {
+		return errors.New("owned reviewer process still running")
+	}
+	return nil
+}
+
+func (a *lostCorrectionReviewer) RunTurn(_ context.Context, id, prompt string, _ codexapp.RoleSettings, handler codexapp.ToolHandler, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+	a.turns++
+	turn, verdict := "review-turn-1", "changes_requested"
+	if a.turns == 1 {
+		a.reagent.run = func(_ string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+			workspace := strings.TrimSuffix(a.cwd, "-review")
+			// The task checkout is the sibling of the review checkout.
+			if err := os.WriteFile(filepath.Join(workspace, "feature.go"), []byte("package feature\n\nfunc Corrected() bool { return true }\n"), 0600); err != nil {
+				return codexapp.TurnOutcome{}, err
+			}
+			evidence := readyEvidence()
+			evidence.Progress = "Corrected feature after review."
+			evidence.SelfReview = "Checked corrected source and scope."
+			body, _ := json.Marshal(evidence)
+			args, _ := json.Marshal(map[string]string{"content": string(body)})
+			response, err := handler(context.Background(), codexapp.ToolCall{Role: "reagent", ThreadID: "fresh-thread", TurnID: "correction-turn", CallID: "correction-checkpoint", Tool: "save_checkpoint", Arguments: args})
+			if err != nil {
+				return codexapp.TurnOutcome{}, err
+			}
+			if err := response.Commit(context.Background()); err != nil {
+				return codexapp.TurnOutcome{}, err
+			}
+			return codexapp.TurnOutcome{ThreadID: "fresh-thread", TurnID: "correction-turn", Status: "completed", FinalText: `{"disposition":"ready_for_review","summary":"corrected"}`}, nil
+		}
+	} else {
+		turn, verdict = "review-turn-2", "approved"
+		if id != "reviewer-2" || !strings.Contains(prompt, "Fix feature.go") {
+			return codexapp.TurnOutcome{}, errors.New("replacement reviewer lost correction evidence")
+		}
+	}
+	body, _ := json.Marshal(map[string]string{"content": "Fix feature.go"})
+	response, err := handler(context.Background(), codexapp.ToolCall{Role: "iragent", ThreadID: id, TurnID: turn, CallID: "assessment-" + turn, Tool: "save_assessment", Arguments: body})
+	if err != nil {
+		return codexapp.TurnOutcome{}, err
+	}
+	if err := response.Commit(context.Background()); err != nil {
+		return codexapp.TurnOutcome{}, err
+	}
+	return codexapp.TurnOutcome{ThreadID: id, TurnID: turn, Status: "completed", FinalText: `{"disposition":"` + verdict + `","summary":"checked"}`}, nil
+}
+
+func TestLostReviewerCorrectionUsesSameAssessmentSequence(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	base := readyAgent(t, repo, external, readyEvidence(), false, true)
+	agent := &continuingAgent{fakeAgent: base}
+	reviewer := &lostCorrectionReviewer{fakeReviewer: &fakeReviewer{}, reagent: base, quietBlocked: true}
+	blocked, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent, Reviewer: reviewer})
+	if err == nil || blocked.Status != "recovery_required" || blocked.Snapshot.Review.Number != 2 || blocked.Snapshot.Review.Verdict != "" || reviewer.starts != 1 {
+		t.Fatalf("unquiet lost reviewer advanced: %+v, %v", blocked, err)
+	}
+	reviewer.quietBlocked = false
+	result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
+	if err != nil || result.Status != "approved" || result.Snapshot.Review.Number != 2 || result.Snapshot.Review.ThreadID != "reviewer-2" || len(result.Snapshot.Dispatch.Assessments) != 2 || reviewer.starts != 2 || reviewer.turns != 2 || reviewer.quietCalls == 0 {
+		t.Fatalf("lost reviewer correction: %+v, %v", result, err)
+	}
+	attempts := result.Snapshot.Dispatch.Attempts
+	if len(attempts) != 5 || attempts[4].Binding.Activity != dispatch.Recovery || attempts[4].Binding.Episode != attempts[3].ID || attempts[3].Status != "failed" {
+		t.Fatalf("lost reviewer recovery reset dispatch history: %+v", attempts)
 	}
 }
 

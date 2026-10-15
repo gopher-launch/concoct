@@ -31,11 +31,14 @@ type resumer interface {
 }
 
 type Config struct {
-	Agent              Agent
-	OnEvent            func(codexapp.Event)
-	StopTrigger        func(codexapp.Event) bool
-	RecoveryEpisode    string // nonempty only for a reconciled interrupted assessment
-	AllowFreshRecovery bool
+	Agent           Agent
+	OnEvent         func(codexapp.Event)
+	StopTrigger     func(codexapp.Event) bool
+	RecoveryEpisode string // nonempty only for a reconciled interrupted assessment
+}
+
+type ownedQuieter interface {
+	OwnedQuiet(context.Context) error
 }
 
 type Result struct {
@@ -120,9 +123,31 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 			return result, err
 		}
 	}
+	settings := snapshot.Dispatch.Profiles[dispatch.Iragent]
+	if settings.Role != "iragent" || settings.Model == "" || settings.Effort == "" || settings.Sandbox != "danger-full-access" || settings.ApprovalPolicy != "never" {
+		return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("reviewer settings are not explicitly resolved for full access"))
+	}
+	priorID := snapshot.RoleIDs["iragent"]
+	hadTurn := reviewerHadTurn(snapshot, priorID)
+	var thread codexapp.Thread
+	lost := false
 	if binding.Number > 1 {
-		if err := cfg.Agent.Idle(ctx, snapshot.RoleIDs["iragent"]); err != nil {
-			return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("prior reviewer is not idle: %w", err))
+		if err := cfg.Agent.Idle(ctx, priorID); err != nil {
+			if !codexapp.IsMissingRollout(err) {
+				return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("prior reviewer is not idle: %w", err))
+			}
+			// A missing rollout may make the provider's per-thread idle query
+			// unavailable. Confirm exact loss and owned-process quiescence before
+			// changing the review checkout.
+			resuming, ok := cfg.Agent.(resumer)
+			if !ok || priorID == "" {
+				return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("prior reviewer is not idle: %w", err))
+			}
+			_, resumeErr := resuming.ResumeThread(ctx, priorID, hadTurn, settings)
+			if resumeErr == nil || !canReplaceReviewer(ctx, cfg.Agent, snapshot, priorID, hadTurn, resumeErr) {
+				return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("prior reviewer is not idle: %w; resume: %v", err, resumeErr))
+			}
+			lost = true
 		}
 		head, headErr := gitOutput(result.Checkout, "rev-parse", "HEAD")
 		if headErr != nil {
@@ -139,28 +164,28 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	if err := verifyCandidate(store, snapshot, result.Checkout, true); err != nil {
 		return failLaunch(owner, store, &result, binding.AttemptID, err)
 	}
-	settings := snapshot.Dispatch.Profiles[dispatch.Iragent]
-	if settings.Role != "iragent" || settings.Model == "" || settings.Effort == "" || settings.Sandbox != "danger-full-access" || settings.ApprovalPolicy != "never" {
-		return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("reviewer settings are not explicitly resolved for full access"))
-	}
-	var thread codexapp.Thread
 	if binding.ThreadID == "" && binding.Number == 1 {
 		thread, err = cfg.Agent.StartThread(ctx, result.Checkout, settings, toolSpecs())
+	} else if lost {
+		thread, err = cfg.Agent.StartThread(ctx, result.Checkout, settings, toolSpecs())
+		if err == nil {
+			err = owner.ReplaceLostReviewThread(binding.Number, priorID, thread.ID)
+		}
 	} else {
 		resuming, ok := cfg.Agent.(resumer)
-		if !ok || snapshot.RoleIDs["iragent"] == "" {
+		if !ok || priorID == "" {
 			return failLaunch(owner, store, &result, binding.AttemptID, fmt.Errorf("existing reviewer thread cannot be resumed"))
 		}
 		replaced := false
-		thread, err = resuming.ResumeThread(ctx, snapshot.RoleIDs["iragent"], true, settings)
-		if err != nil && cfg.AllowFreshRecovery && codexapp.IsMissingRollout(err) {
+		thread, err = resuming.ResumeThread(ctx, priorID, hadTurn, settings)
+		if err != nil && canReplaceReviewer(ctx, cfg.Agent, snapshot, priorID, hadTurn, err) {
 			thread, err = cfg.Agent.StartThread(ctx, result.Checkout, settings, toolSpecs())
 			if err == nil {
-				err = owner.ReplaceLostReviewThread(binding.Number, snapshot.RoleIDs["iragent"], thread.ID)
+				err = owner.ReplaceLostReviewThread(binding.Number, priorID, thread.ID)
 				replaced = err == nil
 			}
 		}
-		if err == nil && thread.ID != snapshot.RoleIDs["iragent"] && !replaced {
+		if err == nil && thread.ID != priorID && !replaced {
 			err = fmt.Errorf("resumed reviewer identity changed")
 		}
 	}
@@ -300,6 +325,55 @@ func findAttempt(policy *dispatch.State, id string) *dispatch.Attempt {
 	return nil
 }
 
+func reviewerHadTurn(snapshot activework.Snapshot, threadID string) bool {
+	if snapshot.Dispatch == nil || threadID == "" {
+		return false
+	}
+	for _, attempt := range snapshot.Dispatch.Attempts {
+		if attempt.ThreadID == threadID && attempt.Binding.Role == dispatch.Iragent && attempt.TurnRequested {
+			return true
+		}
+	}
+	return false
+}
+
+// Missing rollout is evidence of session loss, not of process cessation.
+// Previously dispatched work must be resolved and the dedicated provider's
+// owned execution children quiet before a replacement thread is launched.
+func canReplaceReviewer(ctx context.Context, agent Agent, snapshot activework.Snapshot, threadID string, hadTurn bool, resumeErr error) bool {
+	if threadID == "" || snapshot.Dispatch == nil || !(codexapp.IsMissingRollout(resumeErr) || !hadTurn && codexapp.IsProvisionalThread(resumeErr)) {
+		return false
+	}
+	for _, attempt := range snapshot.Dispatch.Attempts {
+		if attempt.ThreadID != threadID || attempt.Binding.Role != dispatch.Iragent {
+			continue
+		}
+		if attempt.Status == "reserved" || attempt.Status == "uncertain" {
+			return false
+		}
+		if !attempt.TurnRequested {
+			continue
+		}
+		if attempt.Status == "completed" && attempt.Applied {
+			continue
+		}
+		stopped := false
+		for _, record := range snapshot.StopHistory {
+			if record.AttemptID == attempt.ID && record.Status == "stopped_safely" {
+				stopped = true
+			}
+		}
+		if attempt.Status != "reconciled" || !stopped {
+			return false
+		}
+	}
+	if !hadTurn {
+		return true // metadata-only thread: no provider turn was requested
+	}
+	quieter, ok := agent.(ownedQuieter)
+	return ok && quieter.OwnedQuiet(ctx) == nil
+}
+
 func randomID() (string, error) {
 	var bytes [16]byte
 	if _, err := rand.Read(bytes[:]); err != nil {
@@ -351,7 +425,7 @@ func prompt(snapshot activework.Snapshot, binding activework.PendingReview, task
 
 // ReconcileCompleted finalizes one provider-observed completed assessment
 // only when its exact callback receipt and frozen source still match.
-func ReconcileCompleted(owner *activework.Owner, store *activework.Store, observed codexapp.ObservedTurn) (Result, error) {
+func ReconcileCompleted(ctx context.Context, agent Agent, owner *activework.Owner, store *activework.Store, observed codexapp.ObservedTurn) (Result, error) {
 	var result Result
 	snapshot, err := store.Status()
 	if err != nil {
@@ -361,6 +435,12 @@ func ReconcileCompleted(owner *activework.Owner, store *activework.Store, observ
 		return result, fmt.Errorf("no pending exact assessment to reconcile")
 	}
 	result.Checkout = filepath.Join(store.Root, "workspaces", snapshot.RunID+"-review")
+	if agent == nil || snapshot.Review.ThreadID == "" {
+		return result, fmt.Errorf("bound reviewer is unavailable for idle verification")
+	}
+	if err := agent.Idle(ctx, snapshot.Review.ThreadID); err != nil {
+		return result, fmt.Errorf("reviewer tool work is not idle: %w", err)
+	}
 	if err := verifyCandidate(store, snapshot, result.Checkout, true); err != nil {
 		return result, err
 	}

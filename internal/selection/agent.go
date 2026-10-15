@@ -78,6 +78,15 @@ func (a CodexAgent) StopTurn(ctx context.Context, threadID, turnID string) stop.
 	return stop.Run(ctx, a.Client, a.Owned, threadID, turnID, 2*time.Second)
 }
 
+func (a CodexAgent) OwnedQuiet(ctx context.Context) error {
+	if a.Owned == nil {
+		return fmt.Errorf("owned-process probe is unavailable")
+	}
+	quietCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return a.Owned.Quiet(quietCtx, 2*time.Second)
+}
+
 // Idle requires both the completed turn's resolved callbacks and an empty
 // provider background-terminal list before source can be frozen.
 func (a CodexAgent) Idle(ctx context.Context, threadID string) error {
@@ -91,9 +100,7 @@ func (a CodexAgent) Idle(ctx context.Context, threadID string) error {
 	if len(terminals) != 0 {
 		return fmt.Errorf("role thread still has %d background terminals", len(terminals))
 	}
-	quietCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	return a.Owned.Quiet(quietCtx, 2*time.Second)
+	return a.OwnedQuiet(ctx)
 }
 
 func toolSpecs() []codexapp.ToolSpec {

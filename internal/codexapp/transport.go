@@ -19,6 +19,7 @@ const TestedVersion = "0.147.0"
 var (
 	ErrDisconnected        = errors.New("Codex app-server disconnected")
 	ErrProvisionalThread   = errors.New("metadata-only thread has no confirmed turn history")
+	ErrMissingRollout      = errors.New("provider thread rollout is unavailable")
 	ErrMalformedRoleResult = errors.New("malformed role result")
 	ErrUncertainCallback   = errors.New("host callback acknowledgment is uncertain")
 	ErrUncertainDispatch   = errors.New("turn dispatch acknowledgment is uncertain")

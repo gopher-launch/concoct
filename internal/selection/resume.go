@@ -181,7 +181,7 @@ func applyCompleted(ctx context.Context, cfg Config, owner *activework.Owner, st
 		return holdContinuation(owner, store, result, "recovery-required", "provider result differs from recorded outcome")
 	}
 	if attempt.Binding.Role == dispatch.Iragent {
-		assessment, err := review.ReconcileCompleted(owner, store, observed)
+		assessment, err := review.ReconcileCompleted(ctx, reviewerFor(cfg), owner, store, observed)
 		if err != nil {
 			return holdContinuation(owner, store, result, "recovery-required", "review completion cannot be reconciled: "+err.Error())
 		}
@@ -222,8 +222,25 @@ func continueAfterResolved(ctx context.Context, cfg Config, owner *activework.Ow
 	}
 	result.Snapshot = snapshot
 	if snapshot.Hold != "" {
-		result.Status = "decision_required"
-		return result, nil
+		if snapshot.Hold != "recovery-required" || snapshot.Phase != "reviewing" || snapshot.Review == nil || snapshot.Review.Verdict != "" || snapshot.Dispatch == nil {
+			result.Status = "decision_required"
+			return result, nil
+		}
+		priorResolved := false
+		for _, attempt := range snapshot.Dispatch.Attempts {
+			if attempt.ID == snapshot.Review.AttemptID && (attempt.Status == "failed" || attempt.Status == "reconciled") {
+				priorResolved = true
+				episode = attempt.ID
+				if attempt.Binding.Activity == dispatch.Recovery {
+					episode = attempt.Binding.Episode
+				}
+			}
+		}
+		if !priorResolved {
+			result.Status = "recovery_required"
+			return result, nil
+		}
+		recovering = true
 	}
 	switch snapshot.Phase {
 	case "ready-for-acceptance":
@@ -283,7 +300,7 @@ func continueAfterResolved(ctx context.Context, cfg Config, owner *activework.Ow
 		if reviewer == nil {
 			return holdContinuation(owner, store, result, "recovery-required", "reviewer provider is unavailable")
 		}
-		assessment, err := review.Run(ctx, review.Config{Agent: reviewer, OnEvent: cfg.OnEvent, StopTrigger: cfg.StopTrigger, RecoveryEpisode: episode, AllowFreshRecovery: snapshot.Stop == nil && len(snapshot.StopHistory) > 0}, owner, store)
+		assessment, err := review.Run(ctx, review.Config{Agent: reviewer, OnEvent: cfg.OnEvent, StopTrigger: cfg.StopTrigger, RecoveryEpisode: episode}, owner, store)
 		result.Status, result.Snapshot = assessment.Status, assessment.Snapshot
 		if err != nil {
 			return result, err

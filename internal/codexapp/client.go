@@ -300,6 +300,9 @@ func (c *Client) CleanBackgroundTerminals(ctx context.Context, threadID string) 
 func IsProvisionalThread(err error) bool { return errors.Is(err, ErrProvisionalThread) }
 
 func IsMissingRollout(err error) bool {
+	if errors.Is(err, ErrMissingRollout) {
+		return true
+	}
 	var providerErr *rpcError
 	return errors.As(err, &providerErr) && providerErr.Code == -32000 && strings.TrimSpace(providerErr.Message) == "no rollout found"
 }
