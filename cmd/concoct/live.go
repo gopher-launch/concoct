@@ -99,7 +99,14 @@ func (l liveOperations) Do(ctx context.Context, req request, onEvent func(codexa
 		if req.Task != "" && (!snapshot.Active || snapshot.TaskID != req.Task) {
 			return outcome{Snapshot: snapshot}, fmt.Errorf("task %q is not active", req.Task)
 		}
-		return outcome{Disposition: disposition(snapshot), Snapshot: snapshot}, nil
+		result := outcome{Disposition: disposition(snapshot), Snapshot: snapshot}
+		if result.Disposition == "ready_for_acceptance" && snapshot.Acceptance != nil {
+			result.Approval, err = approvalMaterials(store, snapshot)
+			if err != nil {
+				return outcome{Snapshot: snapshot}, err
+			}
+		}
+		return result, err
 	}
 	if snapshot.PendingStart {
 		owner, err := store.Acquire()
@@ -207,12 +214,15 @@ func (l liveOperations) Do(ctx context.Context, req request, onEvent func(codexa
 			if err != nil {
 				return outcome{}, err
 			}
-			return outcome{Disposition: "ready_for_acceptance", Snapshot: fresh, Acceptance: &acceptance, Summary: "Reviewed candidate is ready for exact operator acceptance."}, nil
+			return acceptanceResult(store, fresh, acceptance, "Reviewed candidate is ready for exact operator acceptance.")
 		}
 		if snapshot.Active && snapshot.Dispatch != nil && snapshot.Dispatch.Pending != nil && !snapshot.Dispatch.Pending.Authorized {
 			return outcome{Disposition: "authorization_required", Snapshot: snapshot}, nil
 		}
 		if snapshot.Active && snapshot.Question != nil && snapshot.Question.AnswerMode == "" {
+			return outcome{Disposition: "decision_required", Snapshot: snapshot}, nil
+		}
+		if snapshot.Active && (snapshot.Hold == "limit-exhausted" || snapshot.Hold == "operator-decision") {
 			return outcome{Disposition: "decision_required", Snapshot: snapshot}, nil
 		}
 	}
@@ -359,13 +369,43 @@ func (l liveOperations) agentOperation(ctx context.Context, req request, store *
 		if err != nil {
 			return outcome{}, err
 		}
-		return outcome{Disposition: "ready_for_acceptance", Snapshot: fresh, Acceptance: &acceptance, Summary: result.Summary}, nil
+		return acceptanceResult(store, fresh, acceptance, result.Summary)
 	}
 	returned := outcome{Disposition: normalize(result.Status), Snapshot: result.Snapshot, Summary: result.Summary}
 	if result.Status == "deferred" {
 		returned.Next = "concoct run --resume " + req.Defer
 	}
 	return returned, nil
+}
+
+func acceptanceResult(store *activework.Store, snapshot activework.Snapshot, acceptance activework.Acceptance, summary string) (outcome, error) {
+	materials, err := approvalMaterials(store, snapshot)
+	if err != nil {
+		return outcome{Snapshot: snapshot}, err
+	}
+	return outcome{Disposition: "ready_for_acceptance", Snapshot: snapshot, Acceptance: &acceptance, Summary: summary, Approval: materials}, err
+}
+
+func approvalMaterials(store *activework.Store, snapshot activework.Snapshot) (*approvalView, error) {
+	inspection, err := store.InspectAcceptance(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	var checkpoint selection.ReadyCheckpoint
+	if err := json.Unmarshal([]byte(inspection.Checkpoint), &checkpoint); err != nil {
+		return nil, fmt.Errorf("candidate checkpoint: %w", err)
+	}
+	base, candidate := snapshot.ParentCommit, snapshot.Candidate.Commit
+	git := "git -C " + shellQuote(store.Checkout) + " diff --no-ext-diff --binary " + base + " " + candidate + " --"
+	var reconciled []string
+	for _, path := range []string{"roadmap.md", "capabilities.md"} {
+		for _, changed := range snapshot.Candidate.ChangedPaths {
+			if changed == path {
+				reconciled = append(reconciled, path)
+			}
+		}
+	}
+	return &approvalView{DiffCommand: git, ReconciliationCommand: git + " roadmap.md capabilities.md", TaskEvidence: inspection.TaskPath, ReviewEvidence: inspection.ReviewPath, Progress: checkpoint.Progress, SelfReview: checkpoint.SelfReview, Criteria: checkpoint.Criteria, Checks: checkpoint.Checks, Assessment: inspection.Assessment, ReconciledPaths: reconciled}, nil
 }
 
 func readQuota(ctx context.Context, process provider) *dispatch.QuotaObservation {
@@ -435,7 +475,7 @@ func disposition(s activework.Snapshot) string {
 	if s.Dispatch != nil && s.Dispatch.Pending != nil && !s.Dispatch.Pending.Authorized {
 		return "authorization_required"
 	}
-	if s.Question != nil && s.Question.AnswerMode == "" || s.Hold == "operator-decision" {
+	if s.Question != nil && s.Question.AnswerMode == "" || s.Hold == "operator-decision" || s.Hold == "limit-exhausted" {
 		return "decision_required"
 	}
 	if s.Review != nil && s.Review.Verdict == "approved" {

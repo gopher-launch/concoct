@@ -87,7 +87,7 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 
 ## CON-055 — Operator CLI
 
-- `run` starts or resumes one controller task using the verified Linux Codex app-server, and `status` reads an atomic active-work snapshot without a provider call or execution lock. Fresh role model/effort and dispatch-gate choices are explicit; effective settings, quota age/windows, consumption, candidate identity and bound next actions are displayed.
+- `run` starts or resumes one controller task using the verified Linux Codex app-server, and `status` reads an atomic active-work snapshot without a provider call or execution lock. Fresh role model/effort and dispatch-gate choices are explicit; effective settings, quota age/windows, consumption, candidate identity and bound next actions are displayed. Structured questions and exhausted-limit holds expose their action context; acceptance results expose candidate-bound task/review evidence, verification and exact diff commands.
 - Exact stable IDs route question answers, dispatch authorization, candidate acceptance/local integration, limit extensions, defer/abandon and deferred reactivation. A successful accepted integration proceeds to mechanical completion; interrupted maintenance is retried without an agent turn. Invalid or unsupported options and stale IDs fail explicitly.
 - Agent messages stream before the separate verified controller result. Human, quiet and JSON-lines output retain actionable dispositions and documented exit codes. The CLI does not install project templates, reuse legacy choreography, push or publish.
 

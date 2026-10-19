@@ -101,6 +101,85 @@ func TestCLIStreamsProgressBeforeVerifiedResult(t *testing.T) {
 	}
 }
 
+func TestCLIQuestionContextInHumanQuietAndJSON(t *testing.T) {
+	question := &activework.Question{ID: "question-1", Requester: "iragent", Objective: "Assess APP-002", Evidence: "Two input modes are possible.", Missing: "Choose a mode.", SafeWork: "Inspect tests.", NextStep: "Resume review after answer.", Options: []activework.QuestionOption{{ID: "safe", Description: "Safe mode", Tradeoff: "Slower"}}}
+	snapshot := activework.Snapshot{Active: true, TaskID: "APP-002", Phase: "reviewing", Hold: "operator-decision", PendingRequest: "answer question-1 for iragent", Question: question}
+	for _, flags := range [][]string{nil, {"--quiet"}, {"--json"}} {
+		f := &fakeOperations{out: outcome{Disposition: "decision_required", Snapshot: snapshot}}
+		var out, errs bytes.Buffer
+		if code := run(context.Background(), append([]string{"run"}, flags...), &out, &errs, f); code != 10 {
+			t.Fatalf("question exit %v: %d %s", flags, code, errs.String())
+		}
+		for _, want := range []string{"question-1", "iragent", "Assess APP-002", "Two input modes", "Choose a mode", "Inspect tests", "Resume review", "safe", "Slower", "--answer question-1"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("%v missing %q: %s", flags, want, out.String())
+			}
+		}
+	}
+}
+
+func TestStatusStructuredQuestionReadOnly(t *testing.T) {
+	repo, root, store := cliRepo(t)
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Start(activework.StartSpec{TaskID: "APP-002", ParentBranch: "main", ParentCommit: strings.TrimSpace(string(base)), TaskBranch: "work/app-002", Objective: "test", Acceptance: "test", SelectionRationale: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	profiles := map[dispatch.Role]codexapp.RoleSettings{}
+	for _, role := range []dispatch.Role{dispatch.Reagent, dispatch.Iragent} {
+		profiles[role] = codexapp.RoleSettings{Role: string(role), Model: "test", Effort: "medium", Sandbox: "danger-full-access", ApprovalPolicy: "never"}
+	}
+	policy, err := dispatch.NewState(profiles, dispatch.DefaultLimits(), dispatch.GatePolicy{}, dispatch.QuotaPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.ConfigureDispatch(policy); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.UpdateOperational(activework.Operational{Phase: "engineering", RoleIDs: map[string]string{"reagent": "thread-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if decision, err := owner.ReserveDispatch("engineering-1", dispatch.Binding{TaskID: "APP-002", Role: dispatch.Reagent, Activity: dispatch.Engineering}, time.Now().UTC()); err != nil || !decision.Dispatch {
+		t.Fatalf("reserve: %+v %v", decision, err)
+	}
+	for _, step := range []func() error{
+		func() error { return owner.BindDispatchThread("engineering-1", "thread-1") },
+		func() error { return owner.MarkTurnRequested("engineering-1") },
+		func() error { return owner.ObserveDispatchTurn("engineering-1", "turn-1") },
+		func() error {
+			return owner.RecordDispatchOutcome("engineering-1", "thread-1", "turn-1", "completed", "question")
+		},
+		func() error { return owner.FinishDispatch("engineering-1", "completed", nil) },
+	} {
+		if err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	question, err := owner.AskRoleQuestion("reagent", "engineering-1", &codexapp.RoleQuestion{Objective: "Choose mode", Evidence: "Both modes pass.", Missing: "Pick one.", SafeWork: "Read docs.", NextStep: "Resume with choice.", Options: []codexapp.RoleQuestionOption{{ID: "safe", Description: "Safe mode", Tradeoff: "Slower"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	for _, flags := range [][]string{nil, {"--quiet"}, {"--json"}} {
+		var out, errs bytes.Buffer
+		args := append([]string{"status", "APP-002", "--repo", repo, "--root", root}, flags...)
+		if code := run(context.Background(), args, &out, &errs, liveOperations{}); code != 10 {
+			t.Fatalf("question status %v: %d %s", flags, code, errs.String())
+		}
+		for _, want := range []string{question.ID, "Choose mode", "Both modes pass", "Pick one", "Read docs", "Resume with choice", "safe", "Slower", "--answer " + question.ID, "--choice safe --repo '" + repo + "'"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("question status %v missing %q: %s", flags, want, out.String())
+			}
+		}
+	}
+}
+
 func TestCLIJSONInvalidOptionKeepsDisposition(t *testing.T) {
 	f := &fakeOperations{}
 	var out, errs bytes.Buffer
@@ -171,6 +250,60 @@ func TestStatusReadOnlyDuringOwnerAndStaleIDs(t *testing.T) {
 	}
 	if code := run(context.Background(), []string{"run", "--approve", "wrong", "--repo", repo, "--root", root}, &out, &errs, liveOperations{}); code != 2 {
 		t.Fatalf("stale acceptance accepted: %d", code)
+	}
+}
+
+func TestStatusLimitHoldHasExactExtension(t *testing.T) {
+	repo, root, store := cliRepo(t)
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Start(activework.StartSpec{TaskID: "APP-002", ParentBranch: "main", ParentCommit: strings.TrimSpace(string(base)), TaskBranch: "work/app-002", Objective: "test", Acceptance: "test", SelectionRationale: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	profiles := map[dispatch.Role]codexapp.RoleSettings{}
+	for _, role := range []dispatch.Role{dispatch.Reagent, dispatch.Iragent} {
+		profiles[role] = codexapp.RoleSettings{Role: string(role), Model: "test", Effort: "medium", Sandbox: "danger-full-access", ApprovalPolicy: "never"}
+	}
+	policy, err := dispatch.NewState(profiles, dispatch.Limits{Dispatches: 1, SelfReviews: 3, Assessments: 3, Recovery: 2}, dispatch.GatePolicy{}, dispatch.QuotaPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.ConfigureDispatch(policy); err != nil {
+		t.Fatal(err)
+	}
+	if decision, err := owner.ReserveDispatch("engineering-1", dispatch.Binding{TaskID: "APP-002", Role: dispatch.Reagent, Activity: dispatch.Engineering}, time.Now().UTC()); err != nil || !decision.Dispatch {
+		t.Fatalf("reserve: %+v %v", decision, err)
+	}
+	if err := owner.FinishDispatch("engineering-1", "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.UpdateOperational(activework.Operational{Phase: "engineering", Hold: "limit-exhausted", PendingRequest: "extend dispatch allowance to 2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, flags := range [][]string{nil, {"--quiet"}, {"--json"}} {
+		var out, errs bytes.Buffer
+		args := append([]string{"status", "APP-002", "--repo", repo, "--root", root}, flags...)
+		if code := run(context.Background(), args, &out, &errs, liveOperations{}); code != 10 {
+			t.Fatalf("status %v: %d %s", flags, code, errs.String())
+		}
+		for _, want := range []string{"decision_required", "extend dispatch allowance to 2", "concoct run --extend APP-002 --dispatch-limit 2"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("status %v missing %q: %s", flags, want, out.String())
+			}
+		}
+	}
+	var heldOut, heldErr bytes.Buffer
+	if code := run(context.Background(), []string{"run", "--repo", repo, "--root", root, "--codex", filepath.Join(t.TempDir(), "missing-codex")}, &heldOut, &heldErr, liveOperations{}); code != 10 || !strings.Contains(heldOut.String(), "--extend APP-002 --dispatch-limit 2") {
+		t.Fatalf("plain run lost held decision or launched provider: %d %s %s", code, heldOut.String(), heldErr.String())
 	}
 }
 
@@ -420,6 +553,42 @@ func TestCLIFullLocalDeliveryWithFakeProvider(t *testing.T) {
 	snapshot, err := store.Status()
 	if err != nil || snapshot.Acceptance == nil || snapshot.Candidate == nil {
 		t.Fatalf("candidate not offered: %+v %v", snapshot, err)
+	}
+	for _, want := range []string{"Source diff:", "Roadmap/capability diff:", "Final independent assessment:", "Candidate source and criteria verified.", "Criterion passed", "Review assessment:", "Final review verdict: approved"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("acceptance result missing %q: %s", want, out.String())
+		}
+	}
+	var statusOut bytes.Buffer
+	if code := run(context.Background(), []string{"status", "APP-002", "--json", "--repo", repo, "--root", root}, &statusOut, &errs, ops); code != 12 {
+		t.Fatalf("acceptance status: %d %s", code, statusOut.String())
+	}
+	for _, want := range []string{`"approval":`, `"diff_command":`, `"review_evidence":`, "Candidate source and criteria verified.", `"reconciled_paths":`} {
+		if !strings.Contains(statusOut.String(), want) {
+			t.Errorf("acceptance JSON missing %q: %s", want, statusOut.String())
+		}
+	}
+	var statusResult struct {
+		Approval struct {
+			ReviewEvidence string `json:"review_evidence"`
+		} `json:"approval"`
+	}
+	if err := json.Unmarshal(statusOut.Bytes(), &statusResult); err != nil {
+		t.Fatal(err)
+	}
+	reviewBytes, err := os.ReadFile(statusResult.Approval.ReviewEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statusResult.Approval.ReviewEvidence, append(append([]byte(nil), reviewBytes...), 'x'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	statusOut.Reset()
+	if code := run(context.Background(), []string{"status", "APP-002", "--json", "--repo", repo, "--root", root}, &statusOut, &errs, ops); code != 2 || !strings.Contains(statusOut.String(), "evidence digest mismatch") || strings.Contains(statusOut.String(), `"approval":`) {
+		t.Fatalf("tampered assessment remained approvable: %d %s", code, statusOut.String())
+	}
+	if err := os.WriteFile(statusResult.Approval.ReviewEvidence, reviewBytes, 0600); err != nil {
+		t.Fatal(err)
 	}
 	candidate, id := snapshot.Candidate.Commit, snapshot.Acceptance.ID
 	out.Reset()

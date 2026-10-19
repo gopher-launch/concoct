@@ -15,6 +15,7 @@ import (
 	"github.com/gopher-launch/concoct/internal/activework"
 	"github.com/gopher-launch/concoct/internal/codexapp"
 	"github.com/gopher-launch/concoct/internal/dispatch"
+	"github.com/gopher-launch/concoct/internal/selection"
 )
 
 type request struct {
@@ -33,6 +34,20 @@ type outcome struct {
 	Snapshot                   activework.Snapshot
 	Acceptance                 *activework.Acceptance
 	Completion                 *activework.CompletionResult
+	Approval                   *approvalView
+}
+
+type approvalView struct {
+	DiffCommand           string                        `json:"diff_command"`
+	ReconciliationCommand string                        `json:"reconciliation_command"`
+	TaskEvidence          string                        `json:"task_evidence"`
+	ReviewEvidence        string                        `json:"review_evidence"`
+	Progress              string                        `json:"progress"`
+	SelfReview            string                        `json:"self_review"`
+	Assessment            string                        `json:"assessment"`
+	Criteria              []selection.CriterionEvidence `json:"criteria"`
+	Checks                []selection.CheckEvidence     `json:"checks"`
+	ReconciledPaths       []string                      `json:"reconciled_paths"`
 }
 
 type operations interface {
@@ -114,19 +129,23 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ops opera
 	result.Next = contextualCommand(result.Next, req)
 	if req.JSON {
 		response := struct {
-			Type        string     `json:"type"`
-			Disposition string     `json:"disposition"`
-			Summary     string     `json:"summary"`
-			Next        string     `json:"next"`
-			Status      statusView `json:"status"`
-		}{"result", result.Disposition, result.Summary, result.Next, view(result.Snapshot)}
+			Type        string        `json:"type"`
+			Disposition string        `json:"disposition"`
+			Summary     string        `json:"summary"`
+			Next        string        `json:"next"`
+			Status      statusView    `json:"status"`
+			Approval    *approvalView `json:"approval,omitempty"`
+		}{"result", result.Disposition, result.Summary, result.Next, view(result.Snapshot, req), result.Approval}
 		_ = json.NewEncoder(stdout).Encode(response)
 	} else {
 		fmt.Fprintf(stdout, "\nConcoct: %s\n", result.Disposition)
 		if result.Summary != "" {
 			fmt.Fprintln(stdout, result.Summary)
 		}
-		printStatus(stdout, view(result.Snapshot))
+		printStatus(stdout, view(result.Snapshot, req))
+		if result.Approval != nil {
+			printApproval(stdout, *result.Approval)
+		}
 		if result.Next != "" {
 			fmt.Fprintln(stdout, "Next:", result.Next)
 		}
@@ -298,9 +317,11 @@ type statusView struct {
 	RunID           string                 `json:"run_id,omitempty"`
 	Phase           string                 `json:"phase,omitempty"`
 	Hold            string                 `json:"hold,omitempty"`
+	PendingRequest  string                 `json:"pending_request,omitempty"`
 	Candidate       string                 `json:"candidate,omitempty"`
 	ReviewVerdict   string                 `json:"review_verdict,omitempty"`
 	QuestionID      string                 `json:"question_id,omitempty"`
+	Question        *questionView          `json:"question,omitempty"`
 	AuthorizationID string                 `json:"authorization_id,omitempty"`
 	AcceptanceID    string                 `json:"acceptance_id,omitempty"`
 	TargetBranch    string                 `json:"target_branch,omitempty"`
@@ -316,22 +337,46 @@ type statusView struct {
 	QuotaWindows    map[string]quotaWindow `json:"quota_windows,omitempty"`
 }
 
+type questionView struct {
+	ID           string               `json:"id"`
+	Requester    string               `json:"requester"`
+	Objective    string               `json:"objective"`
+	Evidence     string               `json:"evidence"`
+	Missing      string               `json:"missing"`
+	SafeWork     string               `json:"safe_work"`
+	NextStep     string               `json:"next_step"`
+	Options      []questionOptionView `json:"options,omitempty"`
+	SourceChange bool                 `json:"source_change"`
+	ScopeChange  bool                 `json:"scope_change"`
+}
+
+type questionOptionView struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Tradeoff    string `json:"tradeoff"`
+	Command     string `json:"command"`
+}
+
 type quotaWindow struct {
 	UsedPercent      float64   `json:"used_percent"`
 	RemainingPercent float64   `json:"remaining_percent"`
 	ResetAt          time.Time `json:"reset_at,omitempty"`
 }
 
-func view(s activework.Snapshot) statusView {
-	v := statusView{ObservedAt: s.ObservedAt, Active: s.Active, PendingStart: s.PendingStart, TaskID: s.TaskID, RunID: s.RunID, Phase: s.Phase, Hold: s.Hold, QuotaAge: "unknown", Profiles: map[string]string{}}
+func view(s activework.Snapshot, req request) statusView {
+	v := statusView{ObservedAt: s.ObservedAt, Active: s.Active, PendingStart: s.PendingStart, TaskID: s.TaskID, RunID: s.RunID, Phase: s.Phase, Hold: s.Hold, PendingRequest: s.PendingRequest, QuotaAge: "unknown", Profiles: map[string]string{}}
 	if s.Candidate != nil {
 		v.Candidate = s.Candidate.Commit
 	}
 	if s.Review != nil {
 		v.ReviewVerdict = s.Review.Verdict
 	}
-	if s.Question != nil {
+	if s.Question != nil && s.Question.AnswerMode == "" {
 		v.QuestionID = s.Question.ID
+		v.Question = &questionView{ID: s.Question.ID, Requester: s.Question.Requester, Objective: s.Question.Objective, Evidence: s.Question.Evidence, Missing: s.Question.Missing, SafeWork: s.Question.SafeWork, NextStep: s.Question.NextStep, SourceChange: s.Question.SourceChange, ScopeChange: s.Question.ScopeChange}
+		for _, option := range s.Question.Options {
+			v.Question.Options = append(v.Question.Options, questionOptionView{ID: option.ID, Description: option.Description, Tradeoff: option.Tradeoff, Command: contextualCommand("concoct run --answer "+s.Question.ID+" --choice "+option.ID, req)})
+		}
 	}
 	if s.Acceptance != nil {
 		v.AcceptanceID, v.TargetBranch, v.TargetCommit = s.Acceptance.ID, s.Acceptance.TargetBranch, s.Acceptance.Candidate
@@ -378,6 +423,9 @@ func printStatus(w io.Writer, s statusView) {
 		fmt.Fprintf(w, "; hold %s", s.Hold)
 	}
 	fmt.Fprintln(w)
+	if s.PendingRequest != "" {
+		fmt.Fprintln(w, "Pending action:", s.PendingRequest)
+	}
 	if s.Candidate != "" {
 		fmt.Fprintln(w, "Candidate:", s.Candidate)
 	}
@@ -405,7 +453,12 @@ func printStatus(w io.Writer, s statusView) {
 		}
 	}
 	if s.QuestionID != "" {
-		fmt.Fprintln(w, "Question:", s.QuestionID)
+		q := s.Question
+		fmt.Fprintf(w, "Question %s from %s\nObjective: %s\nEvidence: %s\nMissing: %s\nSafe work: %s\nNext step: %s\n", q.ID, q.Requester, q.Objective, q.Evidence, q.Missing, q.SafeWork, q.NextStep)
+		for _, option := range q.Options {
+			fmt.Fprintf(w, "Option %s: %s (tradeoff: %s)\n", option.ID, option.Description, option.Tradeoff)
+			fmt.Fprintln(w, "  Choose:", option.Command)
+		}
 	}
 	if s.AuthorizationID != "" {
 		fmt.Fprintln(w, "Authorization:", s.AuthorizationID)
@@ -413,6 +466,24 @@ func printStatus(w io.Writer, s statusView) {
 	if s.AcceptanceID != "" {
 		fmt.Fprintln(w, "Acceptance:", s.AcceptanceID)
 	}
+}
+
+func printApproval(w io.Writer, a approvalView) {
+	fmt.Fprintln(w, "Recorded candidate evidence:", a.TaskEvidence)
+	fmt.Fprintln(w, "Final independent assessment:", a.ReviewEvidence)
+	fmt.Fprintln(w, "Source diff:", a.DiffCommand)
+	fmt.Fprintln(w, "Roadmap/capability diff:", a.ReconciliationCommand)
+	fmt.Fprintln(w, "Reconciled paths:", strings.Join(a.ReconciledPaths, ", "))
+	fmt.Fprintln(w, "Engineering progress:", a.Progress)
+	fmt.Fprintln(w, "Self-review:", a.SelfReview)
+	for _, criterion := range a.Criteria {
+		fmt.Fprintf(w, "Criterion %s: %s — %s\n", criterion.Result, criterion.Criterion, criterion.Evidence)
+	}
+	for _, check := range a.Checks {
+		fmt.Fprintf(w, "Check %s: %s — %s\n", check.Result, check.Command, check.Evidence)
+	}
+	fmt.Fprintln(w, "Final review verdict: approved")
+	fmt.Fprintln(w, "Review assessment:", a.Assessment)
 }
 
 func nextCommand(o outcome) string {
@@ -433,7 +504,19 @@ func nextCommand(o outcome) string {
 			return "concoct run --authorize " + s.Dispatch.Pending.ID
 		}
 	case "decision_required":
-		if s.Question != nil {
+		if s.Hold == "limit-exhausted" && s.Dispatch != nil && s.TaskID != "" {
+			var limits []string
+			if len(s.Dispatch.Attempts) >= s.Dispatch.Limits.Dispatches {
+				limits = append(limits, fmt.Sprintf("--dispatch-limit %d", len(s.Dispatch.Attempts)+1))
+			}
+			if len(s.Dispatch.Assessments) >= s.Dispatch.Limits.Assessments {
+				limits = append(limits, fmt.Sprintf("--review-limit %d", len(s.Dispatch.Assessments)+1))
+			}
+			if len(limits) != 0 {
+				return "concoct run --extend " + s.TaskID + " " + strings.Join(limits, " ")
+			}
+		}
+		if s.Question != nil && s.Question.AnswerMode == "" {
 			return "concoct run --answer " + s.Question.ID + " --text <answer>"
 		}
 	case "maintenance_pending", "in_progress", "stopped_safely", "recovery_required":
