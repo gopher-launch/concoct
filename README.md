@@ -1,6 +1,6 @@
 # Concoct
 
-Concoct runs one bounded roadmap task at a time with a reagent and an independent iragent. It retains active work outside the project, presents an exact reviewed candidate for operator acceptance, integrates locally only with that acceptance ID, then archives completion evidence. The first supported runner is Linux Codex CLI 0.147.0. The real external-project demonstration remains CON-056.
+Concoct runs one bounded roadmap task at a time with a reagent and an independent iragent. It retains active work outside the project, presents an exact reviewed candidate for operator acceptance, integrates locally only with that acceptance ID, then archives completion evidence. The first supported runner is Linux Codex CLI 0.147.0. The real external-project demonstration remains CON-056, after corrective tasks CON-058 and CON-059.
 
 ## Build
 
@@ -44,4 +44,4 @@ The read-only `internal/roadmap` parser accepts `## ID — title` entries with c
 
 ## Construction
 
-Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Record construction evidence outside this repository under `$HOME/.concoct/manual/<task-id>/`; independent review and explicit operator acceptance precede local integration. Historical Git, including CON-042, is reference material for selective harvesting. CON-056 is the next ready task in the intended post-integration state.
+Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Record construction evidence outside this repository under `$HOME/.concoct/manual/<task-id>/`; independent review and explicit operator acceptance precede local integration. Historical Git, including CON-042, is reference material for selective harvesting. CON-058 is the next ready task; CON-056 remains planned until the corrections are delivered.

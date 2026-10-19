@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-10-13
+updated: 2026-10-19
 ---
 
 # Concoct implementation roadmap
@@ -10,12 +10,12 @@ Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-The source tree includes selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration, mechanical completion and the operator CLI. The fresh real-project demonstration remains planned. CON-056 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+The source tree includes selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration, mechanical completion and the operator CLI. The first CON-056 real-project attempt stopped before independent review with uncertain callback acknowledgment and retained active work. CON-058 and CON-059 are corrective prerequisites; CON-056 remains planned. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-059 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-056` is ready after CON-055 delivery. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-058` is the next ready task after CON-055 delivery. CON-059 follows its integration, then CON-056 can resume acceptance work. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the runner to build itself. The CLI exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation.
@@ -30,7 +30,7 @@ The source tree includes selection, engineering, candidate freezing, bounded ind
 | M2: automatic candidate/review flow | CON-047–CON-050 | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance |
 | M3: durable interventions | CON-051–CON-052 | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition |
 | M4: accepted local delivery | CON-053–CON-054 | Exact-candidate integration and mechanical completion/archive lifecycle |
-| M5: nominal CLI and real proof | CON-055–CON-056 | Complete `concoct run` operator experience and one fresh real-task demonstration |
+| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-059 | Correct callback/recovery handling and operator presentation before completing the real-task demonstration |
 
 The order is deliberately sequential for the first delivery. The dependencies below identify concrete prerequisites rather than suggesting parallel agent work. Intermediate milestones are development checkpoints, not claims that a usable redesigned release has shipped.
 
@@ -96,7 +96,7 @@ Tasks CON-053–CON-054 implement guarded local integration and mechanical compl
 - Parent: CON-E001
 - Depends on: none
 
-Tasks CON-055–CON-056 expose the complete operator interface and demonstrate it on fresh real work.
+CON-055 exposes the operator interface. CON-058 corrects dynamic-tool completion and recovery; CON-059 makes its output and first-use guidance usable. CON-056 then completes real-work acceptance with the retained first attempt accounted for.
 
 ## CON-043 — Reset the repository to a clean rebuild baseline
 
@@ -340,13 +340,60 @@ Delivered internal completion: after exact integrated target verification, a dur
 
 Delivered operator CLI: `run` and read-only `status` expose the active controller. Exact question, dispatch, acceptance and task IDs route answers, authorization, local integration, limit extensions and defer/abandon/reactivation. Structured blockers and exhausted bounds display the pending action; acceptance displays bound review/checkpoint evidence and exact source/documentation diff commands. A fresh run resolves role settings from the provider catalog and invocation choices; active work retains its settings. Human agent messages stream before the separately verified final disposition, while quiet and JSON-lines modes preserve actionable results. Completion maintenance remains retryable without agent dispatch. Unsupported commands and stale IDs fail explicitly; no legacy choreography or publication path is exposed.
 
-## CON-056 — Prove the golden path on fresh real work
+## CON-058 — Correct dynamic-tool completion and retained recovery state
 
 - Kind: task
 - Status: ready
 - Priority: high
 - Parent: CON-F005
 - Depends on: CON-055
+
+**Objective:** recognize verified Codex dynamic-tool completion without a spurious callback hold, and retain enough truthful recovery evidence to resume the same task safely before independent review.
+
+**Acceptance criteria:**
+
+- Check the supported Codex 0.147.0 dynamic-tool request, response and completed-item contract against its schema/source and available current-run evidence. A matching successful `dynamicToolCall` item completion is provider acknowledgment; an unrelated `serverRequest/resolved` event is not required for this path. Record any trace limitation rather than claiming an exact observed event sequence without evidence.
+- Bind role, thread, turn, request/call and item identities, tool name and durable host-operation receipt. Distinguish receipt commit, response transport, provider completion and operation failure. A failed, missing, mismatched or genuinely uncertain callback cannot make reagent's reported `ready_for_review` a verified candidate or dispatch iragent.
+- Make relevant callback events and restart reconciliation idempotent across duplicates and reordered delivery. A response classification error cannot create another claim, replace agreed scope, alter a finalized review or spend another engineering dispatch. Preserve the distinct approval/input resolution contract.
+- Derive `run` and `status` recovery disposition from the same retained state. Persist the actual failure reason, affected operation/stage and available evidence reference with the last agent result; show a useful next step instead of only a generic pending request and attempt ID.
+- Keep previous active records readable, including the bound CURU-001 settings and consumption. A corrected resume reconciles the exact completed provider turn, callback/host receipts, checkpoint, workspace and source before candidate freeze or initial iragent review. If proof is insufficient, retain the hold and name the missing evidence. Do not infer candidate validity from agent JSON alone; existing scope, verification, clean-source and candidate identity checks still apply.
+- Do not modify or retry Curu, reset allowances, abandon active work, integrate or dispatch live model turns during this implementation. Deliver reviewed Concoct source and specific operator instructions for a later, separately authorized resume. Reconcile delivered behavior in product documentation and `capabilities.md` with the candidate.
+
+**Verification:** deterministic provider transcripts using dynamic-tool item completion without `serverRequest/resolved`, plus success, failure, absence, mismatched identities, numeric/string request IDs, relevant event ordering and duplicates. Exercise completed-turn/restart reconciliation, no duplicate host mutation or dispatch, identical `run`/`status` recovery classification with retained reason, prior active-state fixtures and valid approval/input resolution. Run applicable Go checks and independent review; no live model turn is needed.
+
+**Source starting points:** `internal/codexapp/turn.go`, `transport.go`, `transport_test.go`; `internal/selection/selection.go`, `resume.go`; `cmd/concoct/live.go`; active-work callback receipts.
+
+## CON-059 — Make operator output readable and document first use
+
+- Kind: task
+- Status: planned
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-058
+
+**Objective:** make live progress, recovery and status understandable to an operator while preserving streaming and the verified controller boundary.
+
+**Acceptance criteria:**
+
+- Lead `README.md` with a concise first-use journey: compatible Linux/Codex and build prerequisites, clean initialized project inputs, initial role settings, `run`/`status`, exact candidate and acceptance IDs, inspection, explicit approval and completion. Explain holds, exit codes, external state/workspaces, first-run profile choices and maintenance continuation using supported commands.
+- Use kebab-case for Concoct-owned public status, disposition and event names. Normalize Concoct-owned public CLI JSON field names consistently, document the output contract change and keep existing durable records and legacy role results readable. Leave provider-owned methods and fields in their required schema.
+- Track agent message item and role/turn boundaries. Stream ordinary chunks immediately within one message, retain its internal newlines and put a blank line between distinct messages. Handle adjacent or empty items and role switches without buffering the turn or waiting for verified completion.
+- Use actual item lifecycle/phase to separate structured final role results from human commentary. Parse control JSON and display a readable agent-reported summary separately from Concoct's verified disposition; do not dump raw control JSON in normal output. Malformed control results retain actionable diagnostics. Keep JSON mode machine-readable and quiet mode actionable.
+- Show recovery with the agent's reported result, incomplete controller verification, specific retained reason, whether iragent review began and what the suggested command will do. Treat diagnostic IDs as supporting details; do not invent an absent operation name or promise review before checks succeed. Show a readable pre-claim selection state and distinguish missing token receipts from measured zero.
+- Render human-facing timestamps in the operator's local timezone by default, honoring `TZ`, with a visible zone/offset and a documented UTC or alternate-zone choice. Keep durable UTC instants and prior records unambiguous. Apply this consistently to displayed CLI timestamp views.
+- Preserve CON-058's exact-candidate, recovery and `run`/`status` safeguards. Reconcile README, roadmap and capabilities with delivered behavior in the candidate; keep trial and review records outside the product repository.
+
+**Verification:** output fixtures with distinct message items, fragmented commentary and split final JSON, role changes, empty items and malformed control data; human/JSON/quiet, recovery and pre-claim selection views; previous active-state fixtures; local/UTC timestamp and DST-boundary cases. Exercise CLI behavior, run applicable Go checks and independent review. No live model turn is required.
+
+**Source starting points:** `README.md`; `cmd/concoct/cli.go`, `live.go`, `cli_test.go`; `internal/codexapp` item event metadata.
+
+## CON-056 — Prove the golden path on fresh real work
+
+- Kind: task
+- Status: planned
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-055, CON-058, CON-059
 
 **Objective:** demonstrate the complete supported Linux/Codex workflow on one fresh, genuinely useful bounded task in a small external project and report its practical limits. This does not require Concoct to build itself.
 
@@ -356,9 +403,10 @@ Delivered operator CLI: `run` and read-only `status` expose the active controlle
 - The operator inspects/approves the exact candidate; Concoct integrates it locally, finalizes external evidence and leaves the agreed parent clean. No push/deployment is implied.
 - Correction, intervention, limits, interruption/recovery and integration faults have focused automated evidence from preceding tasks. Do not manufacture all failures in this billable real trial or require a defect solely to force a correction cycle.
 - Record supported runner/configuration, actual role settings, observed turns/token/quota evidence, task-criterion results and any limitations. Do not report account deltas as exact task spend or claim universal provider compatibility.
+- Preserve the interrupted CURU-001 attempt and its recorded settings/consumption. After integrating the corrective tasks, inspect that binding and resume it through the supported command only after the exact binary and active state are checked; reconcile completed reagent work before iragent review. Record the original callback hold as an observed failure. A successful recovery demonstrates recovery, not an uninterrupted nominal run. Decide with the operator whether further fresh useful work is needed for nominal-path acceptance and require an explicit task purpose and dispatch budget for it.
 
 **Verification:** one real-task run and normal operator acceptance, within configured bounds. The task's product/acceptance must actually be ready; do not invent requirements. Review source/checkpoint/reviews and normal project checks. Further live dispatches require an explicit task/budget reason, not an open-ended convergence experiment.
 
 ## Next task boundary
 
-CON-056 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-058 is the next ready task. Complete and review CON-058, then CON-059, before resuming CON-056 acceptance. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
