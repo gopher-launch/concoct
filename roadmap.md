@@ -10,15 +10,15 @@ Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-The source tree includes internal selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration and mechanical completion. The CLI remains a buildable skeleton; the complete workflow remains planned. CON-055 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
+The source tree includes selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration, mechanical completion and the operator CLI. The fresh real-project demonstration remains planned. CON-056 is the next ready task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-057 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-055` is ready after CON-054 delivery. Later tasks remain planned until their dependencies are delivered. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-056` is ready after CON-055 delivery. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
-- Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the unfinished runner to build itself. The reset CLI truthfully exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation. CON-055 completes the new operator interface.
+- Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the runner to build itself. The CLI exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation.
 - Every task uses focused non-model tests. Run broader module/build checks when code changes require them. Do not spend provider turns to validate every internal step; the final live trial proves the integrated behavior.
 
 ## Delivery checkpoints
@@ -322,7 +322,7 @@ Delivered internal completion: after exact integrated target verification, a dur
 ## CON-055 — Complete the new operator CLI
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F005
 - Depends on: CON-054
@@ -338,10 +338,12 @@ Delivered internal completion: after exact integrated target verification, a dur
 
 **Verification:** CLI/controller integration tests for nominal flow, holds/answers/gates, quiet/JSON, status while running, invalid/stale IDs and unsupported-option rejection. Run full Go tests/vet/build and `git diff --check` for the complete interface.
 
+Delivered operator CLI: `run` and read-only `status` expose the active controller. Exact question, dispatch, acceptance and task IDs route answers, authorization, local integration, limit extensions and defer/abandon/reactivation. A fresh run resolves role settings from the provider catalog and invocation choices; active work retains its settings. Human agent messages stream before the separately verified final disposition, while quiet and JSON-lines modes preserve actionable results. Completion maintenance remains retryable without agent dispatch. Unsupported commands and stale IDs fail explicitly; no legacy choreography or publication path is exposed.
+
 ## CON-056 — Prove the golden path on fresh real work
 
 - Kind: task
-- Status: planned
+- Status: ready
 - Priority: high
 - Parent: CON-F005
 - Depends on: CON-055
@@ -359,4 +361,4 @@ Delivered internal completion: after exact integrated target verification, a dur
 
 ## Next task boundary
 
-CON-055 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-056 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.

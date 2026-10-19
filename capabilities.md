@@ -85,4 +85,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Interrupted archive or cleanup work resumes from the durable completion marker. Conflicting archive contents or changed and ignored workspace files remain in place with a maintenance-pending result. Completed archives are retained indefinitely by default.
 - Explicit cutoff-based pruning removes completed archives in deterministic task/run order while retaining the active run and supplied task or run IDs. Archived narratives are not added to automatic selection or resume context; full-access agents are not physically barred from the external archive.
 
-The CLI workflow and broader threshold intervention remain planned. CON-042 remains a frozen, undelivered historical reference.
+## CON-055 — Operator CLI
+
+- `run` starts or resumes one controller task using the verified Linux Codex app-server, and `status` reads an atomic active-work snapshot without a provider call or execution lock. Fresh role model/effort and dispatch-gate choices are explicit; effective settings, quota age/windows, consumption, candidate identity and bound next actions are displayed.
+- Exact stable IDs route question answers, dispatch authorization, candidate acceptance/local integration, limit extensions, defer/abandon and deferred reactivation. A successful accepted integration proceeds to mechanical completion; interrupted maintenance is retried without an agent turn. Invalid or unsupported options and stale IDs fail explicitly.
+- Agent messages stream before the separate verified controller result. Human, quiet and JSON-lines output retain actionable dispositions and documented exit codes. The CLI does not install project templates, reuse legacy choreography, push or publish.
+
+The fresh real-project proof remains CON-056. CON-042 remains a frozen, undelivered historical reference.

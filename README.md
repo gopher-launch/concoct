@@ -1,8 +1,8 @@
 # Concoct
 
-Concoct is being rebuilt from the CON-043 repository reset baseline. The active Go program is a development skeleton: it displays help and version information, and exits unsuccessfully for workflow commands. The end-to-end agent workflow described in [the accepted design](doc/implementation-design.md) remains planned work in [the roadmap](roadmap.md).
+Concoct runs one bounded roadmap task at a time with a reagent and an independent iragent. It retains active work outside the project, presents an exact reviewed candidate for operator acceptance, integrates locally only with that acceptance ID, then archives completion evidence. The first supported runner is Linux Codex CLI 0.147.0. The real external-project demonstration remains CON-056.
 
-## Build and smoke check
+## Build
 
 Requires Go 1.27.2 or newer.
 
@@ -12,21 +12,36 @@ go vet ./...
 go build -o /tmp/concoct ./cmd/concoct
 /tmp/concoct help
 /tmp/concoct version
-/tmp/concoct run # exits nonzero: workflow unavailable
 ```
 
-The CLI also accepts `--help` and `--version`. The read-only `internal/roadmap` package accepts `## ID — title` headings followed by contiguous `Kind`, `Status` and `Priority` bullets, plus optional `Parent` and `Depends on` bullets. Those top-level metadata bullet names are reserved throughout an entry; put examples in code fences. Its `Parse` result retains task prose and reports ready tasks with delivered dependencies; it does not choose among them. Supported kinds are `epic`, `feature`, `task`; statuses are `planned`, `ready`, `delivered`; priorities are `high`, `medium`, `low`. Delivered-task headings in `capabilities.md` can resolve dependencies after detailed completed work leaves the roadmap.
+Run in a Git checkout with `AGENTS.md`, `roadmap.md` and `capabilities.md`. A fresh run requires a clean named parent branch and a ready task with delivered dependencies. Concoct stores run records, task/review evidence and worktrees under `$HOME/.concoct` by default; `--root PATH` selects one external root. It does not install templates, prompts or notes into the project. The source tree and current project documents define implemented behavior.
 
-The `internal/activework` package provides an external active-run store for the internal controller and later workflow work. It defaults to `$HOME/.concoct`, accepts one explicit root override, and rejects storage inside the target repository. An execution owner writes task checkpoints, decisions, pending/final reviews and bounded receipts; `Status` reads an atomic snapshot without taking the execution lock. A selecting run can be created before a task is claimed. Interrupted writes are reconciled when the next owner acquires the store. This package is not a CLI command or a filesystem confinement mechanism.
+## Operator commands
 
-The `internal/codexapp` package speaks the locally verified Linux Codex app-server 0.147.0 stdio subset. It checks the runner version before starting, negotiates experimental capability, applies explicit role settings, streams turn events and handles validated host callbacks. It exposes model/quota reads and background-terminal controls to later controller work. It does not execute the Concoct workflow on its own.
+```sh
+concoct run
+concoct status [TASK] [--json]
+concoct run --answer QUESTION --text TEXT
+concoct run --answer QUESTION --choice OPTION
+concoct run --answer QUESTION --answer-file PATH
+concoct run --authorize DISPATCH
+concoct run --approve ACCEPTANCE
+concoct run --extend TASK --dispatch-limit N
+concoct run --extend TASK --review-limit N
+concoct run --extend TASK --recovery-limit N
+concoct run --defer TASK --reason TEXT
+concoct run --abandon TASK --reason TEXT
+concoct run --resume TASK
+```
 
-The `internal/dispatch` package resolves explicit Concoct role settings against the provider catalog and evaluates dispatch grants, bounds and quota observations. `internal/activework` persists its reservations and authorization waits under the repository execution lock. The internal selection controller uses this policy and durable state; no CLI dispatch command uses them yet.
+`run` resumes active work; otherwise it selects one eligible task. It starts a fresh reagent thread, freezes its verified candidate, and launches a separate reviewer. A reviewer approval returns a candidate and acceptance ID. Inspect the source and review, then use the displayed exact `--approve` command to integrate locally. Approval does not push or publish. A completion or workspace cleanup problem returns `maintenance_pending`; plain `run` retries maintenance without another agent turn. Ctrl-C requests graceful interruption and retains recoverable state.
 
-The internal selection controller can launch a fresh reagent turn, bind one eligible task after it creates a branch, and persist checkpoints while that turn continues engineering. A completed, verified ready turn can freeze an exact candidate commit and external evidence record, then start a separate internal iragent assessment when a reviewer is configured. Completed findings can return to the same reagent and reviewer threads for bounded correction and reassessment. Internal stop and resume reconcile recorded turns before dispatching recovery work. Structured questions and durable answers route to the requesting role; idle deferred work can be explicitly resumed, while abandoned work stays unavailable to selection. The internal integration path binds an operator acceptance ID to the reviewed candidate and guarded parent fast-forward. Internal completion verifies the integrated target, archives compact external evidence and retires active ownership after safe cleanup; maintenance can be retried without an agent. No initialization, agent workflow, review, integration or release CLI command is implemented in this baseline.
+`status` is read-only, works while execution holds the repository lock, and does not contact Codex. Output includes the phase, hold, candidate, role model/effort/full-access settings, observed token receipts, quota observation age and windows, consumed bounds, pending stable IDs and next command. A task argument must match the active task. `--repo PATH` selects the checkout and `--root PATH` selects external storage; both also apply to `run`. On a fresh `run`, `--reagent-model`, `--iragent-model`, `--reagent-effort`, `--iragent-effort` and `--gate selection,engineering,review,correction,recovery` set explicit invocation choices. The provider's recommended model is the default. The role and gate choices are retained with active work and cannot be changed by an ordinary resume.
+
+Agent messages stream as reported. The final `Concoct:` line is the verified controller disposition. `--quiet` suppresses streamed messages but keeps the final result. `--json` writes JSON lines: `agent_progress` events followed by one `result` object. Neither mode turns an agent statement into verified completion. No-work is a normal result. Exit codes are 0 for completed, idle or no-work; 10 for a decision; 11 for authorization; 12 for acceptance; 13 for independent-review pause; 14 for safely stopped; 15 for abnormal stop; 16 for busy; 17 for maintenance; 18 for other retained work; and 2 for invalid arguments or prerequisites. Returned IDs and the exact next command guide follow-up actions.
+
+The read-only `internal/roadmap` parser accepts `## ID — title` entries with contiguous `Kind`, `Status`, `Priority`, optional `Parent` and `Depends on` bullets. Objective and acceptance remain prose. Supported kinds are `epic`, `feature`, `task`; statuses are `planned`, `ready`, `delivered`; priorities are `high`, `medium`, `low`. Completed IDs can resolve through concise `capabilities.md` entries without reading archived narratives.
 
 ## Construction
 
-Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Implement from current source and the accepted design, record active task evidence outside the repository under `$HOME/.concoct/manual/<task-id>/`, and commit a reviewable candidate on a task branch. An independent review and explicit operator acceptance precede local integration. Git history, including the CON-042 branch, is reference material for selective future harvesting. CON-055 is the next ready task in the intended post-integration state.
-
-The first planned runtime scope is Linux with Codex. The broader workflow and its operator commands remain future tasks; see `capabilities.md` for behavior delivered by this skeleton.
+Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Record construction evidence outside this repository under `$HOME/.concoct/manual/<task-id>/`; independent review and explicit operator acceptance precede local integration. Historical Git, including CON-042, is reference material for selective harvesting. CON-056 is the next ready task in the intended post-integration state.
