@@ -135,7 +135,7 @@ func Apply(ctx context.Context, cfg Config, id string) (Result, error) {
 	}
 	switch state {
 	case "baseline":
-		if _, err := git(store.Checkout, "switch", "--detach", acceptance.Candidate); err != nil {
+		if _, err := git(store.Checkout, "switch", "--no-overwrite-ignore", "--detach", acceptance.Candidate); err != nil {
 			return interrupted(store.Checkout, acceptance, err)
 		}
 		if err := after(cfg, "checkout-prepared"); err != nil {
@@ -159,7 +159,7 @@ func Apply(ctx context.Context, cfg Config, id string) (Result, error) {
 		if state != "ref-advanced" {
 			return Result{Status: classify(state), Detail: detail, Acceptance: acceptance}, fmt.Errorf("parent ref or checkout changed: %s", detail)
 		}
-		if _, err := git(store.Checkout, "switch", acceptance.TargetBranch); err != nil {
+		if _, err := git(store.Checkout, "switch", "--no-overwrite-ignore", acceptance.TargetBranch); err != nil {
 			return interrupted(store.Checkout, acceptance, err)
 		}
 		if err := after(cfg, "checkout-attached"); err != nil {

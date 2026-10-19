@@ -84,6 +84,79 @@ func TestExactAcceptanceFastForwardAndReplay(t *testing.T) {
 	}
 }
 
+func TestIntegrationPreservesIgnoredParentFileOnRetry(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	ignore := filepath.Join(repo, ".gitignore")
+	if err := os.WriteFile(ignore, []byte("/concoct\n*.out\nfeature.go\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(repo, "add", ".gitignore"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "ignore future candidate path"); err != nil {
+		t.Fatal(err)
+	}
+	reagent := readyAgent(t, repo, external, readyEvidence(), false, true)
+	originalRun := reagent.run
+	reagent.run = func(prompt string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+		outcome, err := originalRun(prompt, handler)
+		if err != nil {
+			return outcome, err
+		}
+		store, err := activework.Open(repo, external)
+		if err != nil {
+			return outcome, err
+		}
+		snapshot, err := store.Status()
+		if err != nil {
+			return outcome, err
+		}
+		workspace := filepath.Join(external, "workspaces", snapshot.RunID)
+		_, err = gitOutput(workspace, "add", "-f", "feature.go")
+		return outcome, err
+	}
+	reviewer := &fakeReviewer{}
+	reviewer.run = func(_ string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+		reviewCheckpoint(t, handler, "Exact source and acceptance criteria verified.")
+		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"approved","summary":"approved"}`}, nil
+	}
+	selected, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: reagent, Reviewer: reviewer})
+	if err != nil || selected.Status != "approved" {
+		t.Fatalf("approved fixture: %+v, %v", selected, err)
+	}
+	cfg := integration.Config{Repository: repo, Root: external, Reagent: reagent, Reviewer: reviewer}
+	acceptance, err := integration.Offer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentFile := filepath.Join(repo, "feature.go")
+	const externalData = "external data\n"
+	if err := os.WriteFile(parentFile, []byte(externalData), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := gitOutput(repo, "status", "--porcelain=v1", "--untracked-files=all"); err != nil || status != "" {
+		t.Fatalf("parent must look clean to the existing guard: %q, %v", status, err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		result, err := integration.Apply(context.Background(), cfg, acceptance.ID)
+		if err == nil || result.Status != "not_integrated" {
+			t.Fatalf("attempt %d did not hold the ignored collision: %+v, %v", attempt, result, err)
+		}
+		if data, err := os.ReadFile(parentFile); err != nil || string(data) != externalData {
+			t.Fatalf("attempt %d changed external file: %q, %v", attempt, data, err)
+		}
+		if target, err := gitOutput(repo, "rev-parse", "refs/heads/main"); err != nil || target != acceptance.ExpectedParent {
+			t.Fatalf("attempt %d advanced target: %s, %v", attempt, target, err)
+		}
+		if branch, err := gitOutput(repo, "branch", "--show-current"); err != nil || branch != "main" {
+			t.Fatalf("attempt %d changed parent checkout: %s, %v", attempt, branch, err)
+		}
+		if status, err := gitOutput(repo, "status", "--porcelain=v1", "--untracked-files=all"); err != nil || status != "" {
+			t.Fatalf("attempt %d left partial checkout changes: %q, %v", attempt, status, err)
+		}
+	}
+}
+
 func TestIntegrationRejectsTargetCandidateAndDirtyDrift(t *testing.T) {
 	for _, drift := range []string{"target", "candidate", "candidate-ref", "dirty", "review", "scope", "assessment", "idle"} {
 		t.Run(drift, func(t *testing.T) {
