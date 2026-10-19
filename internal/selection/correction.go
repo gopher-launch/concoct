@@ -106,6 +106,9 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 		if outcome.TurnID != "" && observeErr == nil {
 			observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
 		}
+		if outcome.TurnID != "" && observeErr == nil {
+			observeErr = owner.RecordDispatchCallbacks(attemptID, thread.ID, outcome.TurnID, outcome.Callbacks)
+		}
 		if outcome.TurnID != "" && outcome.Status != "" && observeErr == nil {
 			if outcome.ThreadID != "" && outcome.ThreadID != thread.ID {
 				observeErr = fmt.Errorf("provider outcome thread differs from reagent binding")

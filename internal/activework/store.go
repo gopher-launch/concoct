@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gopher-launch/concoct/internal/codexapp"
 	"github.com/gopher-launch/concoct/internal/dispatch"
 	"github.com/gopher-launch/concoct/internal/stop"
 )
@@ -127,6 +128,7 @@ type Snapshot struct {
 	Phase          string
 	Hold           string
 	PendingRequest string
+	Recovery       *RecoveryIssue
 	Revision       uint64
 	PendingWrite   bool
 	RoleIDs        map[string]string
@@ -158,6 +160,7 @@ type state struct {
 	RunID, Repository, CommonDir                   string
 	TaskID, ParentBranch, ParentCommit, TaskBranch string
 	Phase, Hold, PendingRequest                    string
+	Recovery                                       *RecoveryIssue
 	RoleIDs, RoleSettings                          map[string]string
 	Counters                                       map[string]int
 	Digests                                        map[string]string
@@ -174,6 +177,18 @@ type state struct {
 	Stop                                           *StopRecord
 	StopHistory                                    []StopRecord
 	Question                                       *Question
+}
+
+// RecoveryIssue is a retained explanation of an incomplete controller check.
+// It is evidence for an operator, not proof that a candidate is ready.
+type RecoveryIssue struct {
+	AttemptID   string `json:"attempt_id"`
+	Role        string `json:"role,omitempty"`
+	Stage       string `json:"stage"`
+	Operation   string `json:"operation"`
+	Reason      string `json:"reason"`
+	EvidenceRef string `json:"evidence_ref,omitempty"`
+	AgentResult string `json:"agent_result,omitempty"`
 }
 
 type startIntent struct {
@@ -214,6 +229,10 @@ func (s *Store) Status() (Snapshot, error) {
 	snapshot.Repository, snapshot.CommonDir = st.Repository, st.CommonDir
 	snapshot.ParentBranch, snapshot.ParentCommit, snapshot.TaskBranch = st.ParentBranch, st.ParentCommit, st.TaskBranch
 	snapshot.Phase, snapshot.Hold, snapshot.PendingRequest = st.Phase, st.Hold, st.PendingRequest
+	if st.Recovery != nil {
+		copy := *st.Recovery
+		snapshot.Recovery = &copy
+	}
 	snapshot.Revision, snapshot.PendingWrite = st.Revision, st.Pending != nil
 	snapshot.RoleIDs, snapshot.RoleSettings, snapshot.Counters = cloneStrings(st.RoleIDs), cloneStrings(st.RoleSettings), cloneInts(st.Counters)
 	if st.Dispatch != nil {
@@ -222,6 +241,21 @@ func (s *Store) Status() (Snapshot, error) {
 			return snapshot, fmt.Errorf("copy dispatch state: %w", err)
 		}
 		snapshot.Dispatch = &copy
+	}
+	if snapshot.Recovery == nil && snapshot.Hold == "recovery-required" {
+		issue := &RecoveryIssue{Stage: "legacy-reconciliation", Reason: "this earlier active record lacks a structured failure reason; inspect its bound attempt, provider turn and available host receipts before continuation", EvidenceRef: "runs/" + st.RunID + "/state.json"}
+		if st.Dispatch != nil && len(st.Dispatch.Attempts) != 0 {
+			attempt := st.Dispatch.Attempts[len(st.Dispatch.Attempts)-1]
+			issue.AttemptID, issue.Role = attempt.ID, string(attempt.Binding.Role)
+			issue.EvidenceRef += " dispatch attempt " + attempt.ID
+			if attempt.TurnID != "" {
+				issue.EvidenceRef += "; turn " + attempt.TurnID
+			}
+			if verdict, err := codexapp.ParseRoleResult(attempt.FinalText); err == nil {
+				issue.AgentResult = verdict.Summary
+			}
+		}
+		snapshot.Recovery = issue
 	}
 	if st.Candidate != nil {
 		copy := *st.Candidate
@@ -700,6 +734,40 @@ func (o *Owner) VerifiedTurnReceipt(kind, turnID, content string) (bool, error) 
 	return false, nil
 }
 
+// VerifiedCallReceipt binds a provider dynamic-tool item to the durable host
+// receipt created for the same call. Legacy claim receipts have no turn field;
+// the active task binding and exact provider turn must be checked separately.
+func (o *Owner) VerifiedCallReceipt(kind, callID, turnID string) (bool, error) {
+	if (kind != "claim" && kind != "checkpoint" && kind != "assessment") || callID == "" || turnID == "" {
+		return false, fmt.Errorf("invalid call receipt query")
+	}
+	st, err := o.currentState()
+	if err != nil {
+		return false, err
+	}
+	hash := sha256.Sum256([]byte(callID))
+	path := "receipts/" + kind + "-" + hex.EncodeToString(hash[:12]) + ".json"
+	if st.Digests[path] == "" {
+		return false, nil
+	}
+	body, err := o.readBoundFile(st, path)
+	if err != nil {
+		return false, err
+	}
+	if kind == "claim" {
+		var claim struct{ TaskID, TaskBranch string }
+		if err := json.Unmarshal(body, &claim); err != nil {
+			return false, err
+		}
+		return claim.TaskID == st.TaskID && claim.TaskBranch == st.TaskBranch && st.TaskID != "", nil
+	}
+	var receipt struct{ CallID, TurnID string }
+	if err := json.Unmarshal(body, &receipt); err != nil {
+		return false, err
+	}
+	return receipt.CallID == callID && receipt.TurnID == turnID, nil
+}
+
 // RecordReceipt creates a bounded JSON receipt once. Repeating identical data
 // is idempotent; a different payload for the same name is rejected.
 func (o *Owner) RecordReceipt(name string, content []byte) error {
@@ -750,7 +818,30 @@ func (o *Owner) UpdateOperational(value Operational) error {
 		return fmt.Errorf("unclaimed run must remain in selecting phase")
 	}
 	st.Phase, st.Hold, st.PendingRequest = value.Phase, value.Hold, value.PendingRequest
+	if value.Hold != "recovery-required" {
+		st.Recovery = nil
+	}
 	st.RoleIDs, st.RoleSettings, st.Counters = cloneStrings(value.RoleIDs), cloneStrings(value.RoleSettings), cloneInts(value.Counters)
+	st.Revision++
+	return writeJSON(o.store.statePath(st.RunID), st)
+}
+
+// HoldRecovery records the reason and evidence binding in the same atomic
+// state write that makes the hold visible to status readers.
+func (o *Owner) HoldRecovery(issue RecoveryIssue) error {
+	if len(issue.Reason) > 2048 || len(issue.Operation) > 128 || len(issue.Stage) > 128 || len(issue.EvidenceRef) > 512 || len(issue.AgentResult) > 512 || len(issue.AttemptID) > 128 || issue.Reason == "" {
+		return fmt.Errorf("invalid recovery issue")
+	}
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	st.Hold = "recovery-required"
+	st.Recovery = &issue
+	st.PendingRequest = issue.Reason
+	if len(st.PendingRequest) > 256 {
+		st.PendingRequest = st.PendingRequest[:256]
+	}
 	st.Revision++
 	return writeJSON(o.store.statePath(st.RunID), st)
 }

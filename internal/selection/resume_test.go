@@ -36,6 +36,64 @@ type observedReviewer struct {
 	idleChecks   int
 }
 
+type observedReagent struct {
+	*fakeAgent
+	items []codexapp.DynamicToolItem
+	reads int
+}
+
+func (a *observedReagent) RunTurn(ctx context.Context, id, prompt string, settings codexapp.RoleSettings, handler codexapp.ToolHandler, onEvent func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+	outcome, err := a.fakeAgent.RunTurn(ctx, id, prompt, settings, handler, onEvent)
+	if err != nil {
+		return outcome, err
+	}
+	return outcome, errors.New("callback response acknowledgment unavailable")
+}
+
+func (a *observedReagent) ReadTurn(_ context.Context, threadID, turnID string) (codexapp.ObservedTurn, error) {
+	a.reads++
+	if threadID != "fresh-thread" || turnID != "one-turn" {
+		return codexapp.ObservedTurn{}, errors.New("wrong provider turn")
+	}
+	return codexapp.ObservedTurn{ID: turnID, Status: "completed", FinalText: `{"disposition":"ready_for_review","summary":"ready for independent review"}`, DynamicTools: a.items, ItemsKnown: true}, nil
+}
+
+func TestCompletedReagentRecoveryRequiresSuccessfulBoundItemsAndReceipts(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		mutate      func([]codexapp.DynamicToolItem) []codexapp.DynamicToolItem
+		recoverable bool
+	}{
+		{"successful legacy record", func(v []codexapp.DynamicToolItem) []codexapp.DynamicToolItem { return v }, true},
+		{"duplicate completed item", func(v []codexapp.DynamicToolItem) []codexapp.DynamicToolItem { return append(v, v[1]) }, true},
+		{"missing checkpoint item", func(v []codexapp.DynamicToolItem) []codexapp.DynamicToolItem { return v[:1] }, false},
+		{"failed checkpoint item", func(v []codexapp.DynamicToolItem) []codexapp.DynamicToolItem { v[1].Status = "failed"; return v }, false},
+		{"mismatched call ID", func(v []codexapp.DynamicToolItem) []codexapp.DynamicToolItem { v[1].ID = "other"; return v }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, external, policy := testRepo(t)
+			ok := true
+			items := []codexapp.DynamicToolItem{{ID: "claim-ready", Tool: "claim_task", Status: "completed", Success: &ok}, {ID: "checkpoint-ready", Tool: "save_checkpoint", Status: "completed", Success: &ok}}
+			agent := &observedReagent{fakeAgent: readyAgent(t, repo, external, readyEvidence(), false, true), items: tc.mutate(items)}
+			first, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent})
+			if err == nil || first.Status != "recovery_required" || first.Snapshot.Recovery == nil || len(first.Snapshot.Dispatch.Attempts) != 1 {
+				t.Fatalf("initial hold: %+v %v", first, err)
+			}
+			result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Agent: agent})
+			if err != nil || agent.turns != 1 || agent.reads != 1 || len(result.Snapshot.Dispatch.Attempts) != 1 {
+				t.Fatalf("reconciliation replayed or failed: %+v %v", result, err)
+			}
+			if tc.recoverable {
+				if result.Status != "ready_for_review" || result.Snapshot.Candidate == nil {
+					t.Fatalf("valid completion held: %+v", result)
+				}
+			} else if result.Status != "recovery_required" || result.Snapshot.Candidate != nil || result.Snapshot.Recovery == nil || !strings.Contains(result.Snapshot.Recovery.Reason, "callback evidence") {
+				t.Fatalf("invalid completion advanced: %+v", result)
+			}
+		})
+	}
+}
+
 func (a *observedReviewer) Idle(_ context.Context, id string) error {
 	a.idleChecks++
 	if id != "reviewer-thread" || a.busy {
@@ -61,7 +119,8 @@ func (a *observedReviewer) ReadTurn(_ context.Context, threadID, turnID string) 
 	if threadID != "reviewer-thread" || turnID != "observed-review-turn" {
 		return codexapp.ObservedTurn{}, errors.New("unexpected turn")
 	}
-	return codexapp.ObservedTurn{ID: turnID, Status: "completed", FinalText: `{"disposition":"approved","summary":"checked"}`}, nil
+	ok := true
+	return codexapp.ObservedTurn{ID: turnID, Status: "completed", FinalText: `{"disposition":"approved","summary":"checked"}`, DynamicTools: []codexapp.DynamicToolItem{{ID: "observed-assessment", Tool: "save_assessment", Status: "completed", Success: &ok}}, ItemsKnown: true}, nil
 }
 
 func TestObservedCompletedReviewFinalizedOnceWithoutReplay(t *testing.T) {

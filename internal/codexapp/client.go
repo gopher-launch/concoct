@@ -196,6 +196,13 @@ func (c *Client) ReadThread(ctx context.Context, id string) (json.RawMessage, er
 // not imply that host callbacks or source mutations were fully acknowledged.
 type ObservedTurn struct {
 	ID, Status, FinalText string
+	DynamicTools          []DynamicToolItem
+	ItemsKnown            bool
+}
+
+type DynamicToolItem struct {
+	ID, Namespace, Tool, Status string
+	Success                     *bool
 }
 
 func (c *Client) ReadTurn(ctx context.Context, threadID, turnID string) (ObservedTurn, error) {
@@ -209,9 +216,12 @@ func (c *Client) ReadTurn(ctx context.Context, threadID, turnID string) (Observe
 	var thread struct {
 		ID    string `json:"id"`
 		Turns []struct {
-			ID     string                               `json:"id"`
-			Status string                               `json:"status"`
-			Items  []struct{ Type, Text, Phase string } `json:"items"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Items  []struct {
+				Type, Text, Phase, ID, Namespace, Tool, Status string
+				Success                                        *bool
+			} `json:"items"`
 		} `json:"turns"`
 	}
 	if err := json.Unmarshal(body, &thread); err != nil || thread.ID != threadID {
@@ -221,10 +231,13 @@ func (c *Client) ReadTurn(ctx context.Context, threadID, turnID string) (Observe
 		if turn.ID != turnID {
 			continue
 		}
-		observed := ObservedTurn{ID: turn.ID, Status: turn.Status}
+		observed := ObservedTurn{ID: turn.ID, Status: turn.Status, ItemsKnown: turn.Items != nil}
 		for _, item := range turn.Items {
 			if item.Type == "agentMessage" && (item.Phase == "final" || item.Phase == "") {
 				observed.FinalText = item.Text
+			}
+			if item.Type == "dynamicToolCall" {
+				observed.DynamicTools = append(observed.DynamicTools, DynamicToolItem{ID: item.ID, Namespace: item.Namespace, Tool: item.Tool, Status: item.Status, Success: item.Success})
 			}
 		}
 		return observed, nil

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -158,18 +159,42 @@ func Receipt(usage *codexapp.Usage) *TokenReceipt {
 }
 
 type Attempt struct {
-	ID            string        `json:"id"`
-	Binding       Binding       `json:"binding"`
-	ThreadID      string        `json:"thread_id,omitempty"`
-	TurnID        string        `json:"turn_id,omitempty"`
-	TurnRequested bool          `json:"turn_requested,omitempty"`
-	FinalStatus   string        `json:"final_status,omitempty"`
-	FinalText     string        `json:"final_text,omitempty"`
-	Applied       bool          `json:"applied,omitempty"`
-	ReservedAt    time.Time     `json:"reserved_at"`
-	Status        string        `json:"status"` // reserved, uncertain, completed, failed, reconciled
-	Tokens        *TokenReceipt `json:"tokens,omitempty"`
-	Resolution    string        `json:"resolution,omitempty"`
+	ID            string                      `json:"id"`
+	Binding       Binding                     `json:"binding"`
+	ThreadID      string                      `json:"thread_id,omitempty"`
+	TurnID        string                      `json:"turn_id,omitempty"`
+	TurnRequested bool                        `json:"turn_requested,omitempty"`
+	FinalStatus   string                      `json:"final_status,omitempty"`
+	FinalText     string                      `json:"final_text,omitempty"`
+	Callbacks     []codexapp.CallbackEvidence `json:"callbacks,omitempty"`
+	Applied       bool                        `json:"applied,omitempty"`
+	ReservedAt    time.Time                   `json:"reserved_at"`
+	Status        string                      `json:"status"` // reserved, uncertain, completed, failed, reconciled
+	Tokens        *TokenReceipt               `json:"tokens,omitempty"`
+	Resolution    string                      `json:"resolution,omitempty"`
+}
+
+// RecordCallbacks retains the transport evidence even when the provider turn
+// completed but callback acknowledgment remained uncertain.
+func (s *State) RecordCallbacks(id, threadID, turnID string, callbacks []codexapp.CallbackEvidence) error {
+	if len(callbacks) > 64 || threadID == "" || turnID == "" {
+		return fmt.Errorf("invalid callback evidence")
+	}
+	for i := range s.Attempts {
+		a := &s.Attempts[i]
+		if a.ID != id {
+			continue
+		}
+		if a.ThreadID != threadID || (a.TurnID != "" && a.TurnID != turnID) {
+			return fmt.Errorf("callback evidence differs from dispatch")
+		}
+		if len(a.Callbacks) != 0 && !reflect.DeepEqual(a.Callbacks, callbacks) {
+			return fmt.Errorf("callback evidence changed")
+		}
+		a.Callbacks = append([]codexapp.CallbackEvidence(nil), callbacks...)
+		return nil
+	}
+	return fmt.Errorf("unknown dispatch attempt %q", id)
 }
 
 type Authorization struct {
@@ -225,6 +250,14 @@ func (s State) Validate() error {
 		}
 		if len(attempt.ThreadID) > 256 || len(attempt.TurnID) > 256 || (attempt.TurnID != "" && attempt.ThreadID == "") || (attempt.TurnRequested && attempt.ThreadID == "") || len(attempt.FinalText) > 65536 || len(attempt.FinalStatus) > 32 {
 			return fmt.Errorf("invalid persisted provider turn binding")
+		}
+		if len(attempt.Callbacks) > 64 {
+			return fmt.Errorf("too many persisted callbacks")
+		}
+		for _, callback := range attempt.Callbacks {
+			if callback.ThreadID != attempt.ThreadID || callback.TurnID != attempt.TurnID || callback.CallID == "" || callback.Tool == "" || len(callback.RequestID) > 256 || len(callback.Failure) > 1024 {
+				return fmt.Errorf("invalid persisted callback binding")
+			}
 		}
 		if attempt.Applied && (attempt.Status != "completed" || attempt.FinalStatus != "completed") {
 			return fmt.Errorf("applied dispatch lacks completed result")

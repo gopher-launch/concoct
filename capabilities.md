@@ -91,4 +91,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Exact stable IDs route question answers, dispatch authorization, candidate acceptance/local integration, limit extensions, defer/abandon and deferred reactivation. A successful accepted integration proceeds to mechanical completion; interrupted maintenance is retried without an agent turn. Invalid or unsupported options and stale IDs fail explicitly.
 - Agent messages stream before the separate verified controller result. Human, quiet and JSON-lines output retain actionable dispositions and documented exit codes. The CLI does not install project templates, reuse legacy choreography, push or publish.
 
+## CON-058 — Dynamic-tool completion and retained recovery
+
+- The Codex 0.147.0 transport accepts a successful completed `dynamicToolCall` item for the matching host request, call, tool, thread and turn as provider acknowledgment. It records host receipt commit, response transport and provider completion separately. An unrelated `serverRequest/resolved` notification does not acknowledge a dynamic tool.
+- Callback failure, missing completion and mismatched identities hold candidate readiness. Returned transport outcomes retain bound callback evidence in active attempts; recovery holds retain the specific reason, stage, operation, evidence reference and agent-reported summary for consistent `run` and `status` output.
+- Restart reconciliation reads the exact completed provider turn and checks its dynamic-tool items against durable host receipts. Earlier active records remain readable. Incomplete evidence retains the hold; verified completion still passes through checkpoint, source, scope and candidate checks before independent review.
+
 The fresh real-project proof remains CON-056. CON-042 remains a frozen, undelivered historical reference.

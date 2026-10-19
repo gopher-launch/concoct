@@ -219,7 +219,7 @@ func TestInterleavedStreamingCallbackAndTerminalReceipt(t *testing.T) {
 			if result.Success && len(result.ContentItems) == 1 && result.ContentItems[0].Type == "inputText" && committed.Load() == 1 {
 				callbackReply.Store(true)
 			}
-			s.emit(map[string]any{"method": "serverRequest/resolved", "params": map[string]any{"threadId": "thread-1", "requestId": 900}})
+			s.emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "call-1", "type": "dynamicToolCall", "tool": "checkpoint", "namespace": nil, "status": "completed", "success": true}}})
 			s.emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]string{"id": "final", "type": "agentMessage", "phase": "final", "text": `{"disposition":"ready","summary":"done"}`}}})
 			usage := map[string]int{"inputTokens": 4, "cachedInputTokens": 0, "outputTokens": 3, "reasoningOutputTokens": 1, "totalTokens": 7}
 			s.emit(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "tokenUsage": map[string]any{"last": usage, "total": usage}}})
@@ -241,7 +241,7 @@ func TestInterleavedStreamingCallbackAndTerminalReceipt(t *testing.T) {
 			streamed += len(event.Raw)
 		}
 	})
-	if err != nil || result.Status != "completed" || result.TurnID != "turn-1" || result.Usage == nil || result.Usage.TotalTokens != 7 || streamed < len(large) || !callbackReply.Load() {
+	if err != nil || result.Status != "completed" || result.TurnID != "turn-1" || result.Usage == nil || result.Usage.TotalTokens != 7 || streamed < len(large) || !callbackReply.Load() || len(result.Callbacks) != 1 || !result.Callbacks[0].Success {
 		t.Fatalf("turn=%#v err=%v streamed=%d callback=%v", result, err, streamed, callbackReply.Load())
 	}
 	role, err := ParseRoleResult(result.FinalText)
@@ -467,6 +467,77 @@ func TestUnacknowledgedHostCallbackBlocksCompletion(t *testing.T) {
 	outcome, err := s.client.RunTurn(testContext(t), "thread-1", "work", settings(), nil, nil)
 	if !errors.Is(err, ErrUncertainCallback) || outcome.Status != "completed" {
 		t.Fatalf("unacknowledged callback outcome=%#v error=%v", outcome, err)
+	}
+}
+
+func TestDynamicToolCompletionContract(t *testing.T) {
+	for _, tc := range []struct {
+		name                                             string
+		requestID                                        any
+		itemID, tool, status                             string
+		success, duplicate, itemFirst, unrelatedResolved bool
+		wantOK                                           bool
+	}{
+		{"numeric successful item", 17, "call-1", "checkpoint", "completed", true, false, false, false, true},
+		{"string request ID and reordered item", "req-17", "call-1", "checkpoint", "completed", true, false, true, false, true},
+		{"duplicate item", 17, "call-1", "checkpoint", "completed", true, true, false, false, true},
+		{"unrelated resolved notification", 17, "wrong-call", "checkpoint", "completed", true, false, false, true, false},
+		{"failed item", 17, "call-1", "checkpoint", "failed", false, false, false, false, false},
+		{"wrong tool", 17, "call-1", "claim_task", "completed", true, false, false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var committed atomic.Int32
+			s := fake(t, func(s *fakeServer, msg envelope) {
+				switch msg.Method {
+				case "thread/resume":
+					s.reply(msg, threadReplyValue("dangerFullAccess"))
+				case "turn/start":
+					s.emit(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1"}}})
+					s.reply(msg, map[string]any{"turn": map[string]any{"id": "turn-1", "status": "inProgress"}})
+					s.emit(map[string]any{"id": tc.requestID, "method": "item/tool/call", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "callId": "call-1", "tool": "checkpoint", "arguments": map[string]any{}}})
+				case "":
+					if len(msg.ID) == 0 {
+						return
+					}
+					item := map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"type": "dynamicToolCall", "id": tc.itemID, "namespace": nil, "tool": tc.tool, "status": tc.status, "success": tc.success}}}
+					if tc.itemFirst {
+						s.emit(item)
+					}
+					if tc.unrelatedResolved {
+						s.emit(map[string]any{"method": "serverRequest/resolved", "params": map[string]any{"threadId": "thread-1", "requestId": tc.requestID}})
+					}
+					if !tc.itemFirst {
+						s.emit(item)
+					}
+					if tc.duplicate {
+						s.emit(item)
+					}
+					s.emit(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "completed"}}})
+				}
+			})
+			bindTestThread(t, s)
+			s.client.SetToolHandler(func(context.Context, ToolCall) (PreparedToolResponse, error) {
+				return PreparedToolResponse{Success: true, Text: "saved", Commit: func(context.Context) error { committed.Add(1); return nil }}, nil
+			})
+			outcome, err := s.client.RunTurn(testContext(t), "thread-1", "work", settings(), nil, nil)
+			if (err == nil) != tc.wantOK || committed.Load() != 1 || len(outcome.Callbacks) != 1 || (outcome.Callbacks[0].RequestID == "\"req-17\"") != (tc.requestID == "req-17") {
+				t.Fatalf("outcome=%+v err=%v committed=%d", outcome, err, committed.Load())
+			}
+		})
+	}
+}
+
+func TestReadTurnRetainsDynamicToolCompletion(t *testing.T) {
+	s := fake(t, func(s *fakeServer, msg envelope) {
+		if msg.Method != "thread/read" {
+			t.Errorf("unexpected method %s", msg.Method)
+			return
+		}
+		s.reply(msg, map[string]any{"thread": map[string]any{"id": "thread-1", "turns": []any{map[string]any{"id": "turn-1", "status": "completed", "items": []any{map[string]any{"type": "dynamicToolCall", "id": "call-1", "namespace": nil, "tool": "save_checkpoint", "status": "completed", "success": true}, map[string]string{"type": "agentMessage", "phase": "final", "text": `{"disposition":"ready_for_review"}`}}}}}})
+	})
+	observed, err := s.client.ReadTurn(testContext(t), "thread-1", "turn-1")
+	if err != nil || !observed.ItemsKnown || len(observed.DynamicTools) != 1 || observed.DynamicTools[0].ID != "call-1" || observed.DynamicTools[0].Success == nil || !*observed.DynamicTools[0].Success || observed.FinalText == "" {
+		t.Fatalf("observed=%+v err=%v", observed, err)
 	}
 }
 

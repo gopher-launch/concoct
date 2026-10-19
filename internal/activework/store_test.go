@@ -71,6 +71,39 @@ func TestOpenCanonicalRootsAndReadOnlyStatus(t *testing.T) {
 	}
 }
 
+func TestLegacyAndStructuredRecoveryStatus(t *testing.T) {
+	store, repo := testStore(t)
+	owner, err := store.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	if _, err := owner.Start(spec(t, repo)); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.UpdateOperational(Operational{Phase: "engineering", Hold: "recovery-required", PendingRequest: "uncertain-turn in attempt old-1"}); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := store.Status()
+	if err != nil || legacy.Recovery == nil || legacy.Recovery.Stage != "legacy-reconciliation" || !strings.Contains(legacy.PendingRequest, "old-1") {
+		t.Fatalf("legacy record unreadable: %+v %v", legacy, err)
+	}
+	if err := owner.HoldRecovery(RecoveryIssue{AttemptID: "new-1", Stage: "provider-completion", Operation: "save_checkpoint", Reason: "completed item missing", EvidenceRef: "runs/example/state.json"}); err != nil {
+		t.Fatal(err)
+	}
+	structured, err := store.Status()
+	if err != nil || structured.Recovery == nil || structured.Recovery.Reason != "completed item missing" || structured.PendingRequest != "completed item missing" {
+		t.Fatalf("structured reason lost: %+v %v", structured, err)
+	}
+	if err := owner.UpdateOperational(Operational{Phase: "engineering"}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := store.Status()
+	if err != nil || cleared.Recovery != nil {
+		t.Fatalf("resolved recovery remained visible: %+v %v", cleared, err)
+	}
+}
+
 func TestCommonGitDirectorySharesOwnershipAcrossWorktrees(t *testing.T) {
 	store, repo := testStore(t)
 	sibling := filepath.Join(filepath.Dir(repo), "sibling")

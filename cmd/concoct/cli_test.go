@@ -27,6 +27,21 @@ type fakeOperations struct {
 	event   *codexapp.Event
 }
 
+func TestRecoveryStatusShowsRetainedReasonBeforeReadyPhase(t *testing.T) {
+	snapshot := activework.Snapshot{Active: true, TaskID: "APP-002", Phase: "ready-for-review", Hold: "recovery-required", PendingRequest: "reconcile callback", Recovery: &activework.RecoveryIssue{AttemptID: "attempt-1", Stage: "provider-completion", Operation: "save_checkpoint", Reason: "matching completed item missing", EvidenceRef: "turn turn-1; call call-1", AgentResult: "ready for review"}}
+	if got := disposition(snapshot); got != "recovery_required" {
+		t.Fatalf("status disposition = %s", got)
+	}
+	status := view(snapshot, request{})
+	var output bytes.Buffer
+	printStatus(&output, status)
+	for _, fragment := range []string{"matching completed item missing", "save_checkpoint", "ready for review", "turn turn-1"} {
+		if !strings.Contains(output.String(), fragment) {
+			t.Fatalf("missing %q in status: %s", fragment, output.String())
+		}
+	}
+}
+
 func (f *fakeOperations) Do(_ context.Context, r request, stream func(codexapp.Event)) (outcome, error) {
 	f.calls++
 	f.request = r

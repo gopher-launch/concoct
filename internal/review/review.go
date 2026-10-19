@@ -240,6 +240,9 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	if outcome.TurnID != "" && observeErr == nil {
 		observeErr = owner.ObserveDispatchTurn(binding.AttemptID, outcome.TurnID)
 	}
+	if outcome.TurnID != "" && observeErr == nil {
+		observeErr = owner.RecordDispatchCallbacks(binding.AttemptID, thread.ID, outcome.TurnID, outcome.Callbacks)
+	}
 	if outcome.TurnID != "" && outcome.Status != "" && observeErr == nil {
 		if outcome.ThreadID != "" && outcome.ThreadID != thread.ID {
 			observeErr = fmt.Errorf("provider outcome thread differs from reviewer binding")
@@ -398,7 +401,15 @@ func holdRecovery(owner *activework.Owner, store *activework.Store, result *Resu
 	if err != nil {
 		return *result, err
 	}
-	if err := owner.UpdateOperational(activework.Operational{Phase: "reviewing", Hold: "recovery-required", PendingRequest: reason, RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters}); err != nil {
+	attemptID := ""
+	if snapshot.Review != nil {
+		attemptID = snapshot.Review.AttemptID
+	}
+	message := reason
+	if cause != nil {
+		message += ": " + cause.Error()
+	}
+	if err := owner.HoldRecovery(activework.RecoveryIssue{AttemptID: attemptID, Role: "iragent", Stage: "review", Operation: "assessment", Reason: message, EvidenceRef: "active review attempt " + attemptID}); err != nil {
 		return *result, err
 	}
 	result.Status = "recovery_required"
@@ -565,7 +576,7 @@ type hostSession struct {
 }
 
 func (s *hostSession) handle(_ context.Context, call codexapp.ToolCall) (codexapp.PreparedToolResponse, error) {
-	if call.Role != "iragent" || call.ThreadID != s.threadID || call.TurnID == "" || call.CallID == "" || call.Tool != "save_assessment" {
+	if call.Role != "iragent" || call.ThreadID != s.threadID || call.TurnID == "" || call.CallID == "" || call.Namespace != "" || call.Tool != "save_assessment" {
 		return codexapp.PreparedToolResponse{}, fmt.Errorf("callback does not belong to pending iragent assessment")
 	}
 	var args struct {

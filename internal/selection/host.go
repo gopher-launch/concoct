@@ -32,7 +32,7 @@ type claimArguments struct {
 }
 
 func (s *hostSession) handle(_ context.Context, call codexapp.ToolCall) (codexapp.PreparedToolResponse, error) {
-	if call.Role != "reagent" || call.ThreadID != s.threadID || call.TurnID == "" || call.CallID == "" {
+	if call.Role != "reagent" || call.ThreadID != s.threadID || call.TurnID == "" || call.CallID == "" || call.Namespace != "" {
 		return codexapp.PreparedToolResponse{}, fmt.Errorf("callback does not belong to the reagent turn")
 	}
 	switch call.Tool {

@@ -44,4 +44,4 @@ The read-only `internal/roadmap` parser accepts `## ID — title` entries with c
 
 ## Construction
 
-Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Record construction evidence outside this repository under `$HOME/.concoct/manual/<task-id>/`; independent review and explicit operator acceptance precede local integration. Historical Git, including CON-042, is reference material for selective harvesting. CON-058 is the next ready task; CON-056 remains planned until the corrections are delivered.
+Use ordinary manually directed Codex sessions for one bounded roadmap task at a time. Record construction evidence outside this repository under `$HOME/.concoct/manual/<task-id>/`; independent review and explicit operator acceptance precede local integration. Historical Git, including CON-042, is reference material for selective harvesting. CON-059 is the next ready task; CON-056 remains planned until the corrections are delivered.

@@ -4,8 +4,23 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gopher-launch/concoct/internal/codexapp"
 	"github.com/gopher-launch/concoct/internal/dispatch"
 )
+
+func (o *Owner) RecordDispatchCallbacks(id, threadID, turnID string, callbacks []codexapp.CallbackEvidence) error {
+	if len(callbacks) == 0 {
+		return nil
+	}
+	st, policy, err := o.dispatchState()
+	if err != nil {
+		return err
+	}
+	if err := policy.RecordCallbacks(id, threadID, turnID, callbacks); err != nil {
+		return err
+	}
+	return o.saveDispatch(st, policy)
+}
 
 // ConfigureDispatch records resolved policy once for this run. Reopening the
 // store or claiming a selected task retains the same limits and profiles.

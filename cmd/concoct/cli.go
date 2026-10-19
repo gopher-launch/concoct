@@ -310,31 +310,32 @@ func positiveLimit(value string) (int, error) {
 
 // statusView omits provider final text and active narratives from machine output.
 type statusView struct {
-	ObservedAt      time.Time              `json:"observed_at"`
-	Active          bool                   `json:"active"`
-	PendingStart    bool                   `json:"pending_start,omitempty"`
-	TaskID          string                 `json:"task_id,omitempty"`
-	RunID           string                 `json:"run_id,omitempty"`
-	Phase           string                 `json:"phase,omitempty"`
-	Hold            string                 `json:"hold,omitempty"`
-	PendingRequest  string                 `json:"pending_request,omitempty"`
-	Candidate       string                 `json:"candidate,omitempty"`
-	ReviewVerdict   string                 `json:"review_verdict,omitempty"`
-	QuestionID      string                 `json:"question_id,omitempty"`
-	Question        *questionView          `json:"question,omitempty"`
-	AuthorizationID string                 `json:"authorization_id,omitempty"`
-	AcceptanceID    string                 `json:"acceptance_id,omitempty"`
-	TargetBranch    string                 `json:"target_branch,omitempty"`
-	TargetCommit    string                 `json:"target_commit,omitempty"`
-	Profiles        map[string]string      `json:"profiles,omitempty"`
-	Attempts        int                    `json:"attempts"`
-	DispatchLimit   int                    `json:"dispatch_limit"`
-	Assessments     int                    `json:"assessments"`
-	AssessmentLimit int                    `json:"assessment_limit"`
-	RecoveryLimit   int                    `json:"recovery_limit"`
-	ObservedTokens  int64                  `json:"observed_tokens"`
-	QuotaAge        string                 `json:"quota_age"`
-	QuotaWindows    map[string]quotaWindow `json:"quota_windows,omitempty"`
+	ObservedAt      time.Time                 `json:"observed_at"`
+	Active          bool                      `json:"active"`
+	PendingStart    bool                      `json:"pending_start,omitempty"`
+	TaskID          string                    `json:"task_id,omitempty"`
+	RunID           string                    `json:"run_id,omitempty"`
+	Phase           string                    `json:"phase,omitempty"`
+	Hold            string                    `json:"hold,omitempty"`
+	PendingRequest  string                    `json:"pending_request,omitempty"`
+	Recovery        *activework.RecoveryIssue `json:"recovery,omitempty"`
+	Candidate       string                    `json:"candidate,omitempty"`
+	ReviewVerdict   string                    `json:"review_verdict,omitempty"`
+	QuestionID      string                    `json:"question_id,omitempty"`
+	Question        *questionView             `json:"question,omitempty"`
+	AuthorizationID string                    `json:"authorization_id,omitempty"`
+	AcceptanceID    string                    `json:"acceptance_id,omitempty"`
+	TargetBranch    string                    `json:"target_branch,omitempty"`
+	TargetCommit    string                    `json:"target_commit,omitempty"`
+	Profiles        map[string]string         `json:"profiles,omitempty"`
+	Attempts        int                       `json:"attempts"`
+	DispatchLimit   int                       `json:"dispatch_limit"`
+	Assessments     int                       `json:"assessments"`
+	AssessmentLimit int                       `json:"assessment_limit"`
+	RecoveryLimit   int                       `json:"recovery_limit"`
+	ObservedTokens  int64                     `json:"observed_tokens"`
+	QuotaAge        string                    `json:"quota_age"`
+	QuotaWindows    map[string]quotaWindow    `json:"quota_windows,omitempty"`
 }
 
 type questionView struct {
@@ -364,7 +365,7 @@ type quotaWindow struct {
 }
 
 func view(s activework.Snapshot, req request) statusView {
-	v := statusView{ObservedAt: s.ObservedAt, Active: s.Active, PendingStart: s.PendingStart, TaskID: s.TaskID, RunID: s.RunID, Phase: s.Phase, Hold: s.Hold, PendingRequest: s.PendingRequest, QuotaAge: "unknown", Profiles: map[string]string{}}
+	v := statusView{ObservedAt: s.ObservedAt, Active: s.Active, PendingStart: s.PendingStart, TaskID: s.TaskID, RunID: s.RunID, Phase: s.Phase, Hold: s.Hold, PendingRequest: s.PendingRequest, Recovery: s.Recovery, QuotaAge: "unknown", Profiles: map[string]string{}}
 	if s.Candidate != nil {
 		v.Candidate = s.Candidate.Commit
 	}
@@ -425,6 +426,19 @@ func printStatus(w io.Writer, s statusView) {
 	fmt.Fprintln(w)
 	if s.PendingRequest != "" {
 		fmt.Fprintln(w, "Pending action:", s.PendingRequest)
+	}
+	if s.Recovery != nil {
+		label := s.Recovery.Stage
+		if s.Recovery.Operation != "" {
+			label += " " + s.Recovery.Operation
+		}
+		fmt.Fprintf(w, "Recovery: %s: %s\n", label, s.Recovery.Reason)
+		if s.Recovery.AgentResult != "" {
+			fmt.Fprintln(w, "Agent reported:", s.Recovery.AgentResult)
+		}
+		if s.Recovery.EvidenceRef != "" {
+			fmt.Fprintln(w, "Evidence:", s.Recovery.EvidenceRef)
+		}
 	}
 	if s.Candidate != "" {
 		fmt.Fprintln(w, "Candidate:", s.Candidate)

@@ -3,6 +3,7 @@ package selection
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -155,6 +156,9 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 	if outcome.TurnID != "" && observeErr == nil {
 		observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
 	}
+	if outcome.TurnID != "" && observeErr == nil {
+		observeErr = owner.RecordDispatchCallbacks(attemptID, thread.ID, outcome.TurnID, outcome.Callbacks)
+	}
 	if outcome.TurnID != "" && outcome.Status != "" && observeErr == nil {
 		if outcome.ThreadID != "" && outcome.ThreadID != thread.ID {
 			observeErr = fmt.Errorf("provider outcome thread differs from reagent binding")
@@ -179,20 +183,20 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 		return result, err
 	}
 	if turnErr != nil {
-		if holdErr := retainRecovery(owner, store, &result, "uncertain-turn", attemptID); holdErr != nil {
+		if holdErr := retainRecovery(owner, store, &result, "uncertain-turn", attemptID, turnErr); holdErr != nil {
 			return result, fmt.Errorf("%w; retain recovery: %v", turnErr, holdErr)
 		}
 		return result, turnErr
 	}
 	if outcome.Status != "completed" {
-		if holdErr := retainRecovery(owner, store, &result, "incomplete-turn", attemptID); holdErr != nil {
+		if holdErr := retainRecovery(owner, store, &result, "incomplete-turn", attemptID, fmt.Errorf("provider turn ended %s: %s", outcome.Status, outcome.ProviderError)); holdErr != nil {
 			return result, holdErr
 		}
 		return result, fmt.Errorf("reagent turn ended %s: %s", outcome.Status, outcome.ProviderError)
 	}
 	verdict, err := codexapp.ParseRoleResult(outcome.FinalText)
 	if err != nil {
-		if holdErr := retainRecovery(owner, store, &result, "invalid-role-result", attemptID); holdErr != nil {
+		if holdErr := retainRecovery(owner, store, &result, "invalid-role-result", attemptID, err); holdErr != nil {
 			return result, fmt.Errorf("%w; retain recovery: %v", err, holdErr)
 		}
 		return result, err
@@ -303,13 +307,13 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 }
 
 func invalidCompletedResult(owner *activework.Owner, store *activework.Store, result *Result, reason, attemptID string, cause error) (Result, error) {
-	if err := retainRecovery(owner, store, result, reason, attemptID); err != nil {
+	if err := retainRecovery(owner, store, result, reason, attemptID, cause); err != nil {
 		return *result, fmt.Errorf("%w; retain recovery: %v", cause, err)
 	}
 	return *result, cause
 }
 
-func retainRecovery(owner *activework.Owner, store *activework.Store, result *Result, reason, attemptID string) error {
+func retainRecovery(owner *activework.Owner, store *activework.Store, result *Result, reason, attemptID string, cause error) error {
 	snapshot, err := store.Status()
 	if err != nil {
 		return err
@@ -317,13 +321,76 @@ func retainRecovery(owner *activework.Owner, store *activework.Store, result *Re
 	if !snapshot.Active {
 		return fmt.Errorf("active run disappeared before recovery hold")
 	}
-	if err := owner.UpdateOperational(activework.Operational{Phase: snapshot.Phase, Hold: "recovery-required", PendingRequest: reason + " in attempt " + attemptID + "; reconcile within recorded recovery allowance", RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters}); err != nil {
+	issue := recoveryIssue(snapshot, reason, attemptID, cause)
+	if err := owner.HoldRecovery(issue); err != nil {
 		return err
 	}
 	result.Status = "recovery_required"
 	result.TaskID = snapshot.TaskID
 	result.Snapshot, err = store.Status()
 	return err
+}
+
+func recoveryIssue(snapshot activework.Snapshot, stage, attemptID string, cause error) activework.RecoveryIssue {
+	issue := activework.RecoveryIssue{AttemptID: attemptID, Stage: stage, Operation: "provider turn", Reason: stage, EvidenceRef: "runs/" + snapshot.RunID + "/state.json dispatch attempt " + attemptID}
+	if cause != nil {
+		issue.Reason = stage + ": " + cause.Error()
+	}
+	if snapshot.Dispatch != nil {
+		for _, attempt := range snapshot.Dispatch.Attempts {
+			if attempt.ID != attemptID {
+				continue
+			}
+			issue.Role = string(attempt.Binding.Role)
+			if attempt.TurnID != "" {
+				issue.EvidenceRef += "; turn " + attempt.TurnID
+			}
+			if verdict, err := codexapp.ParseRoleResult(attempt.FinalText); err == nil {
+				issue.AgentResult = verdict.Summary
+			} else {
+				issue.AgentResult = strings.TrimSpace(attempt.FinalText)
+			}
+			for _, callback := range attempt.Callbacks {
+				if callback.Success {
+					continue
+				}
+				issue.Operation = callback.Tool
+				issue.EvidenceRef += "; call " + callback.CallID + "; request " + callback.RequestID
+				kind := ""
+				switch callback.Tool {
+				case "claim_task":
+					kind = "claim"
+				case "save_checkpoint":
+					kind = "checkpoint"
+				case "save_assessment":
+					kind = "assessment"
+				}
+				if kind != "" {
+					hash := sha256.Sum256([]byte(callback.CallID))
+					issue.EvidenceRef += "; receipts/" + kind + "-" + hex.EncodeToString(hash[:12]) + ".json"
+				}
+				if !callback.ReceiptCommitted {
+					issue.Stage = "host-receipt"
+				} else if !callback.ResponseSent {
+					issue.Stage = "response-transport"
+				} else {
+					issue.Stage = "provider-completion"
+				}
+				if callback.Failure != "" {
+					issue.Reason = callback.Failure
+				}
+				break
+			}
+			break
+		}
+	}
+	if len(issue.Reason) > 2048 {
+		issue.Reason = issue.Reason[:2048]
+	}
+	if len(issue.AgentResult) > 512 {
+		issue.AgentResult = issue.AgentResult[:512]
+	}
+	return issue
 }
 
 type projectSnapshot struct {

@@ -165,7 +165,7 @@ func Continue(ctx context.Context, cfg Config) (Result, error) {
 }
 
 func observePending(ctx context.Context, cfg Config, snapshot activework.Snapshot, attempt dispatch.Attempt) (codexapp.ObservedTurn, error) {
-	if snapshot.Stop != nil && snapshot.Stop.Status == "stopped_safely" && snapshot.Stop.AttemptID == attempt.ID && snapshot.Stop.ObservedStatus != "" {
+	if snapshot.Stop != nil && snapshot.Stop.Status == "stopped_safely" && snapshot.Stop.AttemptID == attempt.ID && snapshot.Stop.ObservedStatus != "" && snapshot.Stop.ObservedStatus != "completed" {
 		return codexapp.ObservedTurn{ID: attempt.TurnID, Status: snapshot.Stop.ObservedStatus, FinalText: snapshot.Stop.ObservedFinalText}, nil
 	}
 	var agent any = cfg.Agent
@@ -204,11 +204,34 @@ func applyCompleted(ctx context.Context, cfg Config, owner *activework.Owner, st
 	if err != nil {
 		return result, err
 	}
+	if !observed.ItemsKnown {
+		var agent any = cfg.Agent
+		if attempt.Binding.Role == dispatch.Iragent {
+			agent = reviewerFor(cfg)
+		}
+		if _, ok := agent.(turnReader); ok {
+			observed, err = observePending(ctx, cfg, snapshot, attempt)
+			if err != nil {
+				return holdContinuation(owner, store, result, "recovery-required", "exact completed turn items cannot be observed: "+err.Error())
+			}
+			if !observed.ItemsKnown {
+				return holdContinuation(owner, store, result, "recovery-required", "exact completed turn item list is unavailable")
+			}
+		}
+	}
 	if observed.ID != attempt.TurnID || observed.Status != "completed" || observed.FinalText == "" {
 		return holdContinuation(owner, store, result, "recovery-required", "completed turn lacks exact identity or result")
 	}
 	if attempt.FinalText != "" && attempt.FinalText != observed.FinalText {
 		return holdContinuation(owner, store, result, "recovery-required", "provider result differs from recorded outcome")
+	}
+	if err := verifyObservedCallbacks(owner, attempt, observed); err != nil {
+		return holdContinuation(owner, store, result, "recovery-required", "callback evidence for completed turn is insufficient: "+err.Error())
+	}
+	if snapshot.Hold == "recovery-required" {
+		if err := owner.UpdateOperational(activework.Operational{Phase: snapshot.Phase, RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters}); err != nil {
+			return result, err
+		}
 	}
 	if attempt.Binding.Role == dispatch.Iragent {
 		assessment, err := review.ReconcileCompleted(ctx, reviewerFor(cfg), owner, store, observed)
@@ -245,6 +268,81 @@ func applyCompleted(ctx context.Context, cfg Config, owner *activework.Owner, st
 	return applied, err
 }
 
+func verifyObservedCallbacks(owner *activework.Owner, attempt dispatch.Attempt, observed codexapp.ObservedTurn) error {
+	items := make(map[string]codexapp.DynamicToolItem)
+	verifiedTools := make(map[string]bool)
+	for _, item := range observed.DynamicTools {
+		if item.ID == "" || item.Tool == "" {
+			return fmt.Errorf("dynamic tool item identity is missing")
+		}
+		if prior := items[item.ID]; prior.ID != "" {
+			if prior.Tool != item.Tool || prior.Namespace != item.Namespace || prior.Status != item.Status || (prior.Success == nil) != (item.Success == nil) || (prior.Success != nil && *prior.Success != *item.Success) {
+				return fmt.Errorf("conflicting dynamic tool item %s", item.ID)
+			}
+			continue
+		}
+		items[item.ID] = item
+		kind := ""
+		switch item.Tool {
+		case "claim_task":
+			kind = "claim"
+		case "save_checkpoint":
+			kind = "checkpoint"
+		case "save_assessment":
+			kind = "assessment"
+		}
+		if kind == "" {
+			return fmt.Errorf("unrecognized host operation %s", item.Tool)
+		}
+		if (attempt.Binding.Role == dispatch.Reagent && kind == "assessment") || (attempt.Binding.Role == dispatch.Iragent && kind != "assessment") {
+			return fmt.Errorf("host operation %s differs from bound role", item.Tool)
+		}
+		if item.Status != "completed" || item.Success == nil || !*item.Success {
+			return fmt.Errorf("%s call %s did not complete successfully", item.Tool, item.ID)
+		}
+		found, err := owner.VerifiedCallReceipt(kind, item.ID, attempt.TurnID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("%s call %s lacks durable host receipt", item.Tool, item.ID)
+		}
+		verifiedTools[item.Tool] = true
+	}
+	if observed.ItemsKnown {
+		if verdict, err := codexapp.ParseRoleResult(observed.FinalText); err == nil {
+			if verdict.Disposition == "ready_for_review" && !verifiedTools["save_checkpoint"] {
+				return fmt.Errorf("ready result lacks completed save_checkpoint item")
+			}
+			if verdict.Disposition == "ready_for_review" && attempt.Binding.Activity == dispatch.Selection && !verifiedTools["claim_task"] {
+				return fmt.Errorf("selected task lacks completed claim_task item")
+			}
+			if (verdict.Disposition == "approved" || verdict.Disposition == "changes_requested") && !verifiedTools["save_assessment"] {
+				return fmt.Errorf("review result lacks completed save_assessment item")
+			}
+		}
+	}
+	for _, callback := range attempt.Callbacks {
+		if callback.ThreadID != attempt.ThreadID || callback.TurnID != attempt.TurnID || callback.RequestID == "" || callback.CallID == "" {
+			return fmt.Errorf("callback binding differs from dispatch")
+		}
+		item, ok := items[callback.CallID]
+		if observed.ItemsKnown && (!ok || item.Tool != callback.Tool || item.Namespace != callback.Namespace) {
+			return fmt.Errorf("callback call %s lacks matching provider item", callback.CallID)
+		}
+		if !callback.ReceiptCommitted {
+			return fmt.Errorf("callback call %s lacks host commit", callback.CallID)
+		}
+		if !observed.ItemsKnown && (!callback.ResponseSent || !callback.Success) {
+			return fmt.Errorf("callback call %s lacks provider completion", callback.CallID)
+		}
+	}
+	if observed.ItemsKnown && len(attempt.Callbacks) != 0 && len(items) != len(attempt.Callbacks) {
+		return fmt.Errorf("provider items differ from recorded callbacks")
+	}
+	return nil
+}
+
 func continueAfterResolved(ctx context.Context, cfg Config, owner *activework.Owner, store *activework.Store, result Result, episode string, recovering bool) (Result, error) {
 	snapshot, err := store.Status()
 	if err != nil {
@@ -254,6 +352,9 @@ func continueAfterResolved(ctx context.Context, cfg Config, owner *activework.Ow
 	if snapshot.Hold != "" {
 		if snapshot.Hold != "recovery-required" || snapshot.Phase != "reviewing" || snapshot.Review == nil || snapshot.Review.Verdict != "" || snapshot.Dispatch == nil {
 			result.Status = "decision_required"
+			if snapshot.Hold == "recovery-required" {
+				result.Status = "recovery_required"
+			}
 			return result, nil
 		}
 		priorResolved := false
@@ -359,8 +460,20 @@ func holdContinuation(owner *activework.Owner, store *activework.Store, result R
 	if len(request) > 256 {
 		request = request[:256]
 	}
-	if err := owner.UpdateOperational(activework.Operational{Phase: snapshot.Phase, Hold: hold, PendingRequest: request, RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters}); err != nil {
-		return result, err
+	var holdErr error
+	if hold == "recovery-required" {
+		attemptID := ""
+		if snapshot.Dispatch != nil && len(snapshot.Dispatch.Attempts) != 0 {
+			attemptID = snapshot.Dispatch.Attempts[len(snapshot.Dispatch.Attempts)-1].ID
+		}
+		issue := recoveryIssue(snapshot, "reconciliation", attemptID, fmt.Errorf("%s", request))
+		issue.Reason = request
+		holdErr = owner.HoldRecovery(issue)
+	} else {
+		holdErr = owner.UpdateOperational(activework.Operational{Phase: snapshot.Phase, Hold: hold, PendingRequest: request, RoleIDs: snapshot.RoleIDs, RoleSettings: snapshot.RoleSettings, Counters: snapshot.Counters})
+	}
+	if holdErr != nil {
+		return result, holdErr
 	}
 	result.Status = "recovery_required"
 	if hold == "abnormal-stop" {
@@ -526,6 +639,9 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 	})
 	if outcome.TurnID != "" && observeErr == nil {
 		observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
+	}
+	if outcome.TurnID != "" && observeErr == nil {
+		observeErr = owner.RecordDispatchCallbacks(attemptID, thread.ID, outcome.TurnID, outcome.Callbacks)
 	}
 	if outcome.TurnID != "" && outcome.Status != "" && observeErr == nil {
 		observeErr = owner.RecordDispatchOutcome(attemptID, thread.ID, outcome.TurnID, outcome.Status, outcome.FinalText)

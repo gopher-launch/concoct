@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -14,8 +15,21 @@ type Event struct {
 	ThreadID  string
 	TurnID    string
 	RequestID string
+	CallID    string
+	Tool      string
+	Namespace string
+	Committed bool
+	Sent      bool
 	Raw       json.RawMessage
 	Err       error
+}
+
+// CallbackEvidence separates a durable host mutation, response transport, and
+// the provider's completed dynamic-tool item. RequestID retains its JSON type.
+type CallbackEvidence struct {
+	ThreadID, TurnID, RequestID, CallID, Tool, Namespace, ItemID     string
+	ReceiptCommitted, ResponseSent, ProviderCompleted, Success, Done bool
+	Failure                                                          string
 }
 
 type Usage struct {
@@ -33,6 +47,28 @@ type TurnOutcome struct {
 	FinalText     string
 	Usage         *Usage // nil means no provider receipt observed
 	ProviderError string
+	Callbacks     []CallbackEvidence
+}
+
+type dynamicToolItem struct {
+	Type, ID, Namespace, Tool, Status, ThreadID, TurnID string
+	Success                                             *bool
+}
+
+func allCallbacksDone(callbacks map[string]*CallbackEvidence) bool {
+	for _, callback := range callbacks {
+		if !callback.Done {
+			return false
+		}
+	}
+	return true
+}
+
+func sameDynamicItem(a, b dynamicToolItem) bool {
+	if a.Type != b.Type || a.ID != b.ID || a.Namespace != b.Namespace || a.Tool != b.Tool || a.Status != b.Status || a.ThreadID != b.ThreadID || a.TurnID != b.TurnID || (a.Success == nil) != (b.Success == nil) {
+		return false
+	}
+	return a.Success == nil || *a.Success == *b.Success
 }
 
 type turnRun struct {
@@ -77,8 +113,8 @@ func (r *turnRun) emit(event Event) {
 
 // RunTurn streams events as received, including while the provider is still
 // executing. A completed provider turn is not an approved role result.
-func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings RoleSettings, outputSchema json.RawMessage, onEvent func(Event)) (TurnOutcome, error) {
-	result := TurnOutcome{ThreadID: threadID}
+func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings RoleSettings, outputSchema json.RawMessage, onEvent func(Event)) (result TurnOutcome, resultErr error) {
+	result = TurnOutcome{ThreadID: threadID}
 	if err := settings.validate(); err != nil {
 		return result, err
 	}
@@ -111,21 +147,36 @@ func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings 
 	}
 	started := false
 	terminal := false
-	pendingCallbacks := 0
-	callbackAcknowledged := make(map[string]bool)
+	callbacks := make(map[string]*CallbackEvidence)
+	items := make(map[string]dynamicToolItem)
+	defer func() {
+		for _, callback := range callbacks {
+			if item, ok := items[callback.CallID]; ok {
+				callback.ItemID = item.ID
+				callback.ProviderCompleted = item.ThreadID == callback.ThreadID && item.TurnID == callback.TurnID && item.Status == "completed" && item.Success != nil && *item.Success && item.Tool == callback.Tool && item.Namespace == callback.Namespace
+				callback.Success = callback.ProviderCompleted && callback.ReceiptCommitted && callback.ResponseSent && callback.Failure == ""
+			}
+			result.Callbacks = append(result.Callbacks, *callback)
+		}
+		sort.Slice(result.Callbacks, func(i, j int) bool { return result.Callbacks[i].RequestID < result.Callbacks[j].RequestID })
+	}()
 	var callbackErr error
 	for {
-		if terminal && started && pendingCallbacks == 0 {
+		if terminal && started && allCallbacksDone(callbacks) {
 			if result.TurnID == "" {
 				return result, fmt.Errorf("turn completed without identity")
 			}
 			if callbackErr != nil {
 				return result, callbackErr
 			}
-			for id, acknowledged := range callbackAcknowledged {
-				if !acknowledged {
-					return result, fmt.Errorf("%w: provider did not resolve callback %s", ErrUncertainCallback, id)
+			for id, callback := range callbacks {
+				item, ok := items[callback.CallID]
+				if !ok || callback.ThreadID != threadID || callback.TurnID != result.TurnID || item.ThreadID != threadID || item.TurnID != result.TurnID || item.Status != "completed" || item.Success == nil || !*item.Success || item.Tool != callback.Tool || item.Namespace != callback.Namespace || !callback.ReceiptCommitted || !callback.ResponseSent {
+					return result, fmt.Errorf("%w: dynamic tool %s call %s request %s lacks matching successful completed item or host response", ErrUncertainCallback, callback.Tool, callback.CallID, id)
 				}
+			}
+			if len(items) != len(callbacks) {
+				return result, fmt.Errorf("%w: completed dynamic tool item lacks a bound host request", ErrUncertainCallback)
 			}
 			switch result.Status {
 			case "completed":
@@ -196,6 +247,18 @@ func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings 
 				if json.Unmarshal(event.Raw, &value) == nil && value.Item.Type == "agentMessage" && (value.Item.Phase == "final" || value.Item.Phase == "") {
 					result.FinalText = value.Item.Text
 				}
+				var itemEvent struct {
+					Item dynamicToolItem `json:"item"`
+				}
+				if json.Unmarshal(event.Raw, &itemEvent) == nil && itemEvent.Item.Type == "dynamicToolCall" {
+					item := itemEvent.Item
+					item.ThreadID, item.TurnID = event.ThreadID, event.TurnID
+					if item.ID == "" || item.Tool == "" || (items[item.ID].ID != "" && !sameDynamicItem(items[item.ID], item)) {
+						callbackErr = fmt.Errorf("%w: conflicting dynamic tool item", ErrUncertainCallback)
+					} else {
+						items[item.ID] = item
+					}
+				}
 			case "thread/tokenUsage/updated":
 				var value struct {
 					TokenUsage struct {
@@ -212,25 +275,30 @@ func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings 
 					}
 				}
 			case "callback/started":
-				pendingCallbacks++
-				callbackAcknowledged[event.RequestID] = false
+				if prior := callbacks[event.RequestID]; prior != nil {
+					if prior.CallID != event.CallID || prior.Tool != event.Tool || prior.Namespace != event.Namespace || prior.TurnID != event.TurnID {
+						callbackErr = fmt.Errorf("%w: conflicting callback request %s", ErrUncertainCallback, event.RequestID)
+					}
+				} else {
+					callbacks[event.RequestID] = &CallbackEvidence{ThreadID: event.ThreadID, TurnID: event.TurnID, RequestID: event.RequestID, CallID: event.CallID, Tool: event.Tool, Namespace: event.Namespace}
+				}
 			case "callback/done":
-				pendingCallbacks--
+				if callback := callbacks[event.RequestID]; callback != nil {
+					callback.Done = true
+					callback.ReceiptCommitted = callback.ReceiptCommitted || event.Committed
+					callback.ResponseSent = callback.ResponseSent || event.Sent
+					if event.Err != nil {
+						callback.Failure = event.Err.Error()
+					}
+				} else if callbackErr == nil {
+					callbackErr = fmt.Errorf("%w: callback completed without request", ErrUncertainCallback)
+				}
 				if event.Err != nil && callbackErr == nil {
 					callbackErr = event.Err
 				}
 			case "callback/error":
 				if callbackErr == nil {
 					callbackErr = event.Err
-				}
-			case "serverRequest/resolved":
-				var value struct {
-					RequestID json.RawMessage `json:"requestId"`
-				}
-				if json.Unmarshal(event.Raw, &value) == nil {
-					if _, ok := callbackAcknowledged[string(value.RequestID)]; ok {
-						callbackAcknowledged[string(value.RequestID)] = true
-					}
 				}
 			case "turn/completed":
 				var value struct {
@@ -316,7 +384,7 @@ func (c *Client) onRequest(msg envelope) {
 		return
 	}
 	call.Role = run.role
-	run.emit(Event{Kind: "callback/started", ThreadID: call.ThreadID, TurnID: call.TurnID, RequestID: string(id)})
+	run.emit(Event{Kind: "callback/started", ThreadID: call.ThreadID, TurnID: call.TurnID, RequestID: string(id), CallID: call.CallID, Tool: call.Tool, Namespace: call.Namespace})
 	go func() {
 		select {
 		case <-run.ready:
@@ -330,6 +398,7 @@ func (c *Client) onRequest(msg envelope) {
 			return
 		}
 		prepared, err := handler(context.Background(), call)
+		committed := false
 		if err != nil {
 			prepared = PreparedToolResponse{Text: err.Error()}
 		}
@@ -341,13 +410,16 @@ func (c *Client) onRequest(msg envelope) {
 			err = fmt.Errorf("successful host callback has no durable receipt operation")
 			prepared = PreparedToolResponse{Text: err.Error()}
 		}
-		if err == nil && prepared.Commit != nil {
+		if err == nil && prepared.Success && prepared.Commit != nil {
 			if commitErr := run.commit(context.Background(), prepared.Commit); commitErr != nil {
 				err = commitErr
 				prepared = PreparedToolResponse{Text: commitErr.Error()}
+			} else {
+				committed = true
 			}
 		}
-		if sendErr := c.replyTool(id, err == nil && prepared.Success, prepared.Text); sendErr != nil {
+		sendErr := c.replyTool(id, err == nil && prepared.Success, prepared.Text)
+		if sendErr != nil {
 			err = fmt.Errorf("%w: %v", ErrUncertainCallback, sendErr)
 		}
 		if err == nil && !prepared.Success {
@@ -356,7 +428,7 @@ func (c *Client) onRequest(msg envelope) {
 		if err != nil && !errors.Is(err, ErrUncertainCallback) {
 			err = fmt.Errorf("host callback failed: %w", err)
 		}
-		run.emit(Event{Kind: "callback/done", ThreadID: call.ThreadID, TurnID: call.TurnID, RequestID: string(id), Err: err})
+		run.emit(Event{Kind: "callback/done", ThreadID: call.ThreadID, TurnID: call.TurnID, RequestID: string(id), CallID: call.CallID, Tool: call.Tool, Namespace: call.Namespace, Committed: committed, Sent: sendErr == nil, Err: err})
 		if errors.Is(err, ErrUncertainCallback) {
 			c.fail(err)
 		}

@@ -205,7 +205,7 @@ func (l liveOperations) Do(ctx context.Context, req request, onEvent func(codexa
 		if snapshot.Active && snapshot.Integration != nil {
 			return l.approve(ctx, req, store, snapshot, onEvent)
 		}
-		if snapshot.Active && snapshot.Review != nil && snapshot.Review.Verdict == "approved" {
+		if snapshot.Active && snapshot.Hold == "" && snapshot.Review != nil && snapshot.Review.Verdict == "approved" {
 			acceptance, err := integration.Offer(integration.Config{Repository: req.Repository, Root: req.Root})
 			if err != nil {
 				return outcome{Snapshot: snapshot}, err
@@ -471,6 +471,9 @@ func disposition(s activework.Snapshot) string {
 			return "stopped_safely"
 		}
 		return "stopped_abnormally"
+	}
+	if s.Hold == "recovery-required" {
+		return "recovery_required"
 	}
 	if s.Dispatch != nil && s.Dispatch.Pending != nil && !s.Dispatch.Pending.Authorized {
 		return "authorization_required"
