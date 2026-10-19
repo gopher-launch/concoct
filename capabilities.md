@@ -73,4 +73,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Choice, text and answer-file contents are recorded in external task evidence before requester continuation. A source-changing reviewer question requires a receipted, candidate-bound assessment before it can be answered; its answer then becomes findings for reagent correction and renewed independent review within the agreed scope. A confirmed failed pre-turn reagent launch retains the answer for a bounded recovery retry after the requester is idle. Scope-changing questions require separate explicit authority; an answer does not grant dispatch authorization or verify an external action.
 - An idle active task can be deferred or abandoned with retained evidence and released ownership. Deferred work requires explicit reactivation with its recorded settings and consumption; abandoned work is terminal and excluded from automatic selection.
 
-The CLI workflow, broader threshold intervention and integration operation remain planned. CON-042 remains a frozen, undelivered historical reference.
+## CON-053 — Internal exact-candidate local integration
+
+- A durable acceptance ID binds the task and scope digest, candidate commit/tree, approving review number/attempt/turn and assessment digest, and expected parent branch/commit. A task ID or stale token cannot approve substitute work.
+- The internal integration path requires settled execution, idle bound roles, a clean unchanged parent checkout and the exact frozen task/review source. It records intent before preparing the parent checkout, fast-forwards the parent with expected-old-ref protection, and verifies the clean checkout at the reviewed commit and tree. It does not merge, reset or publish.
+- Retries classify the actual Git ref and checkout state. A clean already integrated target is recorded without repeating Git mutations; conflicting or partial states remain for reconciliation. Completion, archive and active ownership retirement remain separate.
+
+The CLI workflow and broader threshold intervention remain planned. CON-042 remains a frozen, undelivered historical reference.

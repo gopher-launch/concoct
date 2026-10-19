@@ -39,6 +39,13 @@ func Continue(ctx context.Context, cfg Config) (Result, error) {
 		return result, fmt.Errorf("no active run to continue")
 	}
 	result = Result{RunID: snapshot.RunID, TaskID: snapshot.TaskID, Workspace: filepath.Join(store.Root, "workspaces", snapshot.RunID), Snapshot: snapshot}
+	if snapshot.Integration != nil {
+		result.Status = "integration_pending"
+		if snapshot.Integration.Status == "integrated" {
+			result.Status = "integrated"
+		}
+		return result, nil
+	}
 	if err := verifyParentUnchanged(store, parentBinding{Branch: snapshot.ParentBranch, Commit: snapshot.ParentCommit}); err != nil {
 		return holdContinuation(owner, store, result, "recovery-required", "parent baseline changed: "+err.Error())
 	}

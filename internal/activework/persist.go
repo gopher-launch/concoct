@@ -62,6 +62,17 @@ func (s *Store) validateState(st state, id string) error {
 			return fmt.Errorf("active review finalization differs from verdict")
 		}
 	}
+	if st.Acceptance != nil {
+		a := st.Acceptance
+		if !namePattern.MatchString(a.ID) || a.TaskID != st.TaskID || a.TargetBranch != st.ParentBranch || a.ExpectedParent != st.ParentCommit || st.Candidate == nil || a.Candidate != st.Candidate.Commit || a.CandidateTree != st.Candidate.Tree || st.Review == nil || st.Review.Verdict != "approved" || a.ReviewNumber != st.Review.Number || a.ReviewAttemptID != st.Review.AttemptID || a.ReviewTurnID != st.Review.TurnID || a.ScopeSHA256 != st.Review.ScopeSHA256 || !isDigest(a.ReviewSHA256) {
+			return fmt.Errorf("active acceptance differs from reviewed candidate or target")
+		}
+	}
+	if st.Integration != nil {
+		if st.Acceptance == nil || st.Integration.AcceptanceID != st.Acceptance.ID || (st.Integration.Status != "intent" && st.Integration.Status != "integrated") {
+			return fmt.Errorf("active integration lacks exact acceptance intent")
+		}
+	}
 	if st.Stop != nil {
 		stop := st.Stop
 		if st.Dispatch == nil || (stop.Role != "reagent" && stop.Role != "iragent") || stop.ThreadID == "" || st.RoleIDs[stop.Role] != stop.ThreadID || stop.AttemptID == "" || (stop.Status != "requested" && stop.Status != "stopped_safely" && stop.Status != "stopped_abnormally") || len(stop.Problem) > 1024 || len(stop.Owned) > 1024 || len(stop.Handles) > 1024 {

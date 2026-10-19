@@ -74,6 +74,19 @@ type PendingReview struct {
 	Verdict                     string
 }
 
+// Acceptance is an operator-facing token bound to one reviewed source and
+// unchanged parent destination. The ID alone has no authority without this
+// durable binding.
+type Acceptance struct {
+	ID, TaskID, ScopeSHA256, Candidate, CandidateTree                         string
+	ReviewNumber                                                              int
+	ReviewAttemptID, ReviewTurnID, ReviewSHA256, TargetBranch, ExpectedParent string
+}
+
+type Integration struct {
+	AcceptanceID, Status string
+}
+
 type StopRecord struct {
 	Role, ThreadID, TurnID, AttemptID string
 	Status, Problem                   string
@@ -116,6 +129,8 @@ type Snapshot struct {
 	Candidate      *Candidate
 	FreezeIntent   *CandidateFreezeIntent
 	Review         *PendingReview
+	Acceptance     *Acceptance
+	Integration    *Integration
 	Stop           *StopRecord
 	StopHistory    []StopRecord
 	Question       *Question
@@ -145,6 +160,8 @@ type state struct {
 	Candidate                                      *Candidate
 	FreezeIntent                                   *CandidateFreezeIntent
 	Review                                         *PendingReview
+	Acceptance                                     *Acceptance
+	Integration                                    *Integration
 	Stop                                           *StopRecord
 	StopHistory                                    []StopRecord
 	Question                                       *Question
@@ -212,6 +229,14 @@ func (s *Store) Status() (Snapshot, error) {
 	if st.Review != nil {
 		copy := *st.Review
 		snapshot.Review = &copy
+	}
+	if st.Acceptance != nil {
+		copy := *st.Acceptance
+		snapshot.Acceptance = &copy
+	}
+	if st.Integration != nil {
+		copy := *st.Integration
+		snapshot.Integration = &copy
 	}
 	if st.Stop != nil {
 		copy := *st.Stop
