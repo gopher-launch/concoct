@@ -87,6 +87,13 @@ type Integration struct {
 	AcceptanceID, Status string
 }
 
+// Completion is persisted before archive and workspace maintenance. The run ID
+// is the stable archive identity across interrupted retries.
+type Completion struct {
+	RunID, TaskID, Candidate, CandidateTree, TargetBranch string
+	At                                                    time.Time
+}
+
 type StopRecord struct {
 	Role, ThreadID, TurnID, AttemptID string
 	Status, Problem                   string
@@ -131,6 +138,7 @@ type Snapshot struct {
 	Review         *PendingReview
 	Acceptance     *Acceptance
 	Integration    *Integration
+	Completion     *Completion
 	Stop           *StopRecord
 	StopHistory    []StopRecord
 	Question       *Question
@@ -162,6 +170,7 @@ type state struct {
 	Review                                         *PendingReview
 	Acceptance                                     *Acceptance
 	Integration                                    *Integration
+	Completion                                     *Completion
 	Stop                                           *StopRecord
 	StopHistory                                    []StopRecord
 	Question                                       *Question
@@ -237,6 +246,10 @@ func (s *Store) Status() (Snapshot, error) {
 	if st.Integration != nil {
 		copy := *st.Integration
 		snapshot.Integration = &copy
+	}
+	if st.Completion != nil {
+		copy := *st.Completion
+		snapshot.Completion = &copy
 	}
 	if st.Stop != nil {
 		copy := *st.Stop

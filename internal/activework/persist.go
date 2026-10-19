@@ -73,6 +73,12 @@ func (s *Store) validateState(st state, id string) error {
 			return fmt.Errorf("active integration lacks exact acceptance intent")
 		}
 	}
+	if st.Completion != nil {
+		c := st.Completion
+		if st.Integration == nil || st.Integration.Status != "integrated" || st.Acceptance == nil || c.RunID != st.RunID || c.TaskID != st.TaskID || c.Candidate != st.Acceptance.Candidate || c.CandidateTree != st.Acceptance.CandidateTree || c.TargetBranch != st.ParentBranch || c.At.IsZero() {
+			return fmt.Errorf("active completion lacks integrated binding")
+		}
+	}
 	if st.Stop != nil {
 		stop := st.Stop
 		if st.Dispatch == nil || (stop.Role != "reagent" && stop.Role != "iragent") || stop.ThreadID == "" || st.RoleIDs[stop.Role] != stop.ThreadID || stop.AttemptID == "" || (stop.Status != "requested" && stop.Status != "stopped_safely" && stop.Status != "stopped_abnormally") || len(stop.Problem) > 1024 || len(stop.Owned) > 1024 || len(stop.Handles) > 1024 {

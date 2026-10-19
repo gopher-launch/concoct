@@ -44,6 +44,9 @@ func Continue(ctx context.Context, cfg Config) (Result, error) {
 		if snapshot.Integration.Status == "integrated" {
 			result.Status = "integrated"
 		}
+		if snapshot.Completion != nil {
+			result.Status = "maintenance_pending"
+		}
 		return result, nil
 	}
 	if err := verifyParentUnchanged(store, parentBinding{Branch: snapshot.ParentBranch, Commit: snapshot.ParentCommit}); err != nil {

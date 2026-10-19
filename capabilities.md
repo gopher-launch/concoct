@@ -79,4 +79,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - The internal integration path requires settled execution, idle bound roles, a clean unchanged parent checkout and the exact frozen task/review source. It records intent before preparing the parent checkout, fast-forwards the parent with expected-old-ref protection, and verifies the clean checkout at the reviewed commit and tree. It does not merge, reset or publish.
 - Retries classify the actual Git ref and checkout state. A clean already integrated target is recorded without repeating Git mutations; conflicting or partial states remain for reconciliation. Completion, archive and active ownership retirement remain separate.
 
+## CON-054 — Mechanical completion and external archive
+
+- The internal completion path verifies the accepted commit, tree, target branch and clean checkout, including when Git integration succeeded before its record was finalized. It records completion facts before maintenance, archives the bound task and final reviews outside the product repository, then retires active ownership after safe workspace cleanup. It invokes no agent and does not repeat integration.
+- Interrupted archive or cleanup work resumes from the durable completion marker. Conflicting archive contents or changed and ignored workspace files remain in place with a maintenance-pending result. Completed archives are retained indefinitely by default.
+- Explicit cutoff-based pruning removes completed archives in deterministic task/run order while retaining the active run and supplied task or run IDs. Archived narratives are not added to automatic selection or resume context; full-access agents are not physically barred from the external archive.
+
 The CLI workflow and broader threshold intervention remain planned. CON-042 remains a frozen, undelivered historical reference.
