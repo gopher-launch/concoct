@@ -35,7 +35,7 @@ func TestRecoveryStatusShowsRetainedReasonBeforeReadyPhase(t *testing.T) {
 	status := view(snapshot, request{})
 	var output bytes.Buffer
 	printStatus(&output, status)
-	for _, fragment := range []string{"matching completed item missing", "save_checkpoint", "ready for review", "turn turn-1"} {
+	for _, fragment := range []string{"matching completed item missing", "save-checkpoint", "ready for review", "turn turn-1"} {
 		if !strings.Contains(output.String(), fragment) {
 			t.Fatalf("missing %q in status: %s", fragment, output.String())
 		}
@@ -97,7 +97,7 @@ func TestCLIStreamsProgressBeforeVerifiedResult(t *testing.T) {
 		progress bool
 	}{
 		{nil, "agent says ready", true},
-		{[]string{"--json"}, `"type":"agent_progress"`, true},
+		{[]string{"--json"}, `"type":"agent-progress"`, true},
 		{[]string{"--quiet"}, "agent says ready", false},
 	} {
 		f := &fakeOperations{out: outcome{Disposition: "ready_for_acceptance", Acceptance: &activework.Acceptance{ID: "accept-123"}}, event: &event}
@@ -110,7 +110,7 @@ func TestCLIStreamsProgressBeforeVerifiedResult(t *testing.T) {
 		if strings.Contains(text, mode.marker) != mode.progress || !strings.Contains(text, "accept-123") {
 			t.Fatalf("%v output: %s", args, text)
 		}
-		if mode.progress && strings.Index(text, mode.marker) > strings.Index(text, "ready_for_acceptance") {
+		if mode.progress && strings.Index(text, mode.marker) > strings.Index(text, "ready-for-acceptance") {
 			t.Fatalf("agent progress was delayed after verified result: %s", text)
 		}
 	}
@@ -202,7 +202,7 @@ func TestCLIJSONInvalidOptionKeepsDisposition(t *testing.T) {
 		t.Fatalf("invalid JSON request: code %d calls %d", code, f.calls)
 	}
 	var result map[string]any
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result["disposition"] != "prerequisite_error" {
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result["disposition"] != "prerequisite-error" {
 		t.Fatalf("invalid request lost JSON disposition: %s, %v", out.String(), err)
 	}
 }
@@ -257,7 +257,7 @@ func TestStatusReadOnlyDuringOwnerAndStaleIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errs bytes.Buffer
-	if code := run(context.Background(), []string{"status", "APP-002", "--json", "--repo", repo, "--root", root}, &out, &errs, liveOperations{}); code != 18 || !strings.Contains(out.String(), `"task_id":"APP-002"`) {
+	if code := run(context.Background(), []string{"status", "APP-002", "--json", "--repo", repo, "--root", root}, &out, &errs, liveOperations{}); code != 18 || !strings.Contains(out.String(), `"task-id":"APP-002"`) {
 		t.Fatalf("status under lock: %d %s %s", code, out.String(), errs.String())
 	}
 	if code := run(context.Background(), []string{"status", "APP-003", "--repo", repo, "--root", root}, &out, &errs, liveOperations{}); code != 2 {
@@ -310,7 +310,7 @@ func TestStatusLimitHoldHasExactExtension(t *testing.T) {
 		if code := run(context.Background(), args, &out, &errs, liveOperations{}); code != 10 {
 			t.Fatalf("status %v: %d %s", flags, code, errs.String())
 		}
-		for _, want := range []string{"decision_required", "extend dispatch allowance to 2", "concoct run --extend APP-002 --dispatch-limit 2"} {
+		for _, want := range []string{"decision-required", "extend dispatch allowance to 2", "concoct run --extend APP-002 --dispatch-limit 2"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("status %v missing %q: %s", flags, want, out.String())
 			}
@@ -445,7 +445,7 @@ func TestCLINominalNoWorkAndGateContinuation(t *testing.T) {
 				out.Reset()
 				code = run(context.Background(), []string{"run", "--authorize", snapshot.Dispatch.Pending.ID, "--repo", repo, "--root", root}, &out, &errs, ops)
 			}
-			if code != 0 || fake.turns != 1 || !strings.Contains(out.String(), "No task chosen.") || !strings.Contains(out.String(), "no_suitable_work") {
+			if code != 0 || fake.turns != 1 || !strings.Contains(out.String(), "No task chosen.") || !strings.Contains(out.String(), "no-suitable-work") {
 				t.Fatalf("nominal no-work: code %d, turns %d, output %s, err %s", code, fake.turns, out.String(), errs.String())
 			}
 			if snapshot, err := store.Status(); err != nil || snapshot.Active {
@@ -578,14 +578,14 @@ func TestCLIFullLocalDeliveryWithFakeProvider(t *testing.T) {
 	if code := run(context.Background(), []string{"status", "APP-002", "--json", "--repo", repo, "--root", root}, &statusOut, &errs, ops); code != 12 {
 		t.Fatalf("acceptance status: %d %s", code, statusOut.String())
 	}
-	for _, want := range []string{`"approval":`, `"diff_command":`, `"review_evidence":`, "Candidate source and criteria verified.", `"reconciled_paths":`} {
+	for _, want := range []string{`"approval":`, `"diff-command":`, `"review-evidence":`, "Candidate source and criteria verified.", `"reconciled-paths":`} {
 		if !strings.Contains(statusOut.String(), want) {
 			t.Errorf("acceptance JSON missing %q: %s", want, statusOut.String())
 		}
 	}
 	var statusResult struct {
 		Approval struct {
-			ReviewEvidence string `json:"review_evidence"`
+			ReviewEvidence string `json:"review-evidence"`
 		} `json:"approval"`
 	}
 	if err := json.Unmarshal(statusOut.Bytes(), &statusResult); err != nil {

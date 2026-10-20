@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -70,50 +70,27 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ops opera
 	req, err := parseRequest(args)
 	if err != nil {
 		if slices.Contains(args, "--json") {
-			_ = json.NewEncoder(stdout).Encode(map[string]string{"type": "result", "disposition": "prerequisite_error", "summary": err.Error()})
+			writePublicJSON(stdout, map[string]string{"type": "result", "disposition": "prerequisite-error", "summary": err.Error()})
 		} else {
 			fmt.Fprintln(stderr, "concoct:", err)
 		}
 		return 2
 	}
-	currentRole, firstDelta := "agent", true
-	stream := func(event codexapp.Event) {
-		if event.Kind == "turn/started" {
-			currentRole, firstDelta = "agent", true
-			if store, err := activework.Open(req.Repository, req.Root); err == nil {
-				if snapshot, err := store.Status(); err == nil {
-					for role, id := range snapshot.RoleIDs {
-						if id == event.ThreadID {
-							currentRole = role
-						}
+	stream := newMessageStream(stdout, req.JSON, req.Quiet)
+	roleForThread := func(threadID string) string {
+		if store, err := activework.Open(req.Repository, req.Root); err == nil {
+			if snapshot, err := store.Status(); err == nil {
+				for role, id := range snapshot.RoleIDs {
+					if id == threadID {
+						return role
 					}
 				}
 			}
-			return
 		}
-		if req.Quiet {
-			return
-		}
-		if event.Kind != "item/agentMessage/delta" {
-			return
-		}
-		var body struct {
-			Delta string `json:"delta"`
-		}
-		if json.Unmarshal(event.Raw, &body) != nil || body.Delta == "" {
-			return
-		}
-		if req.JSON {
-			_ = json.NewEncoder(stdout).Encode(map[string]string{"type": "agent_progress", "role": currentRole, "text": body.Delta})
-		} else {
-			if firstDelta {
-				fmt.Fprintf(stdout, "\n[%s] ", currentRole)
-				firstDelta = false
-			}
-			fmt.Fprint(stdout, body.Delta)
-		}
+		return "agent"
 	}
-	result, err := ops.Do(ctx, req, stream)
+	result, err := ops.Do(ctx, req, func(event codexapp.Event) { stream.event(event, roleForThread) })
+	stream.finish()
 	if result.Disposition == "" {
 		result.Disposition = "prerequisite_error"
 	}
@@ -135,10 +112,18 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ops opera
 			Next        string        `json:"next"`
 			Status      statusView    `json:"status"`
 			Approval    *approvalView `json:"approval,omitempty"`
-		}{"result", result.Disposition, result.Summary, result.Next, view(result.Snapshot, req), result.Approval}
-		_ = json.NewEncoder(stdout).Encode(response)
+			Agent       *agentReport  `json:"agent-reported,omitempty"`
+		}{"result", publicName(result.Disposition), result.Summary, result.Next, view(result.Snapshot, req), result.Approval, stream.report}
+		writePublicJSON(stdout, response)
 	} else {
-		fmt.Fprintf(stdout, "\nConcoct: %s\n", result.Disposition)
+		if stream.report != nil {
+			if stream.report.Error != "" {
+				fmt.Fprintf(stdout, "Agent result: %s (%s turn %s)\n", stream.report.Error, stream.report.Role, stream.report.TurnID)
+			} else {
+				fmt.Fprintf(stdout, "Agent reported (%s, %s): %s\n", stream.report.Role, stream.report.Disposition, stream.report.Summary)
+			}
+		}
+		fmt.Fprintf(stdout, "\nConcoct verified: %s\n", publicName(result.Disposition))
 		if result.Summary != "" {
 			fmt.Fprintln(stdout, result.Summary)
 		}
@@ -333,7 +318,8 @@ type statusView struct {
 	Assessments     int                       `json:"assessments"`
 	AssessmentLimit int                       `json:"assessment_limit"`
 	RecoveryLimit   int                       `json:"recovery_limit"`
-	ObservedTokens  int64                     `json:"observed_tokens"`
+	ObservedTokens  *int64                    `json:"observed_tokens,omitempty"`
+	ReviewTurnSeen  bool                      `json:"review_turn_observed"`
 	QuotaAge        string                    `json:"quota_age"`
 	QuotaWindows    map[string]quotaWindow    `json:"quota_windows,omitempty"`
 }
@@ -365,12 +351,18 @@ type quotaWindow struct {
 }
 
 func view(s activework.Snapshot, req request) statusView {
-	v := statusView{ObservedAt: s.ObservedAt, Active: s.Active, PendingStart: s.PendingStart, TaskID: s.TaskID, RunID: s.RunID, Phase: s.Phase, Hold: s.Hold, PendingRequest: s.PendingRequest, Recovery: s.Recovery, QuotaAge: "unknown", Profiles: map[string]string{}}
+	v := statusView{ObservedAt: s.ObservedAt, Active: s.Active, PendingStart: s.PendingStart, TaskID: s.TaskID, RunID: s.RunID, Phase: publicName(s.Phase), Hold: publicName(s.Hold), PendingRequest: s.PendingRequest, QuotaAge: "unknown", Profiles: map[string]string{}}
+	if s.Recovery != nil {
+		issue := *s.Recovery
+		issue.Stage = publicName(issue.Stage)
+		v.Recovery = &issue
+	}
 	if s.Candidate != nil {
 		v.Candidate = s.Candidate.Commit
 	}
 	if s.Review != nil {
-		v.ReviewVerdict = s.Review.Verdict
+		v.ReviewVerdict = publicName(s.Review.Verdict)
+		v.ReviewTurnSeen = s.Review.TurnID != ""
 	}
 	if s.Question != nil && s.Question.AnswerMode == "" {
 		v.QuestionID = s.Question.ID
@@ -396,7 +388,10 @@ func view(s activework.Snapshot, req request) statusView {
 		}
 		for _, attempt := range s.Dispatch.Attempts {
 			if attempt.Tokens != nil {
-				v.ObservedTokens += attempt.Tokens.TotalTokens
+				if v.ObservedTokens == nil {
+					v.ObservedTokens = new(int64)
+				}
+				*v.ObservedTokens += attempt.Tokens.TotalTokens
 			}
 		}
 		if s.Dispatch.Quota != nil {
@@ -413,15 +408,22 @@ func view(s activework.Snapshot, req request) statusView {
 }
 
 func printStatus(w io.Writer, s statusView) {
+	if !s.ObservedAt.IsZero() {
+		fmt.Fprintln(w, "Observed:", localTime(s.ObservedAt))
+	}
 	if !s.Active {
 		if s.PendingStart {
 			fmt.Fprintln(w, "Run start requires recovery.")
 		}
 		return
 	}
-	fmt.Fprintf(w, "Task %s; phase %s", s.TaskID, s.Phase)
+	if s.TaskID == "" {
+		fmt.Fprintf(w, "Selecting a task; phase %s", publicName(s.Phase))
+	} else {
+		fmt.Fprintf(w, "Task %s; phase %s", s.TaskID, publicName(s.Phase))
+	}
 	if s.Hold != "" {
-		fmt.Fprintf(w, "; hold %s", s.Hold)
+		fmt.Fprintf(w, "; hold %s", publicName(s.Hold))
 	}
 	fmt.Fprintln(w)
 	if s.PendingRequest != "" {
@@ -432,13 +434,19 @@ func printStatus(w io.Writer, s statusView) {
 		if s.Recovery.Operation != "" {
 			label += " " + s.Recovery.Operation
 		}
-		fmt.Fprintf(w, "Recovery: %s: %s\n", label, s.Recovery.Reason)
 		if s.Recovery.AgentResult != "" {
 			fmt.Fprintln(w, "Agent reported:", s.Recovery.AgentResult)
+		}
+		fmt.Fprintln(w, "Controller verification: incomplete; independent review turn observed:", s.ReviewTurnSeen)
+		if label != "" {
+			fmt.Fprintf(w, "Recovery at %s: %s\n", publicName(label), s.Recovery.Reason)
+		} else {
+			fmt.Fprintf(w, "Recovery: %s\n", s.Recovery.Reason)
 		}
 		if s.Recovery.EvidenceRef != "" {
 			fmt.Fprintln(w, "Evidence:", s.Recovery.EvidenceRef)
 		}
+		fmt.Fprintln(w, "Next run reconciles retained evidence and source before any candidate or review step; missing proof keeps this hold.")
 	}
 	if s.Candidate != "" {
 		fmt.Fprintln(w, "Candidate:", s.Candidate)
@@ -450,7 +458,11 @@ func printStatus(w io.Writer, s statusView) {
 		fmt.Fprintf(w, "Roles: reagent %s; iragent %s\n", s.Profiles[string(dispatch.Reagent)], s.Profiles[string(dispatch.Iragent)])
 	}
 	fmt.Fprintf(w, "Bounds: attempts %d/%d; assessments %d/%d; recovery limit %d\n", s.Attempts, s.DispatchLimit, s.Assessments, s.AssessmentLimit, s.RecoveryLimit)
-	fmt.Fprintf(w, "Observed tokens: %d; quota observation age: %s\n", s.ObservedTokens, s.QuotaAge)
+	if s.ObservedTokens == nil {
+		fmt.Fprintf(w, "Observed tokens: unavailable; quota observation age: %s\n", s.QuotaAge)
+	} else {
+		fmt.Fprintf(w, "Observed tokens: %d; quota observation age: %s\n", *s.ObservedTokens, s.QuotaAge)
+	}
 	if len(s.QuotaWindows) > 0 {
 		names := make([]string, 0, len(s.QuotaWindows))
 		for name := range s.QuotaWindows {
@@ -461,7 +473,7 @@ func printStatus(w io.Writer, s statusView) {
 			window := s.QuotaWindows[name]
 			fmt.Fprintf(w, "Quota %s: %.1f%% used, %.1f%% remaining", name, window.UsedPercent, window.RemainingPercent)
 			if !window.ResetAt.IsZero() {
-				fmt.Fprintf(w, "; resets %s", window.ResetAt.Format(time.RFC3339))
+				fmt.Fprintf(w, "; resets %s", localTime(window.ResetAt))
 			}
 			fmt.Fprintln(w)
 		}
@@ -480,6 +492,16 @@ func printStatus(w io.Writer, s statusView) {
 	if s.AcceptanceID != "" {
 		fmt.Fprintln(w, "Acceptance:", s.AcceptanceID)
 	}
+}
+
+func localTime(value time.Time) string {
+	location := time.Local
+	if zone := os.Getenv("TZ"); zone != "" {
+		if loaded, err := time.LoadLocation(zone); err == nil {
+			location = loaded
+		}
+	}
+	return value.In(location).Format("2006-01-02 15:04:05 MST -07:00")
 }
 
 func printApproval(w io.Writer, a approvalView) {

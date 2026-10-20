@@ -97,4 +97,10 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Callback failure, missing completion and mismatched identities hold candidate readiness. Returned transport outcomes retain bound callback evidence in active attempts; recovery holds retain the specific reason, stage, operation, evidence reference and agent-reported summary for consistent `run` and `status` output.
 - Restart reconciliation reads the exact completed provider turn and checks its dynamic-tool items against durable host receipts. Earlier active records remain readable. Incomplete evidence retains the hold; verified completion still passes through checkpoint, source, scope and candidate checks before independent review.
 
+## CON-059 — Operator output and first use
+
+- README guidance covers prerequisites, first run, role choices, exact candidate inspection and acceptance, holds, external state, exit codes and maintenance continuation.
+- The CLI emits kebab-case Concoct public JSON fields, event names and dispositions while reading existing durable records and leaving provider schemas intact. Agent message items stream with separate boundaries and structured final summaries appear apart from verified controller results; malformed final results receive diagnostics.
+- Human status identifies pre-claim selection, specific recovery evidence and review state, missing versus measured-zero token receipts, and local timestamps with zone and offset. `TZ` selects UTC or another zone for human output; JSON and durable timestamps remain UTC instants.
+
 CON-042 remains a frozen, undelivered historical reference.
