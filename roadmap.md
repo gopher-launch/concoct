@@ -424,6 +424,38 @@ Delivered operator presentation: first-use guidance covers supported inputs, rol
 
 Delivered final-result handling: live and historical Codex turns recognize `final_answer`, with explicit results taking priority over bounded phase-less structured-result compatibility. Recovery reports distinct identity, status, missing-text, malformed-result and callback-evidence failures while retaining all candidate and review gates.
 
+## CON-061 — Use retained callback acknowledgments when provider history is incomplete
+
+- Kind: task
+- Status: ready
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-060
+
+**Objective:** Remove the demonstrated dependency on historical provider reads retaining dynamic-tool items, so Concoct can continue its engineering, independent review and correction workflow using callback success it has already verified and durably recorded.
+
+**Context:** Investigation of CURU-001 confirmed successful host checkpoint commits, but historical Codex reads omitted the corresponding dynamic-tool items. Recovery currently requires those historical items even though live callback evidence can be retained by Concoct. The original attempt predates that retained evidence and need not be recoverable.
+
+**Acceptance criteria:**
+
+- Audit and reuse the existing callback records and host receipts. Ensure that successful live callback acknowledgments needed for continuation are durably recorded with their exact dispatch, role, thread, turn, call and tool bindings. Make only the changes needed for this demonstrated case.
+- When historical provider reads omit callback items, recovery accepts sufficient, consistent acknowledgment evidence already recorded by Concoct. Historical omission does not invalidate verified durable success.
+- Apply the same rule to the existing host operations used by engineering and independent review, including claim, checkpoint and assessment. Preserve their current scope and receipt checks.
+- Missing or conflicting acknowledgment evidence produces a concise human-readable hold explaining what cannot be verified. Receipt existence or an agent’s final response alone must not fabricate acknowledgment.
+- Preserve existing candidate validation, independent review, correction bounds and exact operator-authorized integration. Continuation must not duplicate completed callbacks or reset consumption and allowances.
+- Do not require recovery of the original CURU-001 attempt. Record its disposition recommendation externally; do not alter or restart the live trial during implementation.
+
+**Verification:**
+
+- Add focused regression coverage for successful callbacks recorded live, process reopen, historical reads omitting dynamic-tool items, and continuation using the retained evidence.
+- Include representative missing-evidence and conflicting-binding checks demonstrating that insufficient proof still holds.
+- Exercise the relevant engineering and review paths through existing test infrastructure.
+- Run applicable formatting, tests, vet, build and whitespace checks. Use the observed historical omission in fixtures; no billable provider probe is required.
+
+**Scope boundary:** This is a correction to the existing workflow, not a general recovery redesign. No private Codex log parser, legacy evidence migration, new reset command, storage-layout redesign or exhaustive failure matrix is required.
+
+**Follow-up:** After independent review and operator-authorized integration, prepare a fresh CON-056 trial and exercise the normal implementation → independent review → correction → acceptance → integration workflow.
+
 ## CON-056 — Prove the golden path on fresh real work
 
 - Kind: task
@@ -446,4 +478,4 @@ Delivered final-result handling: live and historical Codex turns recognize `fina
 
 ## Next task boundary
 
-CON-056 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-061 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
