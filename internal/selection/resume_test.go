@@ -35,14 +35,17 @@ type observedReviewer struct {
 	turns, reads int
 	busy         bool
 	idleChecks   int
+	callbacks    []codexapp.CallbackEvidence
+	omitItems    bool
 }
 
 type observedReagent struct {
 	*fakeAgent
-	items    []codexapp.DynamicToolItem
-	observed *codexapp.ObservedTurn
-	final    string
-	reads    int
+	items     []codexapp.DynamicToolItem
+	observed  *codexapp.ObservedTurn
+	final     string
+	callbacks []codexapp.CallbackEvidence
+	reads     int
 }
 
 func (a *observedReagent) RunTurn(ctx context.Context, id, prompt string, settings codexapp.RoleSettings, handler codexapp.ToolHandler, onEvent func(codexapp.Event)) (codexapp.TurnOutcome, error) {
@@ -53,7 +56,64 @@ func (a *observedReagent) RunTurn(ctx context.Context, id, prompt string, settin
 	if a.final != "" {
 		outcome.FinalText = a.final
 	}
+	if a.callbacks != nil {
+		outcome.Callbacks = a.callbacks
+	}
 	return outcome, errors.New("callback response acknowledgment unavailable")
+}
+
+func acknowledgedCallback(thread, turn, request, call, tool string) codexapp.CallbackEvidence {
+	return codexapp.CallbackEvidence{ThreadID: thread, TurnID: turn, RequestID: request, CallID: call, Tool: tool, ItemID: call, ReceiptCommitted: true, ResponseSent: true, ProviderCompleted: true, Success: true, Done: true}
+}
+
+func TestRetainedLiveCallbacksRecoverWhenHistoryOmitsItems(t *testing.T) {
+	for _, tc := range []struct {
+		name, wantHold string
+		mutate         func([]codexapp.CallbackEvidence)
+	}{
+		{"acknowledged", "", nil},
+		{"missing claim acknowledgment", "lacks verified live acknowledgment", func(v []codexapp.CallbackEvidence) {
+			v[0].ProviderCompleted = false
+			v[0].Success = false
+		}},
+		{"missing checkpoint acknowledgment", "lacks verified live acknowledgment", func(v []codexapp.CallbackEvidence) {
+			v[1].ProviderCompleted = false
+			v[1].Success = false
+		}},
+		{"conflicting checkpoint tool", "durable host receipt", func(v []codexapp.CallbackEvidence) { v[1].Tool = "claim_task" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, external, policy := testRepo(t)
+			callbacks := []codexapp.CallbackEvidence{
+				acknowledgedCallback("fresh-thread", "one-turn", "1", "claim-ready", "claim_task"),
+				acknowledgedCallback("fresh-thread", "one-turn", "2", "checkpoint-ready", "save_checkpoint"),
+			}
+			if tc.mutate != nil {
+				tc.mutate(callbacks)
+			}
+			agent := &observedReagent{fakeAgent: readyAgent(t, repo, external, readyEvidence(), false, true), callbacks: callbacks}
+			first, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent})
+			if err == nil || first.Status != "recovery_required" || len(first.Snapshot.Dispatch.Attempts) != 1 {
+				t.Fatalf("initial retained attempt: %+v %v", first, err)
+			}
+			stored := first.Snapshot.Dispatch.Attempts[0]
+			if stored.Binding.Role != dispatch.Reagent || stored.ThreadID != "fresh-thread" || stored.TurnID != "one-turn" || !reflect.DeepEqual(stored.Callbacks, callbacks) {
+				t.Fatalf("live callback evidence was not persisted: %+v", first.Snapshot.Dispatch.Attempts[0])
+			}
+			agent.observed = &codexapp.ObservedTurn{ID: "one-turn", Status: "completed", FinalText: `{"disposition":"ready_for_review","summary":"ready for independent review"}`, ItemsKnown: true}
+			result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Agent: agent})
+			if err != nil || agent.turns != 1 || agent.reads != 1 || len(result.Snapshot.Dispatch.Attempts) != 1 || result.Snapshot.Dispatch.Limits != first.Snapshot.Dispatch.Limits {
+				t.Fatalf("recovery replayed or reset allowance: %+v %v", result, err)
+			}
+			if tc.wantHold == "" {
+				if result.Status != "ready_for_review" || result.Snapshot.Candidate == nil {
+					t.Fatalf("acknowledged completion did not advance: %+v", result)
+				}
+			} else if result.Status != "recovery_required" || result.Snapshot.Candidate != nil || result.Snapshot.Recovery == nil || !strings.Contains(result.Snapshot.Recovery.Reason, tc.wantHold) {
+				t.Fatalf("insufficient callback evidence advanced or lost reason: %+v", result)
+			}
+		})
+	}
 }
 
 func (a *observedReagent) ReadTurn(_ context.Context, threadID, turnID string) (codexapp.ObservedTurn, error) {
@@ -162,7 +222,7 @@ func (a *observedReviewer) RunTurn(_ context.Context, id, prompt string, setting
 	if err := response.Commit(context.Background()); err != nil {
 		return codexapp.TurnOutcome{}, err
 	}
-	return codexapp.TurnOutcome{ThreadID: id, TurnID: "observed-review-turn", Status: "completed", FinalText: `{"disposition":"approved","summary":"checked"}`}, errors.New("response connection lost after provider completion")
+	return codexapp.TurnOutcome{ThreadID: id, TurnID: "observed-review-turn", Status: "completed", FinalText: `{"disposition":"approved","summary":"checked"}`, Callbacks: a.callbacks}, errors.New("response connection lost after provider completion")
 }
 func (a *observedReviewer) ReadTurn(_ context.Context, threadID, turnID string) (codexapp.ObservedTurn, error) {
 	a.reads++
@@ -170,7 +230,29 @@ func (a *observedReviewer) ReadTurn(_ context.Context, threadID, turnID string) 
 		return codexapp.ObservedTurn{}, errors.New("unexpected turn")
 	}
 	ok := true
-	return codexapp.ObservedTurn{ID: turnID, Status: "completed", FinalText: `{"disposition":"approved","summary":"checked"}`, DynamicTools: []codexapp.DynamicToolItem{{ID: "observed-assessment", Tool: "save_assessment", Status: "completed", Success: &ok}}, ItemsKnown: true}, nil
+	observed := codexapp.ObservedTurn{ID: turnID, Status: "completed", FinalText: `{"disposition":"approved","summary":"checked"}`, ItemsKnown: true}
+	if !a.omitItems {
+		observed.DynamicTools = []codexapp.DynamicToolItem{{ID: "observed-assessment", Tool: "save_assessment", Status: "completed", Success: &ok}}
+	}
+	return observed, nil
+}
+
+func TestRetainedAssessmentAcknowledgmentSurvivesMissingHistoricalItem(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	reviewer := &observedReviewer{fakeReviewer: &fakeReviewer{}, omitItems: true, callbacks: []codexapp.CallbackEvidence{
+		acknowledgedCallback("reviewer-thread", "observed-review-turn", "review-request", "observed-assessment", "save_assessment"),
+	}}
+	first, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
+	if err == nil || first.Status != "recovery_required" || first.Snapshot.Review == nil || first.Snapshot.Candidate == nil {
+		t.Fatalf("initial review hold: %+v %v", first, err)
+	}
+	if len(first.Snapshot.Dispatch.Attempts) != 2 || first.Snapshot.Dispatch.Attempts[1].Binding.Role != dispatch.Iragent || !reflect.DeepEqual(first.Snapshot.Dispatch.Attempts[1].Callbacks, reviewer.callbacks) {
+		t.Fatalf("review callback evidence not retained: %+v", first.Snapshot.Dispatch)
+	}
+	result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
+	if err != nil || result.Status != "approved" || result.Snapshot.Review.Verdict != "approved" || len(result.Snapshot.Dispatch.Assessments) != 1 || len(result.Snapshot.Dispatch.Attempts) != 2 || reviewer.turns != 1 || reviewer.reads != 1 {
+		t.Fatalf("retained assessment was not reconciled once: %+v %v", result, err)
+	}
 }
 
 func TestObservedCompletedReviewFinalizedOnceWithoutReplay(t *testing.T) {

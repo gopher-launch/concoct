@@ -10,12 +10,12 @@ Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-The source tree includes selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration, mechanical completion and the operator CLI. CON-056 remains the ready real-project proof task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-060 retain their identities here.
+The source tree includes selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration, mechanical completion and the operator CLI. CON-056 remains the ready real-project proof task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-061 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-056` is the next ready task after CON-060 delivery. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-056` is the next ready task after CON-061 delivery. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the runner to build itself. The CLI exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation.
@@ -30,7 +30,7 @@ The source tree includes selection, engineering, candidate freezing, bounded ind
 | M2: automatic candidate/review flow          | CON-047–CON-050                  | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance |
 | M3: durable interventions                    | CON-051–CON-052                  | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition                                       |
 | M4: accepted local delivery                  | CON-053–CON-054                  | Exact-candidate integration and mechanical completion/archive lifecycle                                                                |
-| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-059 | Correct callback/recovery handling and operator presentation before completing the real-task demonstration                             |
+| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-061 | Correct callback/recovery handling and operator presentation before completing the real-task demonstration                             |
 
 The order is deliberately sequential for the first delivery. The dependencies below identify concrete prerequisites rather than suggesting parallel agent work. Intermediate milestones are development checkpoints, not claims that a usable redesigned release has shipped.
 
@@ -96,7 +96,7 @@ Tasks CON-053–CON-054 implement guarded local integration and mechanical compl
 - Parent: CON-E001
 - Depends on: none
 
-CON-055 exposes the operator interface. CON-058 corrects dynamic-tool completion and recovery; CON-059 makes its output and first-use guidance usable. CON-056 then completes real-work acceptance with the retained first attempt accounted for.
+CON-055 exposes the operator interface. CON-058 corrects dynamic-tool completion and recovery; CON-059 makes its output and first-use guidance usable. CON-060 corrects final-result extraction, and CON-061 uses retained callback acknowledgments when provider history omits them. CON-056 then completes fresh real-work acceptance with the retained first attempt accounted for.
 
 ## CON-043 — Reset the repository to a clean rebuild baseline
 
@@ -427,7 +427,7 @@ Delivered final-result handling: live and historical Codex turns recognize `fina
 ## CON-061 — Use retained callback acknowledgments when provider history is incomplete
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F005
 - Depends on: CON-060
@@ -454,7 +454,9 @@ Delivered final-result handling: live and historical Codex turns recognize `fina
 
 **Scope boundary:** This is a correction to the existing workflow, not a general recovery redesign. No private Codex log parser, legacy evidence migration, new reset command, storage-layout redesign or exhaustive failure matrix is required.
 
-**Follow-up:** After independent review and operator-authorized integration, prepare a fresh CON-056 trial and exercise the normal implementation → independent review → correction → acceptance → integration workflow.
+**Follow-up:** CON-056 uses a fresh trial to exercise implementation → independent review → correction → acceptance → integration.
+
+Delivered callback reconciliation: live verified callback outcomes remain bound to their dispatch and host receipts. Exact completed-turn recovery accepts those retained acknowledgments when historical provider items are absent; missing or conflicting proof retains a specific hold. Claim, checkpoint and assessment share this rule.
 
 ## CON-056 — Prove the golden path on fresh real work
 
@@ -462,7 +464,7 @@ Delivered final-result handling: live and historical Codex turns recognize `fina
 - Status: ready
 - Priority: high
 - Parent: CON-F005
-- Depends on: CON-055, CON-058, CON-059, CON-060
+- Depends on: CON-055, CON-058, CON-059, CON-060, CON-061
 
 **Objective:** demonstrate the complete supported Linux/Codex workflow on one fresh, genuinely useful bounded task in a small external project and report its practical limits. This does not require Concoct to build itself.
 
@@ -472,10 +474,10 @@ Delivered final-result handling: live and historical Codex turns recognize `fina
 - The operator inspects/approves the exact candidate; Concoct integrates it locally, finalizes external evidence and leaves the agreed parent clean. No push/deployment is implied.
 - Correction, intervention, limits, interruption/recovery and integration faults have focused automated evidence from preceding tasks. Do not manufacture all failures in this billable real trial or require a defect solely to force a correction cycle.
 - Record supported runner/configuration, actual role settings, observed turns/token/quota evidence, task-criterion results and any limitations. Do not report account deltas as exact task spend or claim universal provider compatibility.
-- Preserve the interrupted CURU-001 attempt and its recorded settings/consumption. After integrating the corrective tasks, inspect that binding and resume it through the supported command only after the exact binary and active state are checked; reconcile completed reagent work before iragent review. Record the original callback hold as an observed failure. A successful recovery demonstrates recovery, not an uninterrupted nominal run. Decide with the operator whether further fresh useful work is needed for nominal-path acceptance and require an explicit task purpose and dispatch budget for it.
+- Preserve the interrupted CURU-001 attempt and its recorded settings/consumption as evidence of the historical callback hold. Its missing live acknowledgment record need not be recoverable; keep its disposition separate from the fresh nominal trial. Require an explicit useful task purpose and dispatch budget for new live work.
 
 **Verification:** one real-task run and normal operator acceptance, within configured bounds. The task's product/acceptance must actually be ready; do not invent requirements. Review source/checkpoint/reviews and normal project checks. Further live dispatches require an explicit task/budget reason, not an open-ended convergence experiment.
 
 ## Next task boundary
 
-CON-061 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-056 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.

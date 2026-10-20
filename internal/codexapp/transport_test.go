@@ -523,6 +523,9 @@ func TestDynamicToolCompletionContract(t *testing.T) {
 			if (err == nil) != tc.wantOK || committed.Load() != 1 || len(outcome.Callbacks) != 1 || (outcome.Callbacks[0].RequestID == "\"req-17\"") != (tc.requestID == "req-17") {
 				t.Fatalf("outcome=%+v err=%v committed=%d", outcome, err, committed.Load())
 			}
+			if tc.wantOK && (!outcome.Callbacks[0].Done || !outcome.Callbacks[0].ReceiptCommitted || !outcome.Callbacks[0].ResponseSent || !outcome.Callbacks[0].ProviderCompleted || !outcome.Callbacks[0].Success || outcome.Callbacks[0].ItemID != "call-1") {
+				t.Fatalf("successful live acknowledgment was not retained: %+v", outcome.Callbacks[0])
+			}
 		})
 	}
 }

@@ -288,20 +288,9 @@ func verifyObservedCallbacks(owner *activework.Owner, attempt dispatch.Attempt, 
 			continue
 		}
 		items[item.ID] = item
-		kind := ""
-		switch item.Tool {
-		case "claim_task":
-			kind = "claim"
-		case "save_checkpoint":
-			kind = "checkpoint"
-		case "save_assessment":
-			kind = "assessment"
-		}
-		if kind == "" {
-			return fmt.Errorf("unrecognized host operation %s", item.Tool)
-		}
-		if (attempt.Binding.Role == dispatch.Reagent && kind == "assessment") || (attempt.Binding.Role == dispatch.Iragent && kind != "assessment") {
-			return fmt.Errorf("host operation %s differs from bound role", item.Tool)
+		kind, err := callbackReceiptKind(attempt.Binding.Role, item.Tool)
+		if err != nil {
+			return err
 		}
 		if item.Status != "completed" || item.Success == nil || !*item.Success {
 			return fmt.Errorf("%s call %s did not complete successfully", item.Tool, item.ID)
@@ -315,38 +304,82 @@ func verifyObservedCallbacks(owner *activework.Owner, attempt dispatch.Attempt, 
 		}
 		verifiedTools[item.Tool] = true
 	}
+	// Codex can omit completed dynamic-tool items from thread/read. A live
+	// acknowledgment retained on this attempt is an independent proof path,
+	// but it must still match the bound host receipt and any returned item.
+	callbacks := make(map[string]codexapp.CallbackEvidence)
+	requests := make(map[string]bool)
+	for _, callback := range attempt.Callbacks {
+		if callback.ThreadID != attempt.ThreadID || callback.TurnID != attempt.TurnID || callback.RequestID == "" || callback.CallID == "" || callback.Tool == "" {
+			return fmt.Errorf("callback binding differs from dispatch")
+		}
+		if callback.ItemID != callback.CallID {
+			return fmt.Errorf("callback call %s lacks matching completed item identity", callback.CallID)
+		}
+		if _, exists := callbacks[callback.CallID]; exists || requests[callback.RequestID] {
+			return fmt.Errorf("conflicting callback call or request %s", callback.CallID)
+		}
+		callbacks[callback.CallID] = callback
+		requests[callback.RequestID] = true
+		kind, err := callbackReceiptKind(attempt.Binding.Role, callback.Tool)
+		if err != nil {
+			return err
+		}
+		item, ok := items[callback.CallID]
+		if ok && (item.Tool != callback.Tool || item.Namespace != callback.Namespace) {
+			return fmt.Errorf("callback call %s conflicts with provider item", callback.CallID)
+		}
+		if !callback.Done || !callback.ReceiptCommitted || !callback.ResponseSent || !callback.ProviderCompleted || !callback.Success || callback.Failure != "" {
+			return fmt.Errorf("callback call %s lacks verified live acknowledgment", callback.CallID)
+		}
+		found, err := owner.VerifiedCallReceipt(kind, callback.CallID, attempt.TurnID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("callback call %s lacks durable host receipt", callback.CallID)
+		}
+		verifiedTools[callback.Tool] = true
+	}
+	if len(callbacks) != 0 {
+		for id := range items {
+			if _, ok := callbacks[id]; !ok {
+				return fmt.Errorf("provider item %s lacks recorded callback", id)
+			}
+		}
+	}
 	if observed.ItemsKnown {
 		if verdict, err := codexapp.ParseRoleResult(observed.FinalText); err == nil {
 			if verdict.Disposition == "ready_for_review" && !verifiedTools["save_checkpoint"] {
-				return fmt.Errorf("ready result lacks completed save_checkpoint item")
+				return fmt.Errorf("ready result lacks verified save_checkpoint acknowledgment")
 			}
 			if verdict.Disposition == "ready_for_review" && attempt.Binding.Activity == dispatch.Selection && !verifiedTools["claim_task"] {
-				return fmt.Errorf("selected task lacks completed claim_task item")
+				return fmt.Errorf("selected task lacks verified claim_task acknowledgment")
 			}
 			if (verdict.Disposition == "approved" || verdict.Disposition == "changes_requested") && !verifiedTools["save_assessment"] {
-				return fmt.Errorf("review result lacks completed save_assessment item")
+				return fmt.Errorf("review result lacks verified save_assessment acknowledgment")
 			}
 		}
 	}
-	for _, callback := range attempt.Callbacks {
-		if callback.ThreadID != attempt.ThreadID || callback.TurnID != attempt.TurnID || callback.RequestID == "" || callback.CallID == "" {
-			return fmt.Errorf("callback binding differs from dispatch")
-		}
-		item, ok := items[callback.CallID]
-		if observed.ItemsKnown && (!ok || item.Tool != callback.Tool || item.Namespace != callback.Namespace) {
-			return fmt.Errorf("callback call %s lacks matching provider item", callback.CallID)
-		}
-		if !callback.ReceiptCommitted {
-			return fmt.Errorf("callback call %s lacks host commit", callback.CallID)
-		}
-		if !observed.ItemsKnown && (!callback.ResponseSent || !callback.Success) {
-			return fmt.Errorf("callback call %s lacks provider completion", callback.CallID)
-		}
-	}
-	if observed.ItemsKnown && len(attempt.Callbacks) != 0 && len(items) != len(attempt.Callbacks) {
-		return fmt.Errorf("provider items differ from recorded callbacks")
-	}
 	return nil
+}
+
+func callbackReceiptKind(role dispatch.Role, tool string) (string, error) {
+	switch tool {
+	case "claim_task":
+		if role == dispatch.Reagent {
+			return "claim", nil
+		}
+	case "save_checkpoint":
+		if role == dispatch.Reagent {
+			return "checkpoint", nil
+		}
+	case "save_assessment":
+		if role == dispatch.Iragent {
+			return "assessment", nil
+		}
+	}
+	return "", fmt.Errorf("host operation %s differs from bound role or is unsupported", tool)
 }
 
 func continueAfterResolved(ctx context.Context, cfg Config, owner *activework.Owner, store *activework.Store, result Result, episode string, recovering bool) (Result, error) {

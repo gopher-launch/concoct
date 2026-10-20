@@ -108,4 +108,9 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Codex 0.147.0 `final_answer` agent messages supply the role result in both live and historical turn reads. An explicit final answer overrides phase-less compatibility results, including when malformed; commentary cannot supply or replace a result. Phase-less compatibility accepts only a valid structured role result.
 - Recovery distinguishes exact-turn identity, terminal status, absent final text, invalid structured results and missing callback evidence. Existing callback receipts, source checks and candidate gates still determine whether work can advance.
 
+## CON-061 — Retained callback acknowledgments in recovery
+
+- Live verified callback outcomes are durably bound to the dispatch role, thread, turn, request, call and tool, with host receipt, response transport and provider completion recorded separately. Recovery can use a complete retained acknowledgment and matching host receipt when an exact completed provider turn omits historical dynamic-tool items.
+- Claim, checkpoint and assessment use the same bounded check. Missing, failed or conflicting callback evidence retains a recovery hold; a receipt or agent result alone cannot establish acknowledgment. Candidate, review, correction and exact integration checks remain in force.
+
 CON-042 remains a frozen, undelivered historical reference.
