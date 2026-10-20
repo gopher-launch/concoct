@@ -84,6 +84,41 @@ func TestMalformedFinalAndJSONQuietPresentation(t *testing.T) {
 	}
 }
 
+func TestNullPhaseFinalStaysOutOfProgressAndOrdinaryTextStreams(t *testing.T) {
+	for _, jsonMode := range []bool{false, true} {
+		var output bytes.Buffer
+		stream := newMessageStream(&output, jsonMode, false)
+		role := func(string) string { return "reagent" }
+		stream.event(messageEvent("turn/started", "writer", "one", `{}`), role)
+		stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"note","type":"agentMessage","phase":null}}`), role)
+		stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"note","delta":"ordinary "}`), role)
+		if !strings.Contains(output.String(), "ordinary ") {
+			t.Fatalf("null-phase ordinary text was delayed: %q", output.String())
+		}
+		stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"note","delta":"message"}`), role)
+		stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"note","type":"agentMessage","phase":null,"text":"ordinary message"}}`), role)
+		stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"control","type":"agentMessage","phase":null}}`), role)
+		stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"control","delta":"  {\"dispo"}`), role)
+		stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"control","delta":"sition\":\"ready_for_review\",\"summary\":\"done\"}"}`), role)
+		if strings.Contains(output.String(), "dispo") || strings.Contains(output.String(), "ready_for_review") {
+			t.Fatalf("null-phase control JSON leaked before completion: %q", output.String())
+		}
+		stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"control","type":"agentMessage","phase":null,"text":"  {\"disposition\":\"ready_for_review\",\"summary\":\"done\"}"}}`), role)
+		if strings.Contains(output.String(), "disposition") || stream.report == nil || stream.report.Disposition != "ready-for-review" {
+			t.Fatalf("null-phase final classification: %q %#v", output.String(), stream.report)
+		}
+		stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"json-note","type":"agentMessage","phase":null}}`), role)
+		stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"json-note","delta":"{\"ordinary-json-key\":1}"}`), role)
+		if strings.Contains(output.String(), "ordinary-json-key") {
+			t.Fatalf("ambiguous JSON should await item completion: %q", output.String())
+		}
+		stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"json-note","type":"agentMessage","phase":null,"text":"{\"ordinary-json-key\":1}"}}`), role)
+		if !strings.Contains(output.String(), "ordinary-json-key") {
+			t.Fatalf("ordinary null-phase JSON was lost: %q", output.String())
+		}
+	}
+}
+
 func TestRunKeepsAgentReportSeparateInHumanJSONAndQuiet(t *testing.T) {
 	events := []codexapp.Event{
 		messageEvent("turn/started", "writer", "one", `{}`),
@@ -136,6 +171,50 @@ func TestPublicJSONNamesAndTokenReceiptDistinction(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "observed_tokens") || strings.Contains(output.String(), "DiffCommand") {
 		t.Fatalf("legacy public names remain: %s", output.String())
+	}
+}
+
+func TestReviewTurnVisibilityUsesCurrentCandidateDispatchEvidence(t *testing.T) {
+	bound := dispatch.Binding{TaskID: "APP-002", Role: dispatch.Iragent, Activity: dispatch.Review, Candidate: "candidate-new"}
+	snapshot := activework.Snapshot{
+		Active: true, TaskID: "APP-002", Candidate: &activework.Candidate{Commit: "candidate-new"},
+		Review:   &activework.PendingReview{Candidate: "candidate-new", AttemptID: "review-2"},
+		Recovery: &activework.RecoveryIssue{Reason: "review turn incomplete"},
+		Dispatch: &dispatch.State{Attempts: []dispatch.Attempt{{ID: "review-2", Binding: bound, TurnID: "observed-turn"}}},
+	}
+	if !view(snapshot, request{}).ReviewTurnSeen {
+		t.Fatal("pending review's observed dispatch turn was hidden before finalization")
+	}
+	var out bytes.Buffer
+	printStatus(&out, view(snapshot, request{}))
+	if !strings.Contains(out.String(), "independent review turn observed: true") {
+		t.Fatalf("recovery view hid observed review turn: %s", out.String())
+	}
+	out.Reset()
+	writePublicJSON(&out, view(snapshot, request{}))
+	if !strings.Contains(out.String(), `"review-turn-observed":true`) {
+		t.Fatalf("JSON recovery view hid observed review turn: %s", out.String())
+	}
+	// A renewed attempt does not erase the observed turn on the same candidate.
+	snapshot.Review.AttemptID = "review-retry"
+	snapshot.Dispatch.Attempts = append(snapshot.Dispatch.Attempts, dispatch.Attempt{ID: "review-retry", Binding: dispatch.Binding{TaskID: "APP-002", Role: dispatch.Iragent, Activity: dispatch.Recovery, Candidate: "candidate-new"}})
+	if !view(snapshot, request{}).ReviewTurnSeen {
+		t.Fatal("same-candidate review history was hidden by a retry reservation")
+	}
+	// Correction freezes a distinct candidate. Its review has not begun.
+	snapshot.Candidate.Commit = "candidate-corrected"
+	snapshot.Review = &activework.PendingReview{Candidate: "candidate-corrected", AttemptID: "review-3"}
+	if view(snapshot, request{}).ReviewTurnSeen {
+		t.Fatal("prior candidate's review was attributed to corrected candidate")
+	}
+	out.Reset()
+	writePublicJSON(&out, view(snapshot, request{}))
+	if !strings.Contains(out.String(), `"review-turn-observed":false`) {
+		t.Fatalf("JSON view attributed prior review to corrected candidate: %s", out.String())
+	}
+	snapshot.Dispatch.Attempts = append(snapshot.Dispatch.Attempts, dispatch.Attempt{ID: "review-3", Binding: dispatch.Binding{TaskID: "APP-002", Role: dispatch.Iragent, Activity: dispatch.Review, Candidate: "candidate-corrected"}, TurnID: "corrected-turn"})
+	if !view(snapshot, request{}).ReviewTurnSeen {
+		t.Fatal("corrected candidate's observed review turn was hidden")
 	}
 }
 

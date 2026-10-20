@@ -362,7 +362,14 @@ func view(s activework.Snapshot, req request) statusView {
 	}
 	if s.Review != nil {
 		v.ReviewVerdict = publicName(s.Review.Verdict)
-		v.ReviewTurnSeen = s.Review.TurnID != ""
+		if s.Candidate != nil && s.Review.Candidate == s.Candidate.Commit && s.Dispatch != nil {
+			for _, attempt := range s.Dispatch.Attempts {
+				if attempt.Binding.Role == dispatch.Iragent && attempt.Binding.TaskID == s.TaskID && attempt.Binding.Candidate == s.Candidate.Commit && attempt.TurnID != "" {
+					v.ReviewTurnSeen = true
+					break
+				}
+			}
+		}
 	}
 	if s.Question != nil && s.Question.AnswerMode == "" {
 		v.QuestionID = s.Question.ID

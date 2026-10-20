@@ -79,22 +79,32 @@ type agentReport struct {
 }
 
 type messageStream struct {
-	w      io.Writer
-	json   bool
-	quiet  bool
-	role   string
-	thread string
-	turn   string
-	item   string
-	open   bool
-	seen   bool
-	breaks int
-	phases map[string]string
-	report *agentReport
+	w        io.Writer
+	json     bool
+	quiet    bool
+	role     string
+	thread   string
+	turn     string
+	item     string
+	open     bool
+	seen     bool
+	breaks   int
+	phases   map[string]string
+	pending  map[string]string
+	ordinary map[string]bool
+	emitted  map[string]bool
+	report   *agentReport
 }
 
 func newMessageStream(w io.Writer, jsonMode, quiet bool) *messageStream {
-	return &messageStream{w: w, json: jsonMode, quiet: quiet, role: "agent", phases: make(map[string]string)}
+	return &messageStream{w: w, json: jsonMode, quiet: quiet, role: "agent", phases: make(map[string]string), pending: make(map[string]string), ordinary: make(map[string]bool), emitted: make(map[string]bool)}
+}
+
+func (s *messageStream) resetItems() {
+	s.phases = make(map[string]string)
+	s.pending = make(map[string]string)
+	s.ordinary = make(map[string]bool)
+	s.emitted = make(map[string]bool)
 }
 
 func (s *messageStream) event(event codexapp.Event, roleForThread func(string) string) {
@@ -102,14 +112,14 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 		s.closeMessage()
 		s.thread, s.turn, s.item = event.ThreadID, event.TurnID, ""
 		s.role = roleForThread(event.ThreadID)
-		s.phases = make(map[string]string)
+		s.resetItems()
 		return
 	}
 	if event.ThreadID != "" && (event.ThreadID != s.thread || event.TurnID != "" && event.TurnID != s.turn) {
 		s.closeMessage()
 		s.thread, s.turn, s.item = event.ThreadID, event.TurnID, ""
 		s.role = roleForThread(event.ThreadID)
-		s.phases = make(map[string]string)
+		s.resetItems()
 	}
 	switch event.Kind {
 	case "item/started", "item/completed":
@@ -125,16 +135,22 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 			s.phases[body.Item.ID] = body.Item.Phase
 		}
 		if event.Kind == "item/completed" {
-			if body.Item.Phase == "final" || body.Item.Phase == "" && strings.HasPrefix(strings.TrimSpace(body.Item.Text), "{") {
+			result, parseErr := codexapp.ParseRoleResult(body.Item.Text)
+			control := body.Item.Phase == "final" || body.Item.Phase == "" && (parseErr == nil || strings.HasPrefix(strings.TrimSpace(body.Item.Text), "{") && strings.Contains(body.Item.Text, `"disposition"`))
+			if control {
 				s.closeMessage()
-				result, err := codexapp.ParseRoleResult(body.Item.Text)
 				s.report = &agentReport{Role: s.role, TurnID: s.turn}
-				if err != nil {
+				if parseErr != nil {
 					s.report.Error = "malformed structured agent result; inspect the role turn and run status"
 				} else {
 					s.report.Disposition, s.report.Summary = publicName(result.Disposition), result.Summary
 				}
+			} else if buffered := s.pending[body.Item.ID]; buffered != "" {
+				s.emitDelta(body.Item.ID, buffered)
+			} else if !s.emitted[body.Item.ID] && body.Item.Text != "" {
+				s.emitDelta(body.Item.ID, body.Item.Text)
 			}
+			delete(s.pending, body.Item.ID)
 			if body.Item.ID == s.item {
 				s.closeMessage()
 			}
@@ -147,36 +163,51 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 		if json.Unmarshal(event.Raw, &body) != nil || body.Delta == "" || s.phases[body.ItemID] == "final" {
 			return
 		}
-		if body.ItemID != s.item {
-			s.closeMessage()
-			s.item = body.ItemID
+		if s.phases[body.ItemID] == "" && !s.ordinary[body.ItemID] {
+			s.pending[body.ItemID] += body.Delta
+			trimmed := strings.TrimSpace(s.pending[body.ItemID])
+			if trimmed == "" || trimmed[0] == '{' {
+				return
+			}
+			s.ordinary[body.ItemID] = true
+			body.Delta = s.pending[body.ItemID]
+			delete(s.pending, body.ItemID)
 		}
-		if s.quiet {
-			return
-		}
-		if s.json {
-			writePublicJSON(s.w, map[string]string{"type": "agent-progress", "role": s.role, "thread-id": s.thread, "turn-id": s.turn, "item-id": s.item, "text": body.Delta})
-			return
-		}
-		if !s.open {
-			if s.seen {
-				for s.breaks < 2 {
-					fmt.Fprint(s.w, "\n")
-					s.breaks++
-				}
-			} else {
+		s.emitDelta(body.ItemID, body.Delta)
+	}
+}
+
+func (s *messageStream) emitDelta(itemID, delta string) {
+	if itemID != s.item {
+		s.closeMessage()
+		s.item = itemID
+	}
+	s.emitted[itemID] = true
+	if s.quiet {
+		return
+	}
+	if s.json {
+		writePublicJSON(s.w, map[string]string{"type": "agent-progress", "role": s.role, "thread-id": s.thread, "turn-id": s.turn, "item-id": s.item, "text": delta})
+		return
+	}
+	if !s.open {
+		if s.seen {
+			for s.breaks < 2 {
 				fmt.Fprint(s.w, "\n")
-			}
-			fmt.Fprintf(s.w, "[%s] ", s.role)
-			s.open, s.seen = true, true
-		}
-		fmt.Fprint(s.w, body.Delta)
-		for _, char := range body.Delta {
-			if char == '\n' {
 				s.breaks++
-			} else {
-				s.breaks = 0
 			}
+		} else {
+			fmt.Fprint(s.w, "\n")
+		}
+		fmt.Fprintf(s.w, "[%s] ", s.role)
+		s.open, s.seen = true, true
+	}
+	fmt.Fprint(s.w, delta)
+	for _, char := range delta {
+		if char == '\n' {
+			s.breaks++
+		} else {
+			s.breaks = 0
 		}
 	}
 }
