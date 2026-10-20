@@ -110,7 +110,7 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 
 ## CON-061 — Retained callback acknowledgments in recovery
 
-- Live verified callback outcomes are durably bound to the dispatch role, thread, turn, request, call and tool, with host receipt, response transport and provider completion recorded separately. Recovery can use a complete retained acknowledgment and matching host receipt when an exact completed provider turn omits historical dynamic-tool items.
-- Claim, checkpoint and assessment use the same bounded check. Missing, failed or conflicting callback evidence retains a recovery hold; a receipt or agent result alone cannot establish acknowledgment. Candidate, review, correction and exact integration checks remain in force.
+- Live verified callback outcomes are durably bound to the dispatch role, thread, turn, request, call and tool, with host receipt, response transport and provider completion recorded separately. Recovery can use a complete retained acknowledgment and matching host receipt when an exact completed provider turn omits historical dynamic-tool items. A matching successful historical item and host receipt can verify a call when its live completion record is incomplete but nonconflicting.
+- Claim, checkpoint and assessment use the same bounded check. Missing or conflicting proof retains a recovery hold; a receipt or agent result alone cannot establish acknowledgment. Candidate, review, correction and exact integration checks remain in force.
 
 CON-042 remains a frozen, undelivered historical reference.

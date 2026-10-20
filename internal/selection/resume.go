@@ -313,9 +313,6 @@ func verifyObservedCallbacks(owner *activework.Owner, attempt dispatch.Attempt, 
 		if callback.ThreadID != attempt.ThreadID || callback.TurnID != attempt.TurnID || callback.RequestID == "" || callback.CallID == "" || callback.Tool == "" {
 			return fmt.Errorf("callback binding differs from dispatch")
 		}
-		if callback.ItemID != callback.CallID {
-			return fmt.Errorf("callback call %s lacks matching completed item identity", callback.CallID)
-		}
 		if _, exists := callbacks[callback.CallID]; exists || requests[callback.RequestID] {
 			return fmt.Errorf("conflicting callback call or request %s", callback.CallID)
 		}
@@ -329,7 +326,16 @@ func verifyObservedCallbacks(owner *activework.Owner, attempt dispatch.Attempt, 
 		if ok && (item.Tool != callback.Tool || item.Namespace != callback.Namespace) {
 			return fmt.Errorf("callback call %s conflicts with provider item", callback.CallID)
 		}
-		if !callback.Done || !callback.ReceiptCommitted || !callback.ResponseSent || !callback.ProviderCompleted || !callback.Success || callback.Failure != "" {
+		if ok {
+			// A completed historical item and host receipt can verify a call even
+			// when the live client missed its completion event.
+			if callback.ItemID != "" && callback.ItemID != callback.CallID {
+				return fmt.Errorf("callback call %s conflicts with provider item identity", callback.CallID)
+			}
+			if !callback.ReceiptCommitted || callback.Failure != "" {
+				return fmt.Errorf("callback call %s conflicts with completed provider item", callback.CallID)
+			}
+		} else if callback.ItemID != callback.CallID || !callback.Done || !callback.ReceiptCommitted || !callback.ResponseSent || !callback.ProviderCompleted || !callback.Success || callback.Failure != "" {
 			return fmt.Errorf("callback call %s lacks verified live acknowledgment", callback.CallID)
 		}
 		found, err := owner.VerifiedCallReceipt(kind, callback.CallID, attempt.TurnID)

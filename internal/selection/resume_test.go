@@ -68,19 +68,32 @@ func acknowledgedCallback(thread, turn, request, call, tool string) codexapp.Cal
 
 func TestRetainedLiveCallbacksRecoverWhenHistoryOmitsItems(t *testing.T) {
 	for _, tc := range []struct {
-		name, wantHold string
-		mutate         func([]codexapp.CallbackEvidence)
+		name, wantHold  string
+		mutate          func([]codexapp.CallbackEvidence)
+		historicalItems bool
 	}{
-		{"acknowledged", "", nil},
+		{"acknowledged", "", nil, false},
 		{"missing claim acknowledgment", "lacks verified live acknowledgment", func(v []codexapp.CallbackEvidence) {
 			v[0].ProviderCompleted = false
 			v[0].Success = false
-		}},
+		}, false},
 		{"missing checkpoint acknowledgment", "lacks verified live acknowledgment", func(v []codexapp.CallbackEvidence) {
 			v[1].ProviderCompleted = false
 			v[1].Success = false
-		}},
-		{"conflicting checkpoint tool", "durable host receipt", func(v []codexapp.CallbackEvidence) { v[1].Tool = "claim_task" }},
+		}, false},
+		{"conflicting checkpoint tool", "durable host receipt", func(v []codexapp.CallbackEvidence) { v[1].Tool = "claim_task" }, false},
+		{"historical items recover missed live completion", "", func(v []codexapp.CallbackEvidence) {
+			for i := range v {
+				v[i].ItemID = ""
+				v[i].Done = false
+				v[i].ResponseSent = false
+				v[i].ProviderCompleted = false
+				v[i].Success = false
+			}
+		}, true},
+		{"historical item conflicts with live failure", "conflicts with completed provider item", func(v []codexapp.CallbackEvidence) {
+			v[1].Failure = "host operation failed"
+		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo, external, policy := testRepo(t)
@@ -101,6 +114,10 @@ func TestRetainedLiveCallbacksRecoverWhenHistoryOmitsItems(t *testing.T) {
 				t.Fatalf("live callback evidence was not persisted: %+v", first.Snapshot.Dispatch.Attempts[0])
 			}
 			agent.observed = &codexapp.ObservedTurn{ID: "one-turn", Status: "completed", FinalText: `{"disposition":"ready_for_review","summary":"ready for independent review"}`, ItemsKnown: true}
+			if tc.historicalItems {
+				ok := true
+				agent.observed.DynamicTools = []codexapp.DynamicToolItem{{ID: "claim-ready", Tool: "claim_task", Status: "completed", Success: &ok}, {ID: "checkpoint-ready", Tool: "save_checkpoint", Status: "completed", Success: &ok}}
+			}
 			result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Agent: agent})
 			if err != nil || agent.turns != 1 || agent.reads != 1 || len(result.Snapshot.Dispatch.Attempts) != 1 || result.Snapshot.Dispatch.Limits != first.Snapshot.Dispatch.Limits {
 				t.Fatalf("recovery replayed or reset allowance: %+v %v", result, err)
@@ -252,6 +269,25 @@ func TestRetainedAssessmentAcknowledgmentSurvivesMissingHistoricalItem(t *testin
 	result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
 	if err != nil || result.Status != "approved" || result.Snapshot.Review.Verdict != "approved" || len(result.Snapshot.Dispatch.Assessments) != 1 || len(result.Snapshot.Dispatch.Attempts) != 2 || reviewer.turns != 1 || reviewer.reads != 1 {
 		t.Fatalf("retained assessment was not reconciled once: %+v %v", result, err)
+	}
+}
+
+func TestHistoricalAssessmentItemRecoversMissedLiveCompletion(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	callback := acknowledgedCallback("reviewer-thread", "observed-review-turn", "review-request", "observed-assessment", "save_assessment")
+	callback.ItemID = ""
+	callback.Done = false
+	callback.ResponseSent = false
+	callback.ProviderCompleted = false
+	callback.Success = false
+	reviewer := &observedReviewer{fakeReviewer: &fakeReviewer{}, callbacks: []codexapp.CallbackEvidence{callback}}
+	first, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
+	if err == nil || first.Status != "recovery_required" || len(first.Snapshot.Dispatch.Attempts) != 2 || !reflect.DeepEqual(first.Snapshot.Dispatch.Attempts[1].Callbacks, reviewer.callbacks) {
+		t.Fatalf("initial review hold lost callback evidence: %+v %v", first, err)
+	}
+	result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
+	if err != nil || result.Status != "approved" || result.Snapshot.Review.Verdict != "approved" || len(result.Snapshot.Dispatch.Assessments) != 1 || len(result.Snapshot.Dispatch.Attempts) != 2 || reviewer.turns != 1 || reviewer.reads != 1 {
+		t.Fatalf("historical assessment was not reconciled once: %+v %v", result, err)
 	}
 }
 

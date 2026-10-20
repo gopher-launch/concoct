@@ -456,7 +456,7 @@ Delivered final-result handling: live and historical Codex turns recognize `fina
 
 **Follow-up:** CON-056 uses a fresh trial to exercise implementation → independent review → correction → acceptance → integration.
 
-Delivered callback reconciliation: live verified callback outcomes remain bound to their dispatch and host receipts. Exact completed-turn recovery accepts those retained acknowledgments when historical provider items are absent; missing or conflicting proof retains a specific hold. Claim, checkpoint and assessment share this rule.
+Delivered callback reconciliation: live verified callback outcomes remain bound to their dispatch and host receipts. Exact completed-turn recovery accepts those retained acknowledgments when historical provider items are absent, and accepts matching successful historical items with host receipts when live completion records are incomplete but nonconflicting. Missing or conflicting proof retains a specific hold. Claim, checkpoint and assessment share this rule.
 
 ## CON-056 — Prove the golden path on fresh real work
 
