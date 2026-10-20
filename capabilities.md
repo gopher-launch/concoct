@@ -97,4 +97,4 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Callback failure, missing completion and mismatched identities hold candidate readiness. Returned transport outcomes retain bound callback evidence in active attempts; recovery holds retain the specific reason, stage, operation, evidence reference and agent-reported summary for consistent `run` and `status` output.
 - Restart reconciliation reads the exact completed provider turn and checks its dynamic-tool items against durable host receipts. Earlier active records remain readable. Incomplete evidence retains the hold; verified completion still passes through checkpoint, source, scope and candidate checks before independent review.
 
-The fresh real-project proof remains CON-056. CON-042 remains a frozen, undelivered historical reference.
+CON-042 remains a frozen, undelivered historical reference.
