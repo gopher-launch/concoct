@@ -110,6 +110,7 @@ func (s *messageStream) resetItems() {
 func (s *messageStream) event(event codexapp.Event, roleForThread func(string) string) {
 	if event.Kind == "turn/started" {
 		s.closeMessage()
+		s.report = nil
 		s.thread, s.turn, s.item = event.ThreadID, event.TurnID, ""
 		s.role = roleForThread(event.ThreadID)
 		s.resetItems()
@@ -117,6 +118,7 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 	}
 	if event.ThreadID != "" && (event.ThreadID != s.thread || event.TurnID != "" && event.TurnID != s.turn) {
 		s.closeMessage()
+		s.report = nil
 		s.thread, s.turn, s.item = event.ThreadID, event.TurnID, ""
 		s.role = roleForThread(event.ThreadID)
 		s.resetItems()
@@ -136,7 +138,7 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 		}
 		if event.Kind == "item/completed" {
 			result, parseErr := codexapp.ParseRoleResult(body.Item.Text)
-			control := body.Item.Phase == "final" || body.Item.Phase == "" && (parseErr == nil || strings.HasPrefix(strings.TrimSpace(body.Item.Text), "{") && strings.Contains(body.Item.Text, `"disposition"`))
+			control := body.Item.Phase == "final" || body.Item.Phase == "" && (parseErr == nil || malformedOrResultShapedObject(body.Item.Text))
 			if control {
 				s.closeMessage()
 				s.report = &agentReport{Role: s.role, TurnID: s.turn}
@@ -175,6 +177,23 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 		}
 		s.emitDelta(body.ItemID, body.Delta)
 	}
+}
+
+// Null-phase objects may be ordinary JSON commentary or a role result. A
+// valid object with no result fields is commentary; malformed objects and
+// result-shaped objects stay out of progress even when role parsing fails.
+func malformedOrResultShapedObject(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(trimmed), &fields) != nil {
+		return true
+	}
+	_, disposition := fields["disposition"]
+	_, summary := fields["summary"]
+	return disposition || summary
 }
 
 func (s *messageStream) emitDelta(itemID, delta string) {

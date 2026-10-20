@@ -100,7 +100,7 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 ## CON-059 — Operator output and first use
 
 - README guidance covers prerequisites, first run, role choices, exact candidate inspection and acceptance, holds, external state, exit codes and maintenance continuation.
-- The CLI emits kebab-case Concoct public JSON fields, event names and dispositions while reading existing durable records and leaving provider schemas intact. Agent message items stream with separate boundaries and structured final summaries appear apart from verified controller results; malformed final results receive diagnostics.
+- The CLI emits kebab-case Concoct public JSON fields, event names and dispositions while reading existing durable records and leaving provider schemas intact. Agent message items stream with separate boundaries and structured final summaries appear apart from verified controller results; malformed structured final items receive diagnostics.
 - Human status identifies pre-claim selection, specific recovery evidence and review state, missing versus measured-zero token receipts, and local timestamps with zone and offset. `TZ` selects UTC or another zone for human output; JSON and durable timestamps remain UTC instants.
 
 CON-042 remains a frozen, undelivered historical reference.

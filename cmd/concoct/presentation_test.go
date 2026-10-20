@@ -54,7 +54,13 @@ func TestMessageItemsStreamBeforeCompletionAndKeepControlSeparate(t *testing.T) 
 	stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"final","delta":"{\"disposition\":\"ready_"}`), role)
 	stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"final","delta":"for_review\",\"summary\":\"done\"}"}`), role)
 	stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final","text":"{\"disposition\":\"ready_for_review\",\"summary\":\"done\"}"}}`), role)
+	if stream.report == nil || stream.report.Summary != "done" || stream.report.Disposition != "ready-for-review" {
+		t.Fatalf("structured final was lost: %#v", stream.report)
+	}
 	stream.event(messageEvent("turn/started", "reviewer", "two", `{}`), role)
+	if stream.report != nil {
+		t.Fatalf("prior role result was retained for new turn: %#v", stream.report)
+	}
 	stream.event(messageEvent("item/agentMessage/delta", "reviewer", "two", `{"itemId":"review-note","delta":"reviewing"}`), role)
 	stream.finish()
 	got := output.String()
@@ -63,8 +69,8 @@ func TestMessageItemsStreamBeforeCompletionAndKeepControlSeparate(t *testing.T) 
 			t.Fatalf("missing %q in %q", want, got)
 		}
 	}
-	if strings.Contains(got, "ready_for_review") || stream.report == nil || stream.report.Summary != "done" || stream.report.Disposition != "ready-for-review" {
-		t.Fatalf("structured final was printed or lost: %q %#v", got, stream.report)
+	if strings.Contains(got, "ready_for_review") {
+		t.Fatalf("structured final was printed: %q", got)
 	}
 }
 
@@ -117,6 +123,51 @@ func TestNullPhaseFinalStaysOutOfProgressAndOrdinaryTextStreams(t *testing.T) {
 			t.Fatalf("ordinary null-phase JSON was lost: %q", output.String())
 		}
 	}
+}
+
+func TestMalformedNullPhaseFinalsDoNotBecomeProgress(t *testing.T) {
+	for _, tc := range []struct {
+		name, first, last, completed string
+	}{
+		{"missing-disposition", `{"summary":`, `"done"}`, `{"summary":"done"}`},
+		{"malformed-object", `{`, `bad`, `{bad`},
+	} {
+		for _, jsonMode := range []bool{false, true} {
+			t.Run(tc.name+map[bool]string{false: "-human", true: "-json"}[jsonMode], func(t *testing.T) {
+				events := []codexapp.Event{
+					messageEvent("turn/started", "writer", "one", `{}`),
+					messageEvent("item/started", "writer", "one", `{"item":{"id":"control","type":"agentMessage","phase":null}}`),
+					messageEvent("item/agentMessage/delta", "writer", "one", string(mustJSON(t, map[string]string{"itemId": "control", "delta": tc.first}))),
+					messageEvent("item/agentMessage/delta", "writer", "one", string(mustJSON(t, map[string]string{"itemId": "control", "delta": tc.last}))),
+					messageEvent("item/completed", "writer", "one", string(mustJSON(t, map[string]any{"item": map[string]any{"id": "control", "type": "agentMessage", "phase": nil, "text": tc.completed}}))),
+				}
+				var out, errs bytes.Buffer
+				args := []string{"run", "--root", t.TempDir()}
+				if jsonMode {
+					args = append(args, "--json")
+				}
+				if code := run(context.Background(), args, &out, &errs, presentationOperations{events: events, result: outcome{Disposition: "recovery_required", Summary: "verification incomplete"}}); code != 18 {
+					t.Fatalf("exit %d: %s", code, errs.String())
+				}
+				got := out.String()
+				if !strings.Contains(got, "malformed structured agent result") || strings.Contains(got, tc.completed) || strings.Contains(got, "agent-progress") {
+					t.Fatalf("raw null-phase control result leaked: %s", got)
+				}
+				if jsonMode && !strings.Contains(got, `"agent-reported"`) || !jsonMode && !strings.Contains(got, "Agent result:") {
+					t.Fatalf("missing human/JSON diagnostic: %s", got)
+				}
+			})
+		}
+	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestRunKeepsAgentReportSeparateInHumanJSONAndQuiet(t *testing.T) {
