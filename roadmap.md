@@ -23,14 +23,14 @@ The source tree includes selection, engineering, candidate freezing, bounded ind
 
 ## Delivery checkpoints
 
-| Checkpoint | Tasks | Reviewable result |
-| --- | --- | --- |
-| M0: clean rebuild baseline | CON-043 | Integrated minimal buildable CLI and current guidance, with no legacy engine or skill active |
-| M1: trusted execution foundation | CON-057, CON-044–CON-046 | Small roadmap parser, external active store, app-server client and enforced dispatch policy, verified with fixtures/fakes |
-| M2: automatic candidate/review flow | CON-047–CON-050 | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance |
-| M3: durable interventions | CON-051–CON-052 | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition |
-| M4: accepted local delivery | CON-053–CON-054 | Exact-candidate integration and mechanical completion/archive lifecycle |
-| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-059 | Correct callback/recovery handling and operator presentation before completing the real-task demonstration |
+| Checkpoint                                   | Tasks                            | Reviewable result                                                                                                                      |
+| -------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| M0: clean rebuild baseline                   | CON-043                          | Integrated minimal buildable CLI and current guidance, with no legacy engine or skill active                                           |
+| M1: trusted execution foundation             | CON-057, CON-044–CON-046         | Small roadmap parser, external active store, app-server client and enforced dispatch policy, verified with fixtures/fakes              |
+| M2: automatic candidate/review flow          | CON-047–CON-050                  | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance |
+| M3: durable interventions                    | CON-051–CON-052                  | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition                                       |
+| M4: accepted local delivery                  | CON-053–CON-054                  | Exact-candidate integration and mechanical completion/archive lifecycle                                                                |
+| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-059 | Correct callback/recovery handling and operator presentation before completing the real-task demonstration                             |
 
 The order is deliberately sequential for the first delivery. The dependencies below identify concrete prerequisites rather than suggesting parallel agent work. Intermediate milestones are development checkpoints, not claims that a usable redesigned release has shipped.
 
@@ -391,6 +391,37 @@ Delivered callback and recovery handling: a successful completed dynamic-tool it
 
 Delivered operator presentation: first-use guidance covers supported inputs, role choices, inspection, exact acceptance and maintenance. Public Concoct JSON names and dispositions use kebab-case while durable and provider records retain their contracts. Message items stream promptly with distinct boundaries; structured final agent results are shown separately from controller verification. Recovery, selection and token-receipt views identify missing evidence, and human timestamps show local zone and offset with `TZ` selection.
 
+## CON-060 — Correct final-result extraction across live and resumed turns
+
+- Kind: task
+- Status: ready
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-059
+
+**Objective:** Correct extraction of agent final results from the supported Codex app-server protocol so that live execution and recovery recognize completed results consistently, while preserving exact identity, callback acknowledgment and candidate verification requirements.
+
+**Context:** Both current result readers recognize an agent-message phase of `final` or an absent phase. The supported Codex 0.147.0 protocol defines `final_answer`. This source mismatch can discard a valid final result and leave a completed turn on a recovery hold. Inspection of the retained CURU-001 turn must establish whether that mismatch explains the observed failure.
+
+**Acceptance criteria:**
+
+- Inspect the retained CURU-001 attempt and its exact provider turn using metadata-only reads. Record the observed identity, completion status, message phases, final-result availability and relevant callback evidence in the external task evidence. Distinguish confirmed observations from inference. This investigation must not start a model turn or alter the retained run.
+- Live turn handling and historical turn reads use consistent final-result extraction that recognizes the supported protocol’s `final_answer` phase. Provider wire values remain unchanged.
+- Explicit final-answer messages take precedence over compatibility handling for absent or null phases. Commentary cannot become the final result or overwrite one. Any retained compatibility behavior is deterministic, bounded and covered by tests; it must not conceal a malformed explicit final result.
+- Preserve exact thread and turn identity checks, terminal-status checks, structured role-result validation, callback acknowledgment and receipt verification, and source/candidate validation. Finding final-result text alone does not establish a verified candidate or review.
+- Recovery diagnostics distinguish identity mismatch, nonterminal status, missing final-result text, malformed structured results and callback-evidence failures. Ordinary output explains the failed condition in human-readable terms.
+- Recovery preserves the active task, branch, role settings, accumulated consumption and remaining allowances. It neither repeats acknowledged claims or completed engineering work nor fabricates a result from checkpoint prose or an operator transcript.
+- The existing Curu workspace and durable evidence remain intact. Implementation and verification do not automatically resume its agent workflow, launch independent review or integrate CURU-001. The operator resumes that trial after the Concoct correction has been reviewed and integrated.
+
+**Verification:**
+
+- Add realistic supported-version protocol fixtures covering live and historical reads, commentary before and after an explicit final answer, absent/null phases, and missing or malformed results.
+- Cover reagent and iragent results, identity mismatches, nonterminal turns and unresolved callback evidence. Demonstrate that the corrected extraction permits continuation only when all existing verification requirements pass.
+- Exercise retained-attempt reconciliation to verify that successful recovery advances without duplicate dispatch or allowance reset, while insufficient evidence retains a specific recovery hold.
+- Run the applicable formatting, tests, vet, build and whitespace checks. Record verification limitations explicitly. No billable provider probes are required.
+
+**Scope boundary:** No provider-version upgrade, new recovery command, state reset, verification bypass or broader workflow redesign. Keep operational investigation and review records outside project delivery documentation.
+
 ## CON-056 — Prove the golden path on fresh real work
 
 - Kind: task
@@ -413,4 +444,4 @@ Delivered operator presentation: first-use guidance covers supported inputs, rol
 
 ## Next task boundary
 
-CON-056 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-060 is the next ready task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
