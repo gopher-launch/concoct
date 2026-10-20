@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -38,14 +39,19 @@ type observedReviewer struct {
 
 type observedReagent struct {
 	*fakeAgent
-	items []codexapp.DynamicToolItem
-	reads int
+	items    []codexapp.DynamicToolItem
+	observed *codexapp.ObservedTurn
+	final    string
+	reads    int
 }
 
 func (a *observedReagent) RunTurn(ctx context.Context, id, prompt string, settings codexapp.RoleSettings, handler codexapp.ToolHandler, onEvent func(codexapp.Event)) (codexapp.TurnOutcome, error) {
 	outcome, err := a.fakeAgent.RunTurn(ctx, id, prompt, settings, handler, onEvent)
 	if err != nil {
 		return outcome, err
+	}
+	if a.final != "" {
+		outcome.FinalText = a.final
 	}
 	return outcome, errors.New("callback response acknowledgment unavailable")
 }
@@ -55,7 +61,51 @@ func (a *observedReagent) ReadTurn(_ context.Context, threadID, turnID string) (
 	if threadID != "fresh-thread" || turnID != "one-turn" {
 		return codexapp.ObservedTurn{}, errors.New("wrong provider turn")
 	}
+	if a.observed != nil {
+		return *a.observed, nil
+	}
 	return codexapp.ObservedTurn{ID: turnID, Status: "completed", FinalText: `{"disposition":"ready_for_review","summary":"ready for independent review"}`, DynamicTools: a.items, ItemsKnown: true}, nil
+}
+
+func TestCompletedReagentRecoveryFailureReasonsPreserveBinding(t *testing.T) {
+	validFinal := `{"disposition":"ready_for_review","summary":"ready for independent review"}`
+	for _, tc := range []struct {
+		name, id, status, final, reason string
+		withItems                       bool
+	}{
+		{"identity mismatch", "other-turn", "completed", validFinal, "observed turn identity changed", true},
+		{"nonterminal", "one-turn", "inProgress", validFinal, "still active or uncertain", true},
+		{"missing final text", "one-turn", "completed", "", "no final-result text", true},
+		{"malformed structured result", "one-turn", "completed", "{bad", "completed reagent result is invalid", true},
+		{"missing callback item", "one-turn", "completed", validFinal, "callback evidence", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, external, policy := testRepo(t)
+			ok := true
+			items := []codexapp.DynamicToolItem{{ID: "claim-ready", Tool: "claim_task", Status: "completed", Success: &ok}, {ID: "checkpoint-ready", Tool: "save_checkpoint", Status: "completed", Success: &ok}}
+			agent := &observedReagent{fakeAgent: readyAgent(t, repo, external, readyEvidence(), false, true), items: items}
+			if tc.name == "malformed structured result" {
+				agent.final = tc.final
+			}
+			first, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent})
+			if err == nil || first.Status != "recovery_required" || len(first.Snapshot.Dispatch.Attempts) != 1 {
+				t.Fatalf("initial hold: %+v %v", first, err)
+			}
+			before := first.Snapshot
+			observed := codexapp.ObservedTurn{ID: tc.id, Status: tc.status, FinalText: tc.final, ItemsKnown: true}
+			if tc.withItems {
+				observed.DynamicTools = items
+			}
+			agent.observed = &observed
+			result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Agent: agent})
+			if err != nil || result.Status != "recovery_required" || result.Snapshot.Recovery == nil || !strings.Contains(result.Snapshot.Recovery.Reason, tc.reason) {
+				t.Fatalf("wrong recovery reason: result=%+v err=%v", result, err)
+			}
+			if agent.turns != 1 || agent.reads != 1 || result.Snapshot.TaskID != before.TaskID || result.Snapshot.TaskBranch != before.TaskBranch || result.Snapshot.Candidate != nil || len(result.Snapshot.Dispatch.Attempts) != 1 || result.Snapshot.Dispatch.Attempts[0].ID != before.Dispatch.Attempts[0].ID || result.Snapshot.Dispatch.Limits != before.Dispatch.Limits || !reflect.DeepEqual(result.Snapshot.RoleSettings, before.RoleSettings) || !reflect.DeepEqual(result.Snapshot.Counters, before.Counters) {
+				t.Fatalf("recovery replayed or changed binding: before=%+v after=%+v turns=%d reads=%d", before, result.Snapshot, agent.turns, agent.reads)
+			}
+		})
+	}
 }
 
 func TestCompletedReagentRecoveryRequiresSuccessfulBoundItemsAndReceipts(t *testing.T) {
