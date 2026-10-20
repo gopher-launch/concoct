@@ -149,6 +149,7 @@ func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings 
 	terminal := false
 	callbacks := make(map[string]*CallbackEvidence)
 	items := make(map[string]dynamicToolItem)
+	var final finalResult
 	defer func() {
 		for _, callback := range callbacks {
 			if item, ok := items[callback.CallID]; ok {
@@ -244,8 +245,9 @@ func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings 
 						Phase string `json:"phase"`
 					} `json:"item"`
 				}
-				if json.Unmarshal(event.Raw, &value) == nil && value.Item.Type == "agentMessage" && (value.Item.Phase == "final" || value.Item.Phase == "") {
-					result.FinalText = value.Item.Text
+				if json.Unmarshal(event.Raw, &value) == nil && value.Item.Type == "agentMessage" {
+					final.add(value.Item.Phase, value.Item.Text)
+					result.FinalText = final.text
 				}
 				var itemEvent struct {
 					Item dynamicToolItem `json:"item"`

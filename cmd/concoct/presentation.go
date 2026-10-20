@@ -94,6 +94,7 @@ type messageStream struct {
 	ordinary map[string]bool
 	emitted  map[string]bool
 	report   *agentReport
+	explicit bool
 }
 
 func newMessageStream(w io.Writer, jsonMode, quiet bool) *messageStream {
@@ -111,6 +112,7 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 	if event.Kind == "turn/started" {
 		s.closeMessage()
 		s.report = nil
+		s.explicit = false
 		s.thread, s.turn, s.item = event.ThreadID, event.TurnID, ""
 		s.role = roleForThread(event.ThreadID)
 		s.resetItems()
@@ -119,6 +121,7 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 	if event.ThreadID != "" && (event.ThreadID != s.thread || event.TurnID != "" && event.TurnID != s.turn) {
 		s.closeMessage()
 		s.report = nil
+		s.explicit = false
 		s.thread, s.turn, s.item = event.ThreadID, event.TurnID, ""
 		s.role = roleForThread(event.ThreadID)
 		s.resetItems()
@@ -138,14 +141,19 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 		}
 		if event.Kind == "item/completed" {
 			result, parseErr := codexapp.ParseRoleResult(body.Item.Text)
-			control := body.Item.Phase == "final" || body.Item.Phase == "" && (parseErr == nil || malformedOrResultShapedObject(body.Item.Text))
+			control := body.Item.Phase == "final_answer" || body.Item.Phase == "" && (parseErr == nil || malformedOrResultShapedObject(body.Item.Text))
 			if control {
-				s.closeMessage()
-				s.report = &agentReport{Role: s.role, TurnID: s.turn}
-				if parseErr != nil {
-					s.report.Error = "malformed structured agent result; inspect the role turn and run status"
-				} else {
-					s.report.Disposition, s.report.Summary = publicName(result.Disposition), result.Summary
+				if body.Item.Phase == "final_answer" || !s.explicit {
+					s.closeMessage()
+					if body.Item.Phase == "final_answer" {
+						s.explicit = true
+					}
+					s.report = &agentReport{Role: s.role, TurnID: s.turn}
+					if parseErr != nil {
+						s.report.Error = "malformed structured agent result; inspect the role turn and run status"
+					} else {
+						s.report.Disposition, s.report.Summary = publicName(result.Disposition), result.Summary
+					}
 				}
 			} else if buffered := s.pending[body.Item.ID]; buffered != "" {
 				s.emitDelta(body.Item.ID, buffered)
@@ -162,7 +170,7 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 			ItemID string `json:"itemId"`
 			Delta  string `json:"delta"`
 		}
-		if json.Unmarshal(event.Raw, &body) != nil || body.Delta == "" || s.phases[body.ItemID] == "final" {
+		if json.Unmarshal(event.Raw, &body) != nil || body.Delta == "" || s.phases[body.ItemID] == "final_answer" {
 			return
 		}
 		if s.phases[body.ItemID] == "" && !s.ordinary[body.ItemID] {

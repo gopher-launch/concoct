@@ -220,7 +220,7 @@ func TestInterleavedStreamingCallbackAndTerminalReceipt(t *testing.T) {
 				callbackReply.Store(true)
 			}
 			s.emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "call-1", "type": "dynamicToolCall", "tool": "checkpoint", "namespace": nil, "status": "completed", "success": true}}})
-			s.emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]string{"id": "final", "type": "agentMessage", "phase": "final", "text": `{"disposition":"ready","summary":"done"}`}}})
+			s.emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]string{"id": "final", "type": "agentMessage", "phase": "final_answer", "text": `{"disposition":"ready","summary":"done"}`}}})
 			usage := map[string]int{"inputTokens": 4, "cachedInputTokens": 0, "outputTokens": 3, "reasoningOutputTokens": 1, "totalTokens": 7}
 			s.emit(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "tokenUsage": map[string]any{"last": usage, "total": usage}}})
 			s.emit(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "completed", "items": []any{}}}})
@@ -533,10 +533,10 @@ func TestReadTurnRetainsDynamicToolCompletion(t *testing.T) {
 			t.Errorf("unexpected method %s", msg.Method)
 			return
 		}
-		s.reply(msg, map[string]any{"thread": map[string]any{"id": "thread-1", "turns": []any{map[string]any{"id": "turn-1", "status": "completed", "items": []any{map[string]any{"type": "dynamicToolCall", "id": "call-1", "namespace": nil, "tool": "save_checkpoint", "status": "completed", "success": true}, map[string]string{"type": "agentMessage", "phase": "final", "text": `{"disposition":"ready_for_review"}`}}}}}})
+		s.reply(msg, map[string]any{"thread": map[string]any{"id": "thread-1", "turns": []any{map[string]any{"id": "turn-1", "status": "completed", "items": []any{map[string]any{"type": "dynamicToolCall", "id": "call-1", "namespace": nil, "tool": "save_checkpoint", "status": "completed", "success": true}, map[string]any{"type": "agentMessage", "phase": nil, "text": `{"disposition":"ready"}`}, map[string]string{"type": "agentMessage", "phase": "commentary", "text": "working"}, map[string]string{"type": "agentMessage", "phase": "final_answer", "text": `{"disposition":"ready_for_review"}`}, map[string]string{"type": "agentMessage", "phase": "commentary", "text": "later"}}}}}})
 	})
 	observed, err := s.client.ReadTurn(testContext(t), "thread-1", "turn-1")
-	if err != nil || !observed.ItemsKnown || len(observed.DynamicTools) != 1 || observed.DynamicTools[0].ID != "call-1" || observed.DynamicTools[0].Success == nil || !*observed.DynamicTools[0].Success || observed.FinalText == "" {
+	if err != nil || !observed.ItemsKnown || len(observed.DynamicTools) != 1 || observed.DynamicTools[0].ID != "call-1" || observed.DynamicTools[0].Success == nil || !*observed.DynamicTools[0].Success || observed.FinalText != `{"disposition":"ready_for_review"}` {
 		t.Fatalf("observed=%+v err=%v", observed, err)
 	}
 }

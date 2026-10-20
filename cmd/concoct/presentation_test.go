@@ -50,10 +50,10 @@ func TestMessageItemsStreamBeforeCompletionAndKeepControlSeparate(t *testing.T) 
 	stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"empty","type":"agentMessage","phase":"commentary","text":""}}`), role)
 	stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"b","type":"agentMessage","phase":"commentary"}}`), role)
 	stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"b","delta":"second"}`), role)
-	stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final"}}`), role)
+	stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final_answer"}}`), role)
 	stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"final","delta":"{\"disposition\":\"ready_"}`), role)
 	stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"final","delta":"for_review\",\"summary\":\"done\"}"}`), role)
-	stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final","text":"{\"disposition\":\"ready_for_review\",\"summary\":\"done\"}"}}`), role)
+	stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final_answer","text":"{\"disposition\":\"ready_for_review\",\"summary\":\"done\"}"}}`), role)
 	if stream.report == nil || stream.report.Summary != "done" || stream.report.Disposition != "ready-for-review" {
 		t.Fatalf("structured final was lost: %#v", stream.report)
 	}
@@ -80,9 +80,9 @@ func TestMalformedFinalAndJSONQuietPresentation(t *testing.T) {
 		stream := newMessageStream(&output, mode.json, mode.quiet)
 		role := func(string) string { return "reagent" }
 		stream.event(messageEvent("turn/started", "writer", "one", `{}`), role)
-		stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final"}}`), role)
+		stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final_answer"}}`), role)
 		stream.event(messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"final","delta":"{bad"}`), role)
-		stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final","text":"{bad"}}`), role)
+		stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final_answer","text":"{bad"}}`), role)
 		stream.finish()
 		if output.Len() != 0 || stream.report == nil || stream.report.Error == "" {
 			t.Fatalf("mode %+v leaked control JSON or lost diagnostic: %q %#v", mode, output.String(), stream.report)
@@ -175,10 +175,10 @@ func TestRunKeepsAgentReportSeparateInHumanJSONAndQuiet(t *testing.T) {
 		messageEvent("turn/started", "writer", "one", `{}`),
 		messageEvent("item/started", "writer", "one", `{"item":{"id":"note","type":"agentMessage","phase":"commentary"}}`),
 		messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"note","delta":"I finished"}`),
-		messageEvent("item/started", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final"}}`),
+		messageEvent("item/started", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final_answer"}}`),
 		messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"final","delta":"{\"disposition\":\"ready_for_review\""}`),
 		messageEvent("item/agentMessage/delta", "writer", "one", `{"itemId":"final","delta":",\"summary\":\"ready\"}"}`),
-		messageEvent("item/completed", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final","text":"{\"disposition\":\"ready_for_review\",\"summary\":\"ready\"}"}}`),
+		messageEvent("item/completed", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final_answer","text":"{\"disposition\":\"ready_for_review\",\"summary\":\"ready\"}"}}`),
 	}
 	operations := presentationOperations{events: events, result: outcome{Disposition: "recovery_required", Summary: "callback evidence missing"}}
 	for _, tc := range []struct {
@@ -291,5 +291,17 @@ func TestSelectionRecoveryAndLocalTimestampViews(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("recovery missing %q: %s", want, out.String())
 		}
+	}
+}
+
+func TestExplicitFinalReportSurvivesLaterNullPhase(t *testing.T) {
+	var output strings.Builder
+	stream := newMessageStream(&output, false, false)
+	role := func(string) string { return "reagent" }
+	stream.event(messageEvent("item/started", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final_answer"}}`), role)
+	stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"final","type":"agentMessage","phase":"final_answer","text":"{bad"}}`), role)
+	stream.event(messageEvent("item/completed", "writer", "one", `{"item":{"id":"later","type":"agentMessage","phase":null,"text":"{\"disposition\":\"ready_for_review\",\"summary\":\"wrong\"}"}}`), role)
+	if stream.report == nil || stream.report.Error == "" || stream.report.Disposition != "" || strings.Contains(output.String(), "wrong") {
+		t.Fatalf("explicit malformed result was hidden: report=%+v output=%q", stream.report, output.String())
 	}
 }

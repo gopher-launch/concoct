@@ -232,9 +232,11 @@ func (c *Client) ReadTurn(ctx context.Context, threadID, turnID string) (Observe
 			continue
 		}
 		observed := ObservedTurn{ID: turn.ID, Status: turn.Status, ItemsKnown: turn.Items != nil}
+		var final finalResult
 		for _, item := range turn.Items {
-			if item.Type == "agentMessage" && (item.Phase == "final" || item.Phase == "") {
-				observed.FinalText = item.Text
+			if item.Type == "agentMessage" {
+				final.add(item.Phase, item.Text)
+				observed.FinalText = final.text
 			}
 			if item.Type == "dynamicToolCall" {
 				observed.DynamicTools = append(observed.DynamicTools, DynamicToolItem{ID: item.ID, Namespace: item.Namespace, Tool: item.Tool, Status: item.Status, Success: item.Success})

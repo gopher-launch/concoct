@@ -394,7 +394,7 @@ Delivered operator presentation: first-use guidance covers supported inputs, rol
 ## CON-060 — Correct final-result extraction across live and resumed turns
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F005
 - Depends on: CON-059
@@ -421,6 +421,8 @@ Delivered operator presentation: first-use guidance covers supported inputs, rol
 - Run the applicable formatting, tests, vet, build and whitespace checks. Record verification limitations explicitly. No billable provider probes are required.
 
 **Scope boundary:** No provider-version upgrade, new recovery command, state reset, verification bypass or broader workflow redesign. Keep operational investigation and review records outside project delivery documentation.
+
+Delivered final-result handling: live and historical Codex turns recognize `final_answer`, with explicit results taking priority over bounded phase-less structured-result compatibility. Recovery reports distinct identity, status, missing-text, malformed-result and callback-evidence failures while retaining all candidate and review gates.
 
 ## CON-056 — Prove the golden path on fresh real work
 

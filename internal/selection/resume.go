@@ -219,8 +219,14 @@ func applyCompleted(ctx context.Context, cfg Config, owner *activework.Owner, st
 			}
 		}
 	}
-	if observed.ID != attempt.TurnID || observed.Status != "completed" || observed.FinalText == "" {
-		return holdContinuation(owner, store, result, "recovery-required", "completed turn lacks exact identity or result")
+	if observed.ID != attempt.TurnID {
+		return holdContinuation(owner, store, result, "recovery-required", "provider turn identity differs from recorded attempt")
+	}
+	if observed.Status != "completed" {
+		return holdContinuation(owner, store, result, "recovery-required", "provider turn is not completed: "+observed.Status)
+	}
+	if strings.TrimSpace(observed.FinalText) == "" {
+		return holdContinuation(owner, store, result, "recovery-required", "completed provider turn has no final-result text")
 	}
 	if attempt.FinalText != "" && attempt.FinalText != observed.FinalText {
 		return holdContinuation(owner, store, result, "recovery-required", "provider result differs from recorded outcome")
