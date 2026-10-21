@@ -222,7 +222,7 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	if err := owner.MarkTurnRequested(binding.AttemptID); err != nil {
 		return result, err
 	}
-	turnCtx, cancelTurn, stopEvent := turnstop.Context(ctx, snapshot.Dispatch.WatchdogElapsed, snapshot.Dispatch.WatchdogStall, cfg.StopTrigger)
+	turnCtx, cancelTurn, stopEvent, finishTurn := turnstop.Context(ctx, snapshot.Dispatch.WatchdogElapsed, snapshot.Dispatch.WatchdogStall, cfg.StopTrigger)
 	defer cancelTurn()
 	var observeErr error
 	outcome, turnErr := cfg.Agent.RunTurn(turnCtx, thread.ID, reviewPrompt, settings, session.handle, func(event codexapp.Event) {
@@ -237,6 +237,7 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 			cfg.OnEvent(event)
 		}
 	})
+	stopReason := finishTurn()
 	if outcome.TurnID != "" && observeErr == nil {
 		observeErr = owner.ObserveDispatchTurn(binding.AttemptID, outcome.TurnID)
 	}
@@ -254,14 +255,14 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		turnErr = observeErr
 	}
 	finish := "completed"
-	if turnCtx.Err() != nil || turnErr != nil || outcome.Status != "completed" {
+	if stopReason != nil || turnErr != nil || outcome.Status != "completed" {
 		finish = "uncertain"
 	}
 	if err := owner.FinishDispatch(binding.AttemptID, finish, dispatch.Receipt(outcome.Usage)); err != nil {
 		return result, err
 	}
-	if turnCtx.Err() != nil {
-		result.Status, err = turnstop.Handle(owner, cfg.Agent, "iragent", thread.ID, outcome.TurnID, binding.AttemptID, context.Cause(turnCtx))
+	if stopReason != nil {
+		result.Status, err = turnstop.Handle(owner, cfg.Agent, "iragent", thread.ID, outcome.TurnID, binding.AttemptID, stopReason)
 		result.Snapshot, _ = store.Status()
 		return result, err
 	}
@@ -312,10 +313,8 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	if verdict.Disposition != "approved" && verdict.Disposition != "changes_requested" {
 		return holdRecovery(owner, store, &result, "invalid reviewer disposition", fmt.Errorf("reviewer returned %q", verdict.Disposition))
 	}
-	if !session.saved {
-		if err := session.saveResult(verdict, outcome.TurnID); err != nil {
-			return holdRecovery(owner, store, &result, "reviewer result could not be recorded", err)
-		}
+	if err := session.saveResult(verdict, outcome.TurnID); err != nil {
+		return holdRecovery(owner, store, &result, "reviewer result could not be recorded", err)
 	}
 	if err := session.finalizeEvidence(verdict.Disposition, outcome.TurnID); err != nil {
 		return holdRecovery(owner, store, &result, "review evidence could not be finalized", err)
@@ -636,8 +635,11 @@ func (s *hostSession) header() string {
 func (s *hostSession) saveResult(verdict codexapp.RoleResult, turnID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.saved {
-		return nil
+	if s.saved && s.turnID != turnID {
+		return fmt.Errorf("pending assessment belongs to another reviewer turn")
+	}
+	if verdict.Disposition == "changes_requested" && len(verdict.Findings) == 0 {
+		return fmt.Errorf("changes requested without findings")
 	}
 	body := strings.TrimSpace(verdict.Summary)
 	for _, finding := range verdict.Findings {
@@ -651,20 +653,25 @@ func (s *hostSession) saveResult(verdict codexapp.RoleResult, turnID string) err
 			return fmt.Errorf("pending assessment belongs to another candidate or scope")
 		}
 		priorBody := strings.TrimSpace(strings.TrimPrefix(prior, s.header()))
+		finalized := false
 		if suffix := fmt.Sprintf("\n\nVerdict: %s\nReviewer turn: %s", verdict.Disposition, turnID); strings.HasSuffix(priorBody, suffix) {
 			priorBody = strings.TrimSuffix(priorBody, suffix)
+			finalized = true
 		}
 		if priorBody != body {
+			if finalized {
+				return fmt.Errorf("finalized assessment differs from reviewer result")
+			}
 			verified, err := s.owner.VerifiedTurnReceipt("assessment", turnID, priorBody)
 			if err != nil || !verified {
 				return fmt.Errorf("pending assessment lacks exact reviewer receipt: %v", err)
 			}
+			if err := s.owner.SaveReview(s.review.Number, s.header()+body+"\n"); err != nil {
+				return err
+			}
 		}
 		s.saved, s.turnID = true, turnID
 		return nil
-	}
-	if verdict.Disposition == "changes_requested" && len(verdict.Findings) == 0 {
-		return fmt.Errorf("changes requested without findings")
 	}
 	if err := s.owner.SaveReview(s.review.Number, s.header()+body+"\n"); err != nil {
 		return err

@@ -586,7 +586,7 @@ func TestCLIFullLocalDeliveryWithFakeProvider(t *testing.T) {
 	if err != nil || snapshot.Acceptance == nil || snapshot.Candidate == nil {
 		t.Fatalf("candidate not offered: %+v %v", snapshot, err)
 	}
-	for _, want := range []string{"Source diff:", "Roadmap/capability diff:", "Final independent assessment:", "Candidate source and criteria verified.", "Criterion passed", "Review assessment:", "Final review verdict: approved"} {
+	for _, want := range []string{"Source diff:", "Roadmap/capability diff:", "Final independent assessment:", "Candidate approved.", "Criterion passed", "Review assessment:", "Final review verdict: approved"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("acceptance result missing %q: %s", want, out.String())
 		}
@@ -595,7 +595,7 @@ func TestCLIFullLocalDeliveryWithFakeProvider(t *testing.T) {
 	if code := run(context.Background(), []string{"status", "APP-002", "--json", "--repo", repo, "--root", root}, &statusOut, &errs, ops); code != 12 {
 		t.Fatalf("acceptance status: %d %s", code, statusOut.String())
 	}
-	for _, want := range []string{`"approval":`, `"diff-command":`, `"review-evidence":`, "Candidate source and criteria verified.", `"reconciled-paths":`} {
+	for _, want := range []string{`"approval":`, `"diff-command":`, `"review-evidence":`, "Candidate approved.", `"reconciled-paths":`} {
 		if !strings.Contains(statusOut.String(), want) {
 			t.Errorf("acceptance JSON missing %q: %s", want, statusOut.String())
 		}

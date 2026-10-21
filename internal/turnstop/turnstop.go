@@ -3,6 +3,7 @@ package turnstop
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/gopher-launch/concoct/internal/activework"
@@ -21,17 +22,42 @@ type Stopper interface {
 
 // Context applies configured elapsed/stall limits and an optional explicit
 // event trigger to the same cancellation path as foreground Ctrl-C.
-func Context(parent context.Context, elapsed, stall time.Duration, trigger func(codexapp.Event) bool) (context.Context, context.CancelFunc, func(codexapp.Event)) {
+func Context(parent context.Context, elapsed, stall time.Duration, trigger func(codexapp.Event) bool) (context.Context, context.CancelFunc, func(codexapp.Event), func() error) {
 	ctx, cancelCause := context.WithCancelCause(parent)
 	cancel := func() { cancelCause(context.Canceled) }
+	var mu sync.Mutex
+	var finished bool
+	var timeoutAt time.Time
 	var elapsedTimer, stallTimer *time.Timer
+	started := time.Now()
+	elapsedDeadline := started.Add(elapsed)
+	stallDeadline := started.Add(stall)
 	if elapsed > 0 {
-		elapsedTimer = time.AfterFunc(elapsed, func() { cancelCause(ErrElapsedLimit) })
+		elapsedTimer = time.AfterFunc(elapsed, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if !finished && !time.Now().Before(elapsedDeadline) {
+				if ctx.Err() == nil {
+					timeoutAt = time.Now()
+				}
+				cancelCause(ErrElapsedLimit)
+			}
+		})
 	}
 	if stall > 0 {
-		stallTimer = time.AfterFunc(stall, func() { cancelCause(ErrStallLimit) })
+		stallTimer = time.AfterFunc(stall, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if !finished && !time.Now().Before(stallDeadline) {
+				if ctx.Err() == nil {
+					timeoutAt = time.Now()
+				}
+				cancelCause(ErrStallLimit)
+			}
+		})
 	}
 	stop := func() {
+		mu.Lock()
 		if elapsedTimer != nil {
 			elapsedTimer.Stop()
 		}
@@ -39,16 +65,45 @@ func Context(parent context.Context, elapsed, stall time.Duration, trigger func(
 			stallTimer.Stop()
 		}
 		cancel()
+		mu.Unlock()
 	}
 	onEvent := func(event codexapp.Event) {
-		if stallTimer != nil {
+		mu.Lock()
+		if stallTimer != nil && !finished {
+			stallDeadline = time.Now().Add(stall)
 			stallTimer.Reset(stall)
 		}
+		mu.Unlock()
 		if trigger != nil && trigger(event) {
 			cancel()
 		}
 	}
-	return ctx, stop, onEvent
+	// Finish is called immediately when RunTurn returns. Its timestamp freezes
+	// the active execution window, even if a timer callback is queued.
+	finish := func() error {
+		returned := time.Now()
+		mu.Lock()
+		defer mu.Unlock()
+		finished = true
+		if elapsedTimer != nil {
+			elapsedTimer.Stop()
+		}
+		if stallTimer != nil {
+			stallTimer.Stop()
+		}
+		cause := context.Cause(ctx)
+		if elapsed > 0 && !returned.Before(elapsedDeadline) {
+			return ErrElapsedLimit
+		}
+		if stall > 0 && !returned.Before(stallDeadline) {
+			return ErrStallLimit
+		}
+		if (errors.Is(cause, ErrElapsedLimit) || errors.Is(cause, ErrStallLimit)) && timeoutAt.After(returned) {
+			return nil // A queued timer fired after Finish captured the return time.
+		}
+		return cause
+	}
+	return ctx, stop, onEvent, finish
 }
 
 // Handle runs after the dispatch is marked uncertain. A canceled turn is

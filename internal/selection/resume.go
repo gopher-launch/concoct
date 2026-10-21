@@ -664,7 +664,7 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 	if err := owner.MarkTurnRequested(attemptID); err != nil {
 		return result, err
 	}
-	turnCtx, cancelTurn, stopEvent := turnstop.Context(ctx, snapshot.Dispatch.WatchdogElapsed, snapshot.Dispatch.WatchdogStall, cfg.StopTrigger)
+	turnCtx, cancelTurn, stopEvent, finishTurn := turnstop.Context(ctx, snapshot.Dispatch.WatchdogElapsed, snapshot.Dispatch.WatchdogStall, cfg.StopTrigger)
 	defer cancelTurn()
 	var observeErr error
 	outcome, turnErr := cfg.Agent.RunTurn(turnCtx, thread.ID, prompt, settings, session.handle, func(event codexapp.Event) {
@@ -679,6 +679,7 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 			cfg.OnEvent(event)
 		}
 	})
+	stopReason := finishTurn()
 	if outcome.TurnID != "" && observeErr == nil {
 		observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
 	}
@@ -692,14 +693,14 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 		turnErr = observeErr
 	}
 	status := "completed"
-	if turnCtx.Err() != nil || turnErr != nil || outcome.Status != "completed" {
+	if stopReason != nil || turnErr != nil || outcome.Status != "completed" {
 		status = "uncertain"
 	}
 	if err := owner.FinishDispatch(attemptID, status, dispatch.Receipt(outcome.Usage)); err != nil {
 		return result, err
 	}
-	if turnCtx.Err() != nil {
-		result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID, context.Cause(turnCtx))
+	if stopReason != nil {
+		result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID, stopReason)
 		result.Snapshot, _ = store.Status()
 		return result, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +75,11 @@ func TestAutomaticInitialReviewVerdicts(t *testing.T) {
 					t.Fatal("reviewer checkout is not detached")
 				}
 				reviewCheckpoint(t, handler, "Checked exact candidate source and criterion; findings: none.")
-				return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"` + tc.disposition + `","summary":"independent assessment complete"}`}, nil
+				final := `{"disposition":"` + tc.disposition + `","summary":"independent assessment complete"}`
+				if tc.disposition == "changes_requested" {
+					final = `{"disposition":"changes_requested","summary":"independent assessment complete","findings":["Correct feature.go"]}`
+				}
+				return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: final}, nil
 			}
 			result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
 			if err != nil || result.Status != tc.status || result.Snapshot.Phase != tc.phase || result.Snapshot.Review == nil || result.Snapshot.Review.Verdict != tc.disposition || result.Snapshot.Review.Number != 1 || reviewer.starts != 1 {
@@ -262,15 +267,22 @@ func TestStructuredReviewApprovesWithoutAssessmentCallback(t *testing.T) {
 }
 
 func TestStructuredReviewRejectsWrongCandidateAndMissingFindings(t *testing.T) {
-	for _, final := range []string{
-		`{"disposition":"approved","summary":"reviewed","task_id":"APP-002","candidate":"another-commit"}`,
-		`{"disposition":"changes_requested","summary":"needs work","task_id":"APP-002"}`,
+	for _, tc := range []struct {
+		final    string
+		callback bool
+	}{
+		{final: `{"disposition":"approved","summary":"reviewed","task_id":"APP-002","candidate":"another-commit"}`},
+		{final: `{"disposition":"changes_requested","summary":"needs work","task_id":"APP-002"}`},
+		{final: `{"disposition":"changes_requested","summary":"needs work","task_id":"APP-002"}`, callback: true},
 	} {
-		t.Run(final, func(t *testing.T) {
+		t.Run(tc.final+fmt.Sprint(tc.callback), func(t *testing.T) {
 			repo, external, policy := testRepo(t)
 			reviewer := &fakeReviewer{}
-			reviewer.run = func(_ string, _ codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
-				return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: final}, nil
+			reviewer.run = func(_ string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+				if tc.callback {
+					reviewCheckpoint(t, handler, "Fix feature.go")
+				}
+				return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: tc.final}, nil
 			}
 			result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
 			if err == nil || result.Status != "recovery_required" || result.Snapshot.Review.Verdict != "" || len(result.Snapshot.Dispatch.Assessments) != 0 {

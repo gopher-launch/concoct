@@ -512,7 +512,11 @@ func (a *lostCorrectionReviewer) RunTurn(_ context.Context, id, prompt string, _
 	if err := response.Commit(context.Background()); err != nil {
 		return codexapp.TurnOutcome{}, err
 	}
-	return codexapp.TurnOutcome{ThreadID: id, TurnID: turn, Status: "completed", FinalText: `{"disposition":"` + verdict + `","summary":"checked"}`}, nil
+	final := `{"disposition":"` + verdict + `","summary":"checked"}`
+	if verdict == "changes_requested" {
+		final = `{"disposition":"changes_requested","summary":"checked","findings":["Fix feature.go"]}`
+	}
+	return codexapp.TurnOutcome{ThreadID: id, TurnID: turn, Status: "completed", FinalText: final}, nil
 }
 
 func TestLostReviewerCorrectionUsesSameAssessmentSequence(t *testing.T) {

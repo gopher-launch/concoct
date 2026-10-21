@@ -57,7 +57,7 @@ func TestCorrectedCandidateReturnsToSameReviewer(t *testing.T) {
 		if firstCandidate == "" {
 			firstCandidate = snapshot.Candidate.Commit
 			first.run = func(prompt string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
-				if !strings.Contains(prompt, firstCandidate) || !strings.Contains(prompt, "Please correct feature.go") {
+				if !strings.Contains(prompt, firstCandidate) || !strings.Contains(prompt, "Please correct feature.go") || strings.Contains(prompt, "findings: none") {
 					t.Fatal("prior findings absent from correction prompt")
 				}
 				workspace := filepath.Join(external, "workspaces", snapshot.RunID)
@@ -88,6 +88,14 @@ func TestCorrectedCandidateReturnsToSameReviewer(t *testing.T) {
 		}
 		final := `{"disposition":"` + verdict + `","summary":"checked","task_id":"APP-002","candidate":"` + snapshot.Candidate.Commit + `"}`
 		if verdict == "changes_requested" {
+			args, _ := json.Marshal(map[string]string{"content": "findings: none"})
+			response, err := handler(context.Background(), codexapp.ToolCall{Role: "iragent", ThreadID: "reviewer-thread", TurnID: turn, CallID: "assessment-one", Tool: "save_assessment", Arguments: args})
+			if err != nil || !response.Success || response.Commit == nil {
+				t.Fatalf("review callback: %+v, %v", response, err)
+			}
+			if err := response.Commit(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 			final = `{"disposition":"changes_requested","summary":"checked","task_id":"APP-002","candidate":"` + snapshot.Candidate.Commit + `","findings":["Please correct feature.go"]}`
 		}
 		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: turn, Status: "completed", FinalText: final}, nil
@@ -136,7 +144,7 @@ func TestCorrectionDispatchExhaustionRetainsFindings(t *testing.T) {
 	reviewer := &continuingReviewer{fakeReviewer: &fakeReviewer{}}
 	reviewer.run = func(_ string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
 		reviewCheckpoint(t, handler, "Fix the feature implementation.")
-		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"changes_requested","summary":"source correction needed"}`}, nil
+		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"changes_requested","summary":"source correction needed","findings":["Fix the feature implementation."]}`}, nil
 	}
 	result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent, Reviewer: reviewer})
 	if err != nil {
@@ -167,7 +175,7 @@ func TestAssessmentExhaustionRetainsReviewedCandidate(t *testing.T) {
 	reviewer := &continuingReviewer{fakeReviewer: &fakeReviewer{}}
 	reviewer.run = func(_ string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
 		reviewCheckpoint(t, handler, "Correct feature.go before approval.")
-		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"changes_requested","summary":"correction required"}`}, nil
+		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"changes_requested","summary":"correction required","findings":["Correct feature.go before approval."]}`}, nil
 	}
 	result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent, Reviewer: reviewer})
 	if err != nil {

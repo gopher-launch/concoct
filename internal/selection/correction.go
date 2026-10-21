@@ -89,7 +89,7 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 			return result, err
 		}
 		prompt := fmt.Sprintf("You are the bound reagent continuing %s on the existing task branch in %s. Address the independent review findings below within the agreed task scope. Preserve the parent baseline %s. Judge the correction, affected checks and documentation yourself; self-review within the recorded limit and save a concise checkpoint. For a genuine missing decision return decision_required with a question object. Return one JSON result with disposition ready_for_review, task_id %s and summary only after completing the correction. Do not integrate, push, publish or start another task.\n\nPrior candidate: %s\nPrior assessment:\n%s\nActive task:\n%s", prior.TaskID, workspace, prior.ParentCommit, prior.TaskID, prior.Candidate.Commit, findings, task)
-		turnCtx, cancelTurn, stopEvent := turnstop.Context(ctx, prior.Dispatch.WatchdogElapsed, prior.Dispatch.WatchdogStall, cfg.StopTrigger)
+		turnCtx, cancelTurn, stopEvent, finishTurn := turnstop.Context(ctx, prior.Dispatch.WatchdogElapsed, prior.Dispatch.WatchdogStall, cfg.StopTrigger)
 		var observeErr error
 		outcome, turnErr := cfg.Agent.RunTurn(turnCtx, thread.ID, prompt, settings, session.handle, func(event codexapp.Event) {
 			stopEvent(event)
@@ -103,6 +103,7 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 				cfg.OnEvent(event)
 			}
 		})
+		stopReason := finishTurn()
 		if outcome.TurnID != "" && observeErr == nil {
 			observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
 		}
@@ -120,14 +121,14 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 			turnErr = observeErr
 		}
 		finish := "completed"
-		if turnCtx.Err() != nil || turnErr != nil || outcome.Status != "completed" {
+		if stopReason != nil || turnErr != nil || outcome.Status != "completed" {
 			finish = "uncertain"
 		}
 		if err := owner.FinishDispatch(attemptID, finish, dispatch.Receipt(outcome.Usage)); err != nil {
 			return result, err
 		}
-		if turnCtx.Err() != nil {
-			result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID, context.Cause(turnCtx))
+		if stopReason != nil {
+			result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID, stopReason)
 			result.Snapshot, _ = store.Status()
 			cancelTurn()
 			return result, err
