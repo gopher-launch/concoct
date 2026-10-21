@@ -458,6 +458,43 @@ Delivered final-result handling: live and historical Codex turns recognize `fina
 
 Delivered callback reconciliation: live verified callback outcomes remain bound to their dispatch and host receipts. Exact completed-turn recovery accepts those retained acknowledgments when historical provider items are absent, and accepts matching successful historical items with host receipts when live completion records are incomplete but nonconflicting. Missing or conflicting proof retains a specific hold. Claim, checkpoint and assessment share this rule.
 
+## CON-062 — Simplify agent coordination and operator interaction
+
+- Kind: task
+- Status: ready
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-061
+
+**Objective:** Make Concoct a simple coordinator that automates the demonstrated manual reagent/iragent workflow. Agents own engineering judgment. Concoct invokes them, routes structured results, streams output, handles necessary operator interaction and enforces execution bounds.
+
+**Intended workflow:** Reagent selects and implements a task, including testing and self-review. Concoct passes the candidate to an independent iragent. Requested changes return to the reagent, followed by reassessment, until approval or an execution limit. The approved candidate reaches the operator for acceptance and authorized local integration. Publication remains operator-controlled.
+
+**Acceptance criteria:**
+
+- **Agent-owned judgment:** Remove normal-workflow checks that independently assess task suitability, implementation completeness, acceptance evidence, test sufficiency or resolution of review findings. Those judgments belong to reagent and iragent. Concoct does not repeat their engineering checks or inspect narrative content to infer success.
+- **Deterministic handoffs:** Define and consistently use schema-defined results containing only the fields needed for coordination, such as task identity, disposition, candidate identity, review findings and explicit requests for operator input. Narrative summaries and findings are passed through without semantic interpretation. Concoct may mechanically validate schemas, identifiers and the association between a review and its candidate.
+- **Simple task identification:** Selecting a task does not require reproducing objective or acceptance prose. Concoct identifies the roadmap entry by task ID and supplies its existing content as agent context. Remove the verbatim scope comparison and associated acknowledgment requirements that obstruct this handoff.
+- **Automatic coordination:** A candidate result starts independent review without another operator authorization. Requested changes automatically return to the reagent with the findings, and the revised candidate returns for reassessment within configured bounds. Successful handoffs do not depend on historical provider callback-item reconstruction.
+- **Rare operator interaction:** Prompt when an agent explicitly requests necessary input, or when the approved candidate requires the agreed final integration approval. Ordinary handoffs, progress updates and differences in prose do not require operator intervention.
+- **Clear execution failures:** Report process failures, provider-reported turn failures and invalid structured responses directly. Stop the affected workflow promptly when continuation is impossible. State what failed, where the work remains and what the operator can do next. A failure does not require implementing a recovery subsystem before a fresh run is possible.
+- **Bounded execution:** Enforce configured agent execution counts and time limits mechanically. Stop further launches when counts are exhausted. Terminate the active execution and its child processes when its time limit is exceeded. Report the exceeded limit clearly.
+- **Operator-facing output:** Clearly identify Concoct’s own messages separately from reagent and iragent streams. Explain current activity, outcome and next action in ordinary language. Replace unexplained “hold,” “host receipt,” callback and reconciliation terminology in normal stdout/stderr. Keep protocol details in diagnostic evidence. Preserve human-readable summaries, blank lines between messages, hyphenated public statuses and local timestamps.
+- **Integration:** Retain the mechanical association between the approved candidate and operator authorization, and perform authorized local integration. Concoct does not independently reassess the approved implementation or publish it.
+- **Consistent documentation:** Update active design, contributor guidance, prompts and tests to reflect this responsibility boundary. Remove superseded requirements that would reintroduce independent engineering assessment into the coordinator.
+
+**Verification:**
+
+- Demonstrate a scripted end-to-end workflow covering implementation, independent review, requested changes, reassessment, approval and operator-authorized integration without manual shuttling between agents.
+- Demonstrate that paraphrased summaries and schema-valid results proceed without objective/acceptance text matching or narrative inspection.
+- Verify representative execution failure, invalid response, execution-count exhaustion and timeout termination.
+- Check operator output for clear source labels, understandable reasons and actionable next steps.
+- Run applicable formatting, tests, vet, build and whitespace checks. No billable provider probe is required for implementation verification.
+
+**Scope boundary:** Simplify the existing implementation. No new orchestration framework, broader recovery machinery or salvage requirement for previous Curu trials.
+
+**Follow-up:** After independent review and operator-authorized integration, perform a fresh CON-056 trial on CURU-001, using successful automatic agent handoffs as the primary acceptance target.
+
 ## CON-056 — Prove the golden path on fresh real work
 
 - Kind: task
