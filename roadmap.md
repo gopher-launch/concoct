@@ -515,12 +515,14 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 - Add focused compatibility tests against the actual outbound schema and request payload. Verify the provider’s relevant schema rules recursively and validate representative result fixtures. Checking JSON syntax or a separate test-only schema is insufficient.
 - Recognize the demonstrated invalid-schema request rejection as a definite execution startup failure. Do not describe it as an uncertain outcome requiring investigation, and do not recommend an unchanged retry.
 - Normal operator output identifies Concoct as the source, explains that the agent could not start because Concoct supplied an invalid response schema, and states that a code correction is required. Retain the full provider error in external diagnostic evidence without dumping raw JSON or repeating truncated errors in ordinary stdout/stderr.
+- A definitely failed unclaimed selection can be retired by exact run ID after checking its clean checkout, retaining the diagnostic and releasing ownership for a fresh run after correction. Do not retire claimed work or an uncertain turn through this path.
 
 **Verification:**
 
 - Demonstrate that the regression test rejects the previously shipped schema and accepts the corrected outbound schema.
 - Exercise representative schema-valid results from both roles, including null optional values and a populated operator question.
 - Simulate the observed provider rejection and verify the startup-failure classification and human-readable output.
+- Verify that stale IDs and changed workspaces prevent retirement, while retiring the exact failed selection preserves diagnostics and permits a fresh run.
 - Run applicable formatting, tests, vet, build and whitespace checks. Record verification and independent review externally.
 
 **Scope boundary:** No new recovery subsystem, general schema framework, provider upgrade or additional assessment of agent work. No billable provider probe or live Curu restart is required during implementation.

@@ -23,7 +23,7 @@ type request struct {
 	JSON, Quiet                                                bool
 	Answer, Text, Choice, AnswerFile                           string
 	Authorize, Approve, Extend                                 string
-	Defer, Abandon, Resume, Reason                             string
+	Defer, Abandon, Resume, RetireFailed, Reason               string
 	ReviewLimit, DispatchLimit, RecoveryLimit, SelfReviewLimit int
 	ReagentModel, IragentModel, ReagentEffort, IragentEffort   string
 	Gate                                                       string
@@ -204,6 +204,8 @@ func parseRequest(args []string) (request, error) {
 			r.Abandon = value
 		case "resume":
 			r.Resume = value
+		case "retire-failed":
+			r.RetireFailed = value
 		case "reason":
 			r.Reason = value
 		case "review-limit":
@@ -251,7 +253,7 @@ func parseRequest(args []string) (request, error) {
 		}
 	}
 	if r.Command == "status" {
-		for _, name := range []string{"codex", "answer", "text", "choice", "answer-file", "authorize", "approve", "extend", "defer", "abandon", "resume", "reason", "review-limit", "dispatch-limit", "recovery-limit", "self-review-limit", "reagent-model", "iragent-model", "reagent-effort", "iragent-effort", "gate", "turn-timeout", "stall-timeout"} {
+		for _, name := range []string{"codex", "answer", "text", "choice", "answer-file", "authorize", "approve", "extend", "defer", "abandon", "resume", "retire-failed", "reason", "review-limit", "dispatch-limit", "recovery-limit", "self-review-limit", "reagent-model", "iragent-model", "reagent-effort", "iragent-effort", "gate", "turn-timeout", "stall-timeout"} {
 			if seen[name] {
 				return r, fmt.Errorf("status does not accept --%s", name)
 			}
@@ -262,7 +264,7 @@ func parseRequest(args []string) (request, error) {
 		return r, nil
 	}
 	actions := 0
-	for _, value := range []string{r.Answer, r.Authorize, r.Approve, r.Extend, r.Defer, r.Abandon, r.Resume} {
+	for _, value := range []string{r.Answer, r.Authorize, r.Approve, r.Extend, r.Defer, r.Abandon, r.Resume, r.RetireFailed} {
 		if value != "" {
 			actions++
 		}
@@ -621,6 +623,10 @@ func nextCommand(o outcome) string {
 	case "maintenance_pending", "in_progress", "stopped_safely", "recovery_required":
 		return "concoct run"
 	case "startup_failed":
+		if s.TaskID == "" && s.RunID != "" && s.Recovery != nil && s.Dispatch != nil && len(s.Dispatch.Attempts) == 1 && s.Dispatch.Attempts[0].ID == s.Recovery.AttemptID && s.Dispatch.Attempts[0].Status == "failed" && s.Dispatch.Attempts[0].TurnID == "" {
+			return "concoct run --retire-failed " + s.RunID
+		}
+	case "retired_failed_selection":
 		return ""
 	case "ready_for_independent_review":
 		return "concoct run"
@@ -648,7 +654,7 @@ func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'
 
 func exitCode(disposition string) int {
 	switch disposition {
-	case "completed", "no_suitable_work", "idle":
+	case "completed", "no_suitable_work", "idle", "retired_failed_selection":
 		return 0
 	case "decision_required":
 		return 10
@@ -681,6 +687,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "       concoct run --authorize DISPATCH | --approve ACCEPTANCE")
 	fmt.Fprintln(w, "       concoct run --extend TASK (--dispatch-limit N|--review-limit N|--recovery-limit N)")
 	fmt.Fprintln(w, "       concoct run --defer TASK --reason TEXT | --abandon TASK --reason TEXT | --resume TASK")
+	fmt.Fprintln(w, "       concoct run --retire-failed RUN (only a definitely failed unclaimed selection)")
 	fmt.Fprintln(w, "Fresh run options: --reagent-model MODEL --iragent-model MODEL --reagent-effort EFFORT --iragent-effort EFFORT --gate ACTIVITY[,ACTIVITY] --turn-timeout DURATION --stall-timeout DURATION")
 	fmt.Fprintln(w, "Use help for this summary. Workflow commands integrate locally; they never push or publish.")
 }

@@ -415,10 +415,13 @@ func TestCLIInvalidResponseSchemaIsDefiniteStartupFailure(t *testing.T) {
 			t.Fatalf("missing %q: %s", want, out.String())
 		}
 	}
-	for _, hidden := range []string{"response_format", "provider diagnostic tail", "Next: concoct run", "uncertain", "needs inspection"} {
+	for _, hidden := range []string{"response_format", "provider diagnostic tail", "uncertain", "needs inspection"} {
 		if strings.Contains(out.String(), hidden) || strings.Contains(errs.String(), hidden) {
 			t.Fatalf("raw rejection or retry advice leaked: %s %s", out.String(), errs.String())
 		}
+	}
+	if strings.Contains(out.String(), "Next: concoct run --repo") {
+		t.Fatalf("unchanged retry was recommended: %s", out.String())
 	}
 	snapshot, err := store.Status()
 	if err != nil || snapshot.Recovery == nil || snapshot.Recovery.Stage != activework.InvalidResponseSchemaStage || len(snapshot.Dispatch.Attempts) != 1 || snapshot.Dispatch.Attempts[0].Status != "failed" || snapshot.Dispatch.Attempts[0].TurnID != "" {
@@ -433,12 +436,57 @@ func TestCLIInvalidResponseSchemaIsDefiniteStartupFailure(t *testing.T) {
 		t.Fatalf("full provider error was not retained: %q, %v", diagnostic, err)
 	}
 	out.Reset()
-	if code := run(context.Background(), args, &out, &errs, ops); code != 2 || fake.turns != 1 || !strings.Contains(out.String(), "Correct Concoct's code") || strings.Contains(out.String(), "Next: concoct run") {
+	if code := run(context.Background(), args, &out, &errs, ops); code != 2 || fake.turns != 1 || !strings.Contains(out.String(), "Correct Concoct's code") || !strings.Contains(out.String(), "--retire-failed "+snapshot.RunID) {
 		t.Fatalf("unchanged retry was recommended or dispatched: code %d turns %d out %s", code, fake.turns, out.String())
 	}
 	out.Reset()
-	if code := run(context.Background(), []string{"status", "--json", "--repo", repo, "--root", root}, &out, &errs, ops); code != 2 || !strings.Contains(out.String(), `"disposition":"startup-failed"`) || !strings.Contains(out.String(), "Correct Concoct's code") || strings.Contains(out.String(), "response_format") || strings.Contains(out.String(), `"next":"concoct run`) {
+	if code := run(context.Background(), []string{"status", "--json", "--repo", repo, "--root", root}, &out, &errs, ops); code != 2 || !strings.Contains(out.String(), `"disposition":"startup-failed"`) || !strings.Contains(out.String(), "Correct Concoct's code") || strings.Contains(out.String(), "response_format") || !strings.Contains(out.String(), "--retire-failed "+snapshot.RunID) {
 		t.Fatalf("read-only status lost clear startup failure: code %d out %s", code, out.String())
+	}
+	retire := []string{"run", "--retire-failed", snapshot.RunID, "--repo", repo, "--root", root}
+	out.Reset()
+	if code := run(context.Background(), []string{"run", "--retire-failed", "wrong-run", "--repo", repo, "--root", root}, &out, &errs, ops); code != 2 {
+		t.Fatalf("stale retirement ID accepted: %d %s", code, out.String())
+	}
+	workspace := filepath.Join(root, "workspaces", snapshot.RunID)
+	if err := os.WriteFile(filepath.Join(workspace, "unexpected.txt"), []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := run(context.Background(), retire, &out, &errs, ops); code != 2 {
+		t.Fatalf("changed workspace was retired: %d %s", code, out.String())
+	}
+	if active, err := store.Status(); err != nil || !active.Active {
+		t.Fatalf("failed retirement released active run: %+v %v", active, err)
+	}
+	if err := os.Remove(filepath.Join(workspace, "unexpected.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "-C", workspace, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "unexpected commit").CombinedOutput(); err != nil {
+		t.Fatalf("advance unclaimed checkout: %v: %s", err, output)
+	}
+	out.Reset()
+	if code := run(context.Background(), retire, &out, &errs, ops); code != 2 {
+		t.Fatalf("advanced checkout was retired: %d %s", code, out.String())
+	}
+	if output, err := exec.Command("git", "-C", workspace, "checkout", "--detach", snapshot.ParentCommit).CombinedOutput(); err != nil {
+		t.Fatalf("restore test checkout: %v: %s", err, output)
+	}
+	out.Reset()
+	if code := run(context.Background(), retire, &out, &errs, ops); code != 0 || fake.turns != 1 || !strings.Contains(out.String(), "retired-failed-selection") {
+		t.Fatalf("failed selection retirement: code %d turns %d out %s err %s", code, fake.turns, out.String(), errs.String())
+	}
+	if active, err := store.Status(); err != nil || active.Active {
+		t.Fatalf("retirement retained ownership: %+v %v", active, err)
+	}
+	if _, err := os.Stat(files[0]); err != nil {
+		t.Fatalf("retirement removed provider diagnostic: %v", err)
+	}
+	fresh := &noWorkProvider{}
+	freshOps := liveOperations{Open: func(context.Context, string) (provider, error) { return fresh, nil }}
+	out.Reset()
+	if code := run(context.Background(), args, &out, &errs, freshOps); code != 0 || fresh.turns != 1 || !strings.Contains(out.String(), "no-suitable-work") {
+		t.Fatalf("fresh selection after correction: code %d turns %d out %s err %s", code, fresh.turns, out.String(), errs.String())
 	}
 }
 

@@ -220,6 +220,45 @@ func Abandon(ctx context.Context, cfg Config, taskID, reason string) (Result, er
 	return retire(ctx, cfg, taskID, "abandoned", reason)
 }
 
+// RetireFailedSelection releases a definitely failed unclaimed selection by
+// exact run ID. It retains run evidence and never touches a claimed task.
+func RetireFailedSelection(cfg Config, runID string) (Result, error) {
+	store, err := activework.Open(cfg.Repository, cfg.Root)
+	if err != nil {
+		return Result{}, err
+	}
+	owner, err := store.Acquire()
+	if err != nil {
+		return Result{}, err
+	}
+	defer owner.Close()
+	if err := owner.ValidateFailedSelection(runID); err != nil {
+		return Result{}, err
+	}
+	snapshot, err := store.Status()
+	if err != nil {
+		return Result{}, err
+	}
+	if err := verifyParentUnchanged(store, parentBinding{Branch: snapshot.ParentBranch, Commit: snapshot.ParentCommit}); err != nil {
+		return Result{}, err
+	}
+	workspace := filepath.Join(store.Root, "workspaces", runID)
+	if _, err := os.Lstat(workspace); err == nil {
+		if err := verifyResumeWorkspace(store, snapshot, workspace); err != nil {
+			return Result{}, err
+		}
+		if err := removeCleanWorkspace(store, workspace); err != nil {
+			return Result{}, err
+		}
+	} else if !os.IsNotExist(err) {
+		return Result{}, err
+	}
+	if err := owner.RetireFailedSelection(runID); err != nil {
+		return Result{}, err
+	}
+	return Result{Status: "retired_failed_selection", RunID: runID, Workspace: workspace, Summary: "Retired the failed unclaimed selection; its diagnostic evidence remains available. Start a fresh run after rebuilding corrected Concoct."}, nil
+}
+
 func ResumeDeferred(ctx context.Context, cfg Config, taskID string) (Result, error) {
 	store, err := activework.Open(cfg.Repository, cfg.Root)
 	if err != nil {

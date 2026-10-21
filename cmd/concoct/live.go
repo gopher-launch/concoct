@@ -180,6 +180,17 @@ func (l liveOperations) Do(ctx context.Context, req request, onEvent func(codexa
 	if req.Answer != "" && (!snapshot.Active || snapshot.Question == nil || snapshot.Question.ID != req.Answer) {
 		return outcome{Snapshot: snapshot}, fmt.Errorf("question ID does not match active request")
 	}
+	if req.RetireFailed != "" {
+		result, err := selection.RetireFailedSelection(selection.Config{Repository: req.Repository, Root: req.Root}, req.RetireFailed)
+		if err != nil {
+			return outcome{Snapshot: snapshot}, err
+		}
+		fresh, err := store.Status()
+		if err != nil {
+			return outcome{Snapshot: snapshot}, err
+		}
+		return outcome{Disposition: result.Status, Snapshot: fresh, Summary: result.Summary}, nil
+	}
 	if (req.Defer != "" || req.Abandon != "") && (!snapshot.Active || snapshot.TaskID != firstNonempty(req.Defer, req.Abandon)) {
 		return outcome{Snapshot: snapshot}, fmt.Errorf("disposition task does not match active work")
 	}
@@ -508,7 +519,7 @@ func normalize(value string) string {
 		return "in_progress"
 	case "integrated":
 		return "maintenance_pending"
-	case "deferred", "abandoned", "decision_required", "authorization_required", "no_suitable_work", "ready_for_acceptance", "stopped_safely", "stopped_abnormally", "recovery_required", "maintenance_pending":
+	case "deferred", "abandoned", "retired_failed_selection", "decision_required", "authorization_required", "no_suitable_work", "ready_for_acceptance", "stopped_safely", "stopped_abnormally", "recovery_required", "maintenance_pending":
 		return value
 	default:
 		return value

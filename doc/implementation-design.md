@@ -164,8 +164,11 @@ These commands are proposed syntax, not current binary behavior. Every returned 
 | `concoct run --defer TASK --reason TEXT` | Preserve resumable work and release active ownership |
 | `concoct run --abandon TASK --reason TEXT` | Preserve terminal disposition and release ownership without integrating |
 | `concoct run --resume TASK` | Explicitly reactivate deferred work when no other task owns the repository |
+| `concoct run --retire-failed RUN` | Retire an exact unclaimed selection whose only turn was definitively rejected before start; retain diagnostics and release ownership after checking the clean detached checkout |
 
 Ctrl-C requests graceful provider interruption in the foreground process. Do not add a daemon solely to support a second-process stop command. If cancellation cannot establish quiescence, report abnormal stop and retain uncertainty rather than claiming a safe stop. Defer/abandon are allowed only after execution is idle.
+
+An invalid response-schema rejection with no observed turn is a definite startup failure. Correct and rebuild Concoct before starting a fresh run. The exact run-ID retirement command applies only to a failed unclaimed selection; it leaves the provider diagnostic in external evidence and cannot retire claimed work or uncertain turns.
 
 A blocker includes requesting role, blocked objective, evidence/attempts, exact missing input or action, options/tradeoffs if useful, safe remaining work and next step. The operator can provide free text or external-action evidence. Persist the answer before dispatch; resume the requesting role by default. If an iragent answer requires source changes, route to reagent, then reassess the resulting candidate. Relevant decisions reach both roles automatically. An answer neither supplies an unrelated budget grant nor proves an external blocker is resolved; the agent verifies the actual condition.
 

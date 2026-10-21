@@ -358,6 +358,32 @@ func (o *Owner) EndUnclaimedSelection(summary string) error {
 	return removeSync(filepath.Join(o.store.dir, "active.json"))
 }
 
+// ValidateFailedSelection limits retirement to an unclaimed selection whose
+// sole turn was definitely rejected before it began.
+func (o *Owner) ValidateFailedSelection(runID string) error {
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	if st.RunID != runID || st.TaskID != "" || st.Phase != "selecting" || st.Stop != nil || st.Recovery == nil || st.Recovery.Stage != InvalidResponseSchemaStage || st.Dispatch == nil || len(st.Dispatch.Attempts) != 1 || st.Dispatch.Pending != nil || st.Question != nil || st.Candidate != nil || st.Integration != nil {
+		return fmt.Errorf("run is not a definitely failed unclaimed selection")
+	}
+	attempt := st.Dispatch.Attempts[0]
+	if attempt.ID != st.Recovery.AttemptID || attempt.Status != "failed" || !attempt.TurnRequested || attempt.TurnID != "" || attempt.Binding.Role != dispatch.Reagent || attempt.Binding.Activity != dispatch.Selection || attempt.Binding.TaskID != "" {
+		return fmt.Errorf("selection dispatch is not a definite pre-turn failure")
+	}
+	return nil
+}
+
+// RetireFailedSelection releases ownership after the clean checkout is
+// removed. The run and provider diagnostic remain in external evidence.
+func (o *Owner) RetireFailedSelection(runID string) error {
+	if err := o.ValidateFailedSelection(runID); err != nil {
+		return err
+	}
+	return removeSync(filepath.Join(o.store.dir, "active.json"))
+}
+
 func (o *Owner) begin(st state, task string) (string, error) {
 	if _, err := os.Stat(filepath.Join(o.store.dir, "active.json")); err == nil {
 		return "", fmt.Errorf("active run already exists")
