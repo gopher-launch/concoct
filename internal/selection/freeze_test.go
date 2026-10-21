@@ -102,6 +102,12 @@ func TestReadyFreezeCapturesUntrackedSourceAndOrdinaryCommit(t *testing.T) {
 			repo, external, policy := testRepo(t)
 			base, _ := gitOutput(repo, "rev-parse", "HEAD")
 			agent := readyAgent(t, repo, external, readyEvidence(), ordinaryCommit, true)
+			originalRun := agent.run
+			agent.run = func(prompt string, handler codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+				outcome, err := originalRun(prompt, handler)
+				outcome.FinalText = `{"disposition":"ready_for_review","summary":"ready for independent review","task_id":"APP-002","candidate":null,"findings":null,"question":null}`
+				return outcome, err
+			}
 			seen := false
 			agent.event = &codexapp.Event{Kind: "progress"}
 			result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent, OnEvent: func(event codexapp.Event) { seen = event.Kind == "progress" }})

@@ -846,6 +846,50 @@ func (o *Owner) HoldRecovery(issue RecoveryIssue) error {
 	return writeJSON(o.store.statePath(st.RunID), st)
 }
 
+const InvalidResponseSchemaStage = "invalid-response-schema"
+
+// FailResponseSchema records a provider rejection before any agent turn began.
+// The complete provider message stays in bound external evidence, while the
+// visible hold contains only a stable action for the operator.
+func (o *Owner) FailResponseSchema(attemptID, providerError string) error {
+	if providerError == "" || len(providerError) > maxEvidence {
+		return fmt.Errorf("invalid provider rejection evidence")
+	}
+	st, err := o.currentState()
+	if err != nil {
+		return err
+	}
+	role := ""
+	if st.Dispatch != nil {
+		for _, attempt := range st.Dispatch.Attempts {
+			if attempt.ID == attemptID && attempt.Status == "reserved" && attempt.TurnRequested && attempt.TurnID == "" {
+				role = string(attempt.Binding.Role)
+				break
+			}
+		}
+	}
+	if role == "" {
+		return fmt.Errorf("schema rejection lacks a reserved pre-turn dispatch")
+	}
+	if err := o.FinishDispatch(attemptID, "failed", nil); err != nil {
+		return err
+	}
+	st, err = o.currentState()
+	if err != nil {
+		return err
+	}
+	key := sha256.Sum256([]byte(attemptID))
+	relative := "evidence/provider-rejection-" + hex.EncodeToString(key[:12]) + ".txt"
+	if err := o.transitionFile(st, relative, providerError); err != nil {
+		return err
+	}
+	return o.HoldRecovery(RecoveryIssue{
+		AttemptID: attemptID, Role: role, Stage: InvalidResponseSchemaStage,
+		Operation: "turn/start", Reason: "Concoct supplied an invalid response schema; the agent could not start. Correct Concoct's code and rebuild; this run remains paused.",
+		EvidenceRef: "runs/" + st.RunID + "/" + relative,
+	})
+}
+
 func validateContent(content string) error {
 	if strings.TrimSpace(content) == "" || len(content) > maxEvidence/2 || strings.Contains(content, checkpointStart) || strings.Contains(content, checkpointEnd) || strings.Contains(content, decisionsStart) || strings.Contains(content, decisionsEnd) {
 		return fmt.Errorf("empty, oversized, or reserved evidence content")

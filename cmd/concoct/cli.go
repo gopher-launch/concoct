@@ -98,6 +98,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ops opera
 	if errors.Is(err, activework.ErrOwned) {
 		result.Disposition = "busy"
 	}
+	if result.Disposition == "startup_failed" {
+		result.Summary = "Concoct could not start the agent because it supplied an invalid response schema. Correct Concoct's code and rebuild; this run remains paused."
+	}
 	if err != nil {
 		result.Summary = err.Error()
 	}
@@ -457,21 +460,29 @@ func printStatus(w io.Writer, s statusView) {
 		fmt.Fprintf(w, "Task %s; phase %s", s.TaskID, publicName(s.Phase))
 	}
 	if s.Hold != "" {
-		fmt.Fprintf(w, "; paused: %s", pauseReason(s.Hold))
+		reason := pauseReason(s.Hold)
+		if s.Recovery != nil && s.Recovery.Stage == activework.InvalidResponseSchemaStage {
+			reason = "agent could not start"
+		}
+		fmt.Fprintf(w, "; paused: %s", reason)
 	}
 	fmt.Fprintln(w)
-	if s.PendingRequest != "" {
+	if s.PendingRequest != "" && (s.Recovery == nil || s.Recovery.Stage != activework.InvalidResponseSchemaStage) {
 		fmt.Fprintln(w, "Pending action:", s.PendingRequest)
 	}
 	if s.Recovery != nil {
-		if s.Recovery.AgentResult != "" {
-			fmt.Fprintln(w, "Agent reported:", s.Recovery.AgentResult)
+		if s.Recovery.Stage == activework.InvalidResponseSchemaStage {
+			fmt.Fprintln(w, "Diagnostic:", s.Recovery.EvidenceRef)
+		} else {
+			if s.Recovery.AgentResult != "" {
+				fmt.Fprintln(w, "Agent reported:", s.Recovery.AgentResult)
+			}
+			fmt.Fprintln(w, "Concoct could not continue:", s.Recovery.Reason)
+			if s.Recovery.EvidenceRef != "" {
+				fmt.Fprintln(w, "Details:", s.Recovery.EvidenceRef)
+			}
+			fmt.Fprintln(w, "The task and source remain in place. Inspect the details, then run the displayed next command.")
 		}
-		fmt.Fprintln(w, "Concoct could not continue:", s.Recovery.Reason)
-		if s.Recovery.EvidenceRef != "" {
-			fmt.Fprintln(w, "Details:", s.Recovery.EvidenceRef)
-		}
-		fmt.Fprintln(w, "The task and source remain in place. Inspect the details, then run the displayed next command.")
 	}
 	if s.Candidate != "" {
 		fmt.Fprintln(w, "Candidate:", s.Candidate)
@@ -609,6 +620,8 @@ func nextCommand(o outcome) string {
 		}
 	case "maintenance_pending", "in_progress", "stopped_safely", "recovery_required":
 		return "concoct run"
+	case "startup_failed":
+		return ""
 	case "ready_for_independent_review":
 		return "concoct run"
 	}

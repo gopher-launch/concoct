@@ -2,6 +2,7 @@ package selection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -39,6 +40,10 @@ func Continue(ctx context.Context, cfg Config) (Result, error) {
 		return result, fmt.Errorf("no active run to continue")
 	}
 	result = Result{RunID: snapshot.RunID, TaskID: snapshot.TaskID, Workspace: filepath.Join(store.Root, "workspaces", snapshot.RunID), Snapshot: snapshot}
+	if snapshot.Recovery != nil && snapshot.Recovery.Stage == activework.InvalidResponseSchemaStage {
+		result.Status = "startup_failed"
+		return result, nil
+	}
 	if snapshot.Integration != nil {
 		result.Status = "integration_pending"
 		if snapshot.Integration.Status == "integrated" {
@@ -680,6 +685,9 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 		}
 	})
 	stopReason := finishTurn()
+	if stopReason == nil && outcome.TurnID == "" && errors.Is(turnErr, codexapp.ErrInvalidResponseSchema) {
+		return failedResponseSchema(owner, store, result, attemptID, turnErr)
+	}
 	if outcome.TurnID != "" && observeErr == nil {
 		observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
 	}

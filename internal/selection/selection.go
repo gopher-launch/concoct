@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -152,6 +153,9 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 		}
 	})
 	stopReason := finishTurn()
+	if stopReason == nil && outcome.TurnID == "" && errors.Is(turnErr, codexapp.ErrInvalidResponseSchema) {
+		return failedResponseSchema(owner, store, result, attemptID, turnErr)
+	}
 	if outcome.TurnID != "" && observeErr == nil {
 		observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
 	}
@@ -316,6 +320,16 @@ func failedSelectionLaunch(owner *activework.Owner, store *activework.Store, res
 		return result, fmt.Errorf("reagent launch failed: %w; retain work: %v", cause, err)
 	}
 	return result, fmt.Errorf("reagent launch failed: %w", cause)
+}
+
+func failedResponseSchema(owner *activework.Owner, store *activework.Store, result Result, attemptID string, cause error) (Result, error) {
+	if err := owner.FailResponseSchema(attemptID, cause.Error()); err != nil {
+		return result, err
+	}
+	result.Status = "startup_failed"
+	var err error
+	result.Snapshot, err = store.Status()
+	return result, err
 }
 
 func invalidCompletedResult(owner *activework.Owner, store *activework.Store, result *Result, reason, attemptID string, cause error) (Result, error) {

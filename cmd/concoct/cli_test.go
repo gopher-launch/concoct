@@ -390,6 +390,58 @@ func TestAuthorizationGateAndExactIDWithoutProvider(t *testing.T) {
 
 type noWorkProvider struct{ starts, turns, closed int }
 
+type schemaRejectProvider struct{ *noWorkProvider }
+
+func (p *schemaRejectProvider) Agent() selection.Agent { return p }
+func (p *schemaRejectProvider) Reviewer() review.Agent { return p }
+
+func (p *schemaRejectProvider) RunTurn(context.Context, string, string, codexapp.RoleSettings, codexapp.ToolHandler, func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+	p.turns++
+	return codexapp.TurnOutcome{}, fmt.Errorf("%w: app-server turn/start: -32600 Invalid schema for response_format 'codex_output_schema': 'required' must include task_id; %sprovider diagnostic tail", codexapp.ErrInvalidResponseSchema, strings.Repeat("schema context; ", 25))
+}
+
+func TestCLIInvalidResponseSchemaIsDefiniteStartupFailure(t *testing.T) {
+	repo, root, store := cliRepo(t)
+	writeCLIProject(t, repo)
+	fake := &schemaRejectProvider{noWorkProvider: &noWorkProvider{}}
+	ops := liveOperations{Open: func(context.Context, string) (provider, error) { return fake, nil }}
+	args := []string{"run", "--repo", repo, "--root", root}
+	var out, errs bytes.Buffer
+	if code := run(context.Background(), args, &out, &errs, ops); code != 2 || fake.turns != 1 {
+		t.Fatalf("startup failure: code %d turns %d out %s err %s", code, fake.turns, out.String(), errs.String())
+	}
+	for _, want := range []string{"Concoct verified: startup-failed", "could not start the agent", "invalid response schema", "Correct Concoct's code", "paused: agent could not start", "Diagnostic:"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q: %s", want, out.String())
+		}
+	}
+	for _, hidden := range []string{"response_format", "provider diagnostic tail", "Next: concoct run", "uncertain", "needs inspection"} {
+		if strings.Contains(out.String(), hidden) || strings.Contains(errs.String(), hidden) {
+			t.Fatalf("raw rejection or retry advice leaked: %s %s", out.String(), errs.String())
+		}
+	}
+	snapshot, err := store.Status()
+	if err != nil || snapshot.Recovery == nil || snapshot.Recovery.Stage != activework.InvalidResponseSchemaStage || len(snapshot.Dispatch.Attempts) != 1 || snapshot.Dispatch.Attempts[0].Status != "failed" || snapshot.Dispatch.Attempts[0].TurnID != "" {
+		t.Fatalf("rejection was not bound as a failed pre-turn attempt: %+v, %v", snapshot, err)
+	}
+	files, err := filepath.Glob(filepath.Join(root, "repos", "*", snapshot.Recovery.EvidenceRef))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("diagnostic file: %v, %v", files, err)
+	}
+	diagnostic, err := os.ReadFile(files[0])
+	if err != nil || !strings.Contains(string(diagnostic), "provider diagnostic tail") || !strings.Contains(string(diagnostic), "required' must include task_id") {
+		t.Fatalf("full provider error was not retained: %q, %v", diagnostic, err)
+	}
+	out.Reset()
+	if code := run(context.Background(), args, &out, &errs, ops); code != 2 || fake.turns != 1 || !strings.Contains(out.String(), "Correct Concoct's code") || strings.Contains(out.String(), "Next: concoct run") {
+		t.Fatalf("unchanged retry was recommended or dispatched: code %d turns %d out %s", code, fake.turns, out.String())
+	}
+	out.Reset()
+	if code := run(context.Background(), []string{"status", "--json", "--repo", repo, "--root", root}, &out, &errs, ops); code != 2 || !strings.Contains(out.String(), `"disposition":"startup-failed"`) || !strings.Contains(out.String(), "Correct Concoct's code") || strings.Contains(out.String(), "response_format") || strings.Contains(out.String(), `"next":"concoct run`) {
+		t.Fatalf("read-only status lost clear startup failure: code %d out %s", code, out.String())
+	}
+}
+
 func (p *noWorkProvider) Agent() selection.Agent                                 { return p }
 func (p *noWorkProvider) Reviewer() review.Agent                                 { return p }
 func (p *noWorkProvider) PrepareIdle(context.Context, activework.Snapshot) error { return nil }
@@ -412,7 +464,7 @@ func (p *noWorkProvider) RunTurn(_ context.Context, _ string, _ string, _ codexa
 		onEvent(codexapp.Event{Kind: "turn/started", ThreadID: "fresh-thread", TurnID: "turn-1"})
 		onEvent(codexapp.Event{Kind: "item/agentMessage/delta", ThreadID: "fresh-thread", TurnID: "turn-1", Raw: json.RawMessage(`{"delta":"No task chosen."}`)})
 	}
-	return codexapp.TurnOutcome{ThreadID: "fresh-thread", TurnID: "turn-1", Status: "completed", FinalText: `{"disposition":"no_suitable_work","summary":"No work selected."}`}, nil
+	return codexapp.TurnOutcome{ThreadID: "fresh-thread", TurnID: "turn-1", Status: "completed", FinalText: `{"disposition":"no_suitable_work","summary":"No work selected.","task_id":null,"candidate":null,"findings":null,"question":null}`}, nil
 }
 func (p *noWorkProvider) Idle(context.Context, string) error { return nil }
 

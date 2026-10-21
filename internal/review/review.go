@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -238,6 +239,14 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		}
 	})
 	stopReason := finishTurn()
+	if stopReason == nil && outcome.TurnID == "" && errors.Is(turnErr, codexapp.ErrInvalidResponseSchema) {
+		if err := owner.FailResponseSchema(binding.AttemptID, turnErr.Error()); err != nil {
+			return result, err
+		}
+		result.Status = "startup_failed"
+		result.Snapshot, err = store.Status()
+		return result, err
+	}
 	if outcome.TurnID != "" && observeErr == nil {
 		observeErr = owner.ObserveDispatchTurn(binding.AttemptID, outcome.TurnID)
 	}

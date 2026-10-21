@@ -116,7 +116,7 @@ stateDiagram-v2
     Completed --> [*]
 ```
 
-Each agent returns one schema-defined JSON result with a disposition, human summary and, where relevant, task ID, candidate ID, findings or an explicit operator question. Concoct validates the shape and any supplied identity against the active binding. It preserves summaries and findings as agent narrative without inferring engineering success from their wording. Task/review prose remains in the evidence files.
+Each agent returns one schema-defined JSON result with a disposition, human summary and, where relevant, task ID, candidate ID, findings or an explicit operator question. The outbound provider schema requires every declared key in each object, closes additional properties and uses nullable types for fields unused by a disposition. Concoct treats null optional values as absent, validates the result and any supplied identity against the active binding. It preserves summaries and findings as agent narrative without inferring engineering success from their wording. Task/review prose remains in the evidence files.
 
 | Role result | Controller action |
 | --- | --- |
@@ -129,7 +129,7 @@ Each agent returns one schema-defined JSON result with a disposition, human summ
 
 **Display agent progress and responses as they arrive throughout the turn.** Do not wait for completion or result validation to print them. Agent statements such as “implementation complete” may be displayed immediately as agent-reported progress; they do not by themselves authorize Concoct to advance the execution phase.
 
-For a state transition such as freezing a candidate or accepting a review verdict, Concoct requires the provider's completed-turn receipt, the valid role disposition and its mechanical prerequisites. These checks govern state transitions, not the stream of terminal output. Provider completion alone is not an engineering verdict. Missing/malformed results permit a bounded clarification turn when safe; they never imply approval. Provider failure, disconnection and interruption are execution outcomes, not invented agent verdicts.
+For a state transition such as freezing a candidate or accepting a review verdict, Concoct requires the provider's completed-turn receipt, the valid role disposition and its mechanical prerequisites. These checks govern state transitions, not the stream of terminal output. Provider completion alone is not an engineering verdict. Missing/malformed results permit a bounded clarification turn when safe; they never imply approval. A provider rejection of Concoct's response schema before a turn starts is a definite failed launch, with the full provider error retained in external diagnostic evidence and a code correction named to the operator. Provider failure, disconnection and interruption are execution outcomes, not invented agent verdicts.
 
 Under the initial dispatch policy, readiness flows directly into independent review, and findings flow directly into correction. **There is no first-iragent authorization gate.** The CLI returns readiness separately only when a configured policy pauses review; it displays both candidate readiness and the missing authorization.
 

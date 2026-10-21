@@ -2,6 +2,7 @@ package selection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,10 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 			}
 		})
 		stopReason := finishTurn()
+		if stopReason == nil && outcome.TurnID == "" && errors.Is(turnErr, codexapp.ErrInvalidResponseSchema) {
+			cancelTurn()
+			return failedResponseSchema(owner, store, result, attemptID, turnErr)
+		}
 		if outcome.TurnID != "" && observeErr == nil {
 			observeErr = owner.ObserveDispatchTurn(attemptID, outcome.TurnID)
 		}

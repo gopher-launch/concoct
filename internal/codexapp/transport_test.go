@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -322,6 +323,54 @@ func TestZeroTurnResumePreservesOtherFailures(t *testing.T) {
 			t.Fatalf("zero-turn timeout=%v", err)
 		}
 	})
+}
+
+func TestTurnStartSendsCompatibleRoleSchemaAndClassifiesRejection(t *testing.T) {
+	for _, role := range []string{"reagent", "iragent"} {
+		t.Run(role, func(t *testing.T) {
+			var sent json.RawMessage
+			s := fake(t, func(s *fakeServer, msg envelope) {
+				switch msg.Method {
+				case "thread/resume":
+					s.reply(msg, threadReplyValue("dangerFullAccess"))
+				case "turn/start":
+					var params map[string]json.RawMessage
+					if err := json.Unmarshal(msg.Params, &params); err != nil {
+						t.Error(err)
+					}
+					sent = params["outputSchema"]
+					s.rpcError(msg, "Invalid schema for response_format 'codex_output_schema': 'required' must include task_id")
+				}
+			})
+			profile := settings()
+			profile.Role = role
+			if _, err := s.client.ResumeThread(testContext(t), "thread-1", true, profile); err != nil {
+				t.Fatal(err)
+			}
+			outcome, err := s.client.RunRoleTurn(testContext(t), "thread-1", "work", profile, nil)
+			if !errors.Is(err, ErrInvalidResponseSchema) || errors.Is(err, ErrUncertainDispatch) || outcome.TurnID != "" {
+				t.Fatalf("rejected request = %+v, %v", outcome, err)
+			}
+			var providerErr *rpcError
+			if !errors.As(err, &providerErr) || !strings.Contains(providerErr.Message, "task_id") {
+				t.Fatalf("provider diagnostic was lost: %v", err)
+			}
+			if len(sent) == 0 {
+				t.Fatal("turn/start omitted outputSchema")
+			}
+			actual, err := schemaObject(sent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := checkProviderSchema(actual, "$turn/start.outputSchema"); err != nil {
+				t.Fatal(err)
+			}
+			want, _ := schemaObject(RoleResultSchema)
+			if !reflect.DeepEqual(actual, want) {
+				t.Fatal("turn/start changed the schema used by role results")
+			}
+		})
+	}
 }
 
 func TestMalformedHostRequestCannotCompleteCleanly(t *testing.T) {

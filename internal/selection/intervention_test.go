@@ -15,10 +15,13 @@ import (
 )
 
 func blockerResult(sourceChange bool) string {
-	result, _ := json.Marshal(codexapp.RoleResult{Disposition: "decision_required", Summary: "operator input needed", Question: &codexapp.RoleQuestion{
-		Objective: "Complete APP-002", Evidence: "Tried both documented inputs; neither names a mode.", Missing: "Choose the mode.", SafeWork: "Tests can be read.", NextStep: "Resume requester after an answer.", SourceChange: sourceChange,
-		Options: []codexapp.RoleQuestionOption{{ID: "safe", Description: "Use safe mode", Tradeoff: "Slower execution"}},
-	}})
+	result, _ := json.Marshal(map[string]any{
+		"disposition": "decision_required", "summary": "operator input needed", "task_id": "APP-002", "candidate": nil, "findings": nil,
+		"question": map[string]any{
+			"objective": "Complete APP-002", "evidence": "Tried both documented inputs; neither names a mode.", "missing": "Choose the mode.", "safe_work": "Tests can be read.", "next_step": "Resume requester after an answer.", "source_change": sourceChange, "scope_change": nil,
+			"options": []codexapp.RoleQuestionOption{{ID: "safe", Description: "Use safe mode", Tradeoff: "Slower execution"}},
+		},
+	})
 	return string(result)
 }
 

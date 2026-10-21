@@ -17,12 +17,13 @@ import (
 const TestedVersion = "0.147.0"
 
 var (
-	ErrDisconnected        = errors.New("Codex app-server disconnected")
-	ErrProvisionalThread   = errors.New("metadata-only thread has no confirmed turn history")
-	ErrMissingRollout      = errors.New("provider thread rollout is unavailable")
-	ErrMalformedRoleResult = errors.New("malformed role result")
-	ErrUncertainCallback   = errors.New("host callback acknowledgment is uncertain")
-	ErrUncertainDispatch   = errors.New("turn dispatch acknowledgment is uncertain")
+	ErrDisconnected          = errors.New("Codex app-server disconnected")
+	ErrProvisionalThread     = errors.New("metadata-only thread has no confirmed turn history")
+	ErrMissingRollout        = errors.New("provider thread rollout is unavailable")
+	ErrMalformedRoleResult   = errors.New("malformed role result")
+	ErrUncertainCallback     = errors.New("host callback acknowledgment is uncertain")
+	ErrUncertainDispatch     = errors.New("turn dispatch acknowledgment is uncertain")
+	ErrInvalidResponseSchema = errors.New("provider rejected Concoct response schema")
 )
 
 type rpcReply struct {
@@ -360,7 +361,28 @@ type RoleResult struct {
 
 // RoleResultSchema asks the provider for the same small coordination result
 // that ParseRoleResult validates on return. Host callbacks remain separate.
-var RoleResultSchema = json.RawMessage(`{"type":"object","properties":{"disposition":{"type":"string"},"summary":{"type":"string"},"task_id":{"type":"string"},"candidate":{"type":"string"},"findings":{"type":"array","items":{"type":"string"}},"question":{"type":"object","properties":{"objective":{"type":"string"},"evidence":{"type":"string"},"missing":{"type":"string"},"safe_work":{"type":"string"},"next_step":{"type":"string"},"source_change":{"type":"boolean"},"scope_change":{"type":"boolean"},"options":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"description":{"type":"string"},"tradeoff":{"type":"string"}},"required":["id","description","tradeoff"],"additionalProperties":false}}},"required":["objective","evidence","missing","safe_work","next_step"],"additionalProperties":false}},"required":["disposition","summary"],"additionalProperties":false}`)
+var RoleResultSchema = json.RawMessage(`{
+  "type":"object",
+  "properties":{
+    "disposition":{"type":"string"},
+    "summary":{"type":"string"},
+    "task_id":{"type":["string","null"]},
+    "candidate":{"type":["string","null"]},
+    "findings":{"type":["array","null"],"items":{"type":"string"}},
+    "question":{"type":["object","null"],"properties":{
+      "objective":{"type":"string"},
+      "evidence":{"type":"string"},
+      "missing":{"type":"string"},
+      "safe_work":{"type":"string"},
+      "next_step":{"type":"string"},
+      "source_change":{"type":["boolean","null"]},
+      "scope_change":{"type":["boolean","null"]},
+      "options":{"type":["array","null"],"items":{"type":"object","properties":{
+        "id":{"type":"string"},"description":{"type":"string"},"tradeoff":{"type":"string"}
+      },"required":["id","description","tradeoff"],"additionalProperties":false}}
+    },"required":["objective","evidence","missing","safe_work","next_step","source_change","scope_change","options"],"additionalProperties":false}
+  },"required":["disposition","summary","task_id","candidate","findings","question"],"additionalProperties":false
+}`)
 
 type RoleQuestion struct {
 	Objective    string               `json:"objective"`

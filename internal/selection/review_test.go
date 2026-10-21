@@ -266,6 +266,22 @@ func TestStructuredReviewApprovesWithoutAssessmentCallback(t *testing.T) {
 	}
 }
 
+func TestReviewerSchemaRejectionKeepsCandidateWithoutUncertainTurn(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	reviewer := &fakeReviewer{}
+	reviewer.run = func(_ string, _ codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+		return codexapp.TurnOutcome{}, fmt.Errorf("%w: app-server turn/start: invalid schema for response_format", codexapp.ErrInvalidResponseSchema)
+	}
+	result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
+	if err != nil || result.Status != "startup_failed" || result.Snapshot.Candidate == nil || result.Snapshot.Review == nil || result.Snapshot.Review.Verdict != "" || result.Snapshot.Recovery == nil || result.Snapshot.Recovery.Role != "iragent" || result.Snapshot.Recovery.Stage != activework.InvalidResponseSchemaStage {
+		t.Fatalf("reviewer rejection lost candidate binding: %+v, %v", result, err)
+	}
+	attempts := result.Snapshot.Dispatch.Attempts
+	if len(attempts) != 2 || attempts[1].Status != "failed" || attempts[1].TurnID != "" || len(result.Snapshot.Dispatch.Assessments) != 0 {
+		t.Fatalf("rejected review consumed an uncertain turn or assessment: %+v", result.Snapshot.Dispatch)
+	}
+}
+
 func TestStructuredReviewRejectsWrongCandidateAndMissingFindings(t *testing.T) {
 	for _, tc := range []struct {
 		final    string

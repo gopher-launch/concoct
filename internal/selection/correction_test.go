@@ -86,7 +86,7 @@ func TestCorrectedCandidateReturnsToSameReviewer(t *testing.T) {
 		if snapshot.Review.Number == 2 {
 			turn, verdict = "review-turn-2", "approved"
 		}
-		final := `{"disposition":"` + verdict + `","summary":"checked","task_id":"APP-002","candidate":"` + snapshot.Candidate.Commit + `"}`
+		final := `{"disposition":"` + verdict + `","summary":"checked","task_id":"APP-002","candidate":"` + snapshot.Candidate.Commit + `","findings":null,"question":null}`
 		if verdict == "changes_requested" {
 			args, _ := json.Marshal(map[string]string{"content": "findings: none"})
 			response, err := handler(context.Background(), codexapp.ToolCall{Role: "iragent", ThreadID: "reviewer-thread", TurnID: turn, CallID: "assessment-one", Tool: "save_assessment", Arguments: args})
@@ -96,7 +96,7 @@ func TestCorrectedCandidateReturnsToSameReviewer(t *testing.T) {
 			if err := response.Commit(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			final = `{"disposition":"changes_requested","summary":"checked","task_id":"APP-002","candidate":"` + snapshot.Candidate.Commit + `","findings":["Please correct feature.go"]}`
+			final = `{"disposition":"changes_requested","summary":"checked","task_id":"APP-002","candidate":"` + snapshot.Candidate.Commit + `","findings":["Please correct feature.go"],"question":null}`
 		}
 		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: turn, Status: "completed", FinalText: final}, nil
 	}

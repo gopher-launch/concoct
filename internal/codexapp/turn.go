@@ -111,6 +111,11 @@ func (r *turnRun) emit(event Event) {
 	}
 }
 
+// RunRoleTurn sends the shared reagent/iragent response schema.
+func (c *Client) RunRoleTurn(ctx context.Context, threadID, prompt string, settings RoleSettings, onEvent func(Event)) (TurnOutcome, error) {
+	return c.RunTurn(ctx, threadID, prompt, settings, RoleResultSchema, onEvent)
+}
+
 // RunTurn streams events as received, including while the provider is still
 // executing. A completed provider turn is not an approved role result.
 func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings RoleSettings, outputSchema json.RawMessage, onEvent func(Event)) (result TurnOutcome, resultErr error) {
@@ -202,7 +207,12 @@ func (c *Client) RunTurn(ctx context.Context, threadID, prompt string, settings 
 				return result, fmt.Errorf("%w: %w", ErrUncertainDispatch, reply.Err)
 			}
 			if reply.Error != nil {
-				return result, fmt.Errorf("app-server turn/start: %d %s", reply.Error.Code, reply.Error.Message)
+				providerErr := &rpcError{Method: "turn/start", Code: reply.Error.Code, Message: reply.Error.Message}
+				message := strings.ToLower(reply.Error.Message)
+				if strings.Contains(message, "invalid schema") && (strings.Contains(message, "response_format") || strings.Contains(message, "response schema") || strings.Contains(message, "output schema")) {
+					return result, fmt.Errorf("%w: %w", ErrInvalidResponseSchema, providerErr)
+				}
+				return result, providerErr
 			}
 			var value struct {
 				Turn struct {

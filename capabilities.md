@@ -120,3 +120,8 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 - Fresh runs can set retained elapsed and inactivity limits. Exceeding one during agent execution cancels the turn and invokes owned-process cessation, with the exceeded limit retained as the operator-facing reason. The timers end when the agent turn returns, before dispatch bookkeeping. Human status gives plain pause reasons and next actions; exact reviewed-candidate approval still authorizes local integration only.
 
 CON-042 remains a frozen, undelivered historical reference.
+
+## CON-063 — Provider-compatible role results
+
+- Reagent and iragent use one outbound structured result schema with all declared object properties required, closed objects and nullable fields for disposition-specific values, including nested question options and flags. Parsed nulls follow the existing empty-value handoffs for no work, engineering, questions, review, correction and approval.
+- A provider rejection of that response schema before a turn starts records a failed dispatch and retains the complete provider error in bound external diagnostic evidence. Human and JSON status identify Concoct's invalid schema as the cause and call for a code correction while the run remains paused; they do not expose raw provider error text or suggest an unchanged retry.

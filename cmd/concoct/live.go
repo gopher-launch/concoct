@@ -186,6 +186,9 @@ func (l liveOperations) Do(ctx context.Context, req request, onEvent func(codexa
 	if (req.Defer != "" || req.Abandon != "") && snapshot.Integration != nil {
 		return outcome{Snapshot: snapshot}, fmt.Errorf("integrated work requires completion maintenance")
 	}
+	if snapshot.Active && snapshot.Recovery != nil && snapshot.Recovery.Stage == activework.InvalidResponseSchemaStage && req.Defer == "" && req.Abandon == "" {
+		return outcome{Disposition: "startup_failed", Snapshot: snapshot}, nil
+	}
 	if req.Resume != "" && snapshot.Active {
 		return outcome{Snapshot: snapshot}, fmt.Errorf("another run owns the repository")
 	}
@@ -453,6 +456,9 @@ func parseGates(value string) (dispatch.GatePolicy, error) {
 }
 
 func disposition(s activework.Snapshot) string {
+	if s.Recovery != nil && s.Recovery.Stage == activework.InvalidResponseSchemaStage {
+		return "startup_failed"
+	}
 	if s.PendingStart {
 		return "recovery_required"
 	}

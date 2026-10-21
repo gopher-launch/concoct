@@ -68,7 +68,7 @@ func (a CodexAgent) RunTurn(ctx context.Context, threadID, prompt string, settin
 			}
 		}
 	}()
-	outcome, err := a.Client.RunTurn(ctx, threadID, prompt, settings, codexapp.RoleResultSchema, onEvent)
+	outcome, err := a.Client.RunRoleTurn(ctx, threadID, prompt, settings, onEvent)
 	close(done)
 	_, _ = a.Owned.Capture()
 	return outcome, err
