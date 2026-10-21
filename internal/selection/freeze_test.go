@@ -167,49 +167,27 @@ func TestReadyFreezeCapturesUntrackedSourceAndOrdinaryCommit(t *testing.T) {
 	}
 }
 
-func TestReadyRejectsIncompleteChecksAndReconciliation(t *testing.T) {
+func TestReadyUsesAgentJudgmentForEvidenceAndDocumentation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		evidence  ReadyCheckpoint
 		reconcile bool
-		want      string
 		extra     []RequiredCheck
 	}{
-		{name: "missing mandatory check", evidence: func() ReadyCheckpoint { e := readyEvidence(); e.Checks = e.Checks[:3]; return e }(), reconcile: true, want: "mandatory check"},
-		{name: "configured check", evidence: readyEvidence(), reconcile: true, want: "mandatory check", extra: []RequiredCheck{{Command: "make lint", Source: "AGENTS.md"}}},
-		{name: "skipped tests", evidence: func() ReadyCheckpoint {
+		{name: "paraphrased evidence", evidence: func() ReadyCheckpoint {
 			e := readyEvidence()
-			e.Checks[1].Command = "go test -run '^$' ./..."
+			e.Criteria = []CriterionEvidence{{Criterion: "The task stays bounded", Result: "passed", Evidence: "reviewed by reagent"}}
 			return e
-		}(), reconcile: true, want: "mandatory check"},
-		{name: "dry-run build", evidence: func() ReadyCheckpoint {
-			e := readyEvidence()
-			e.Checks[3].Command = "go build -n ./cmd/concoct"
-			return e
-		}(), reconcile: true, want: "mandatory check"},
-		{name: "unaccepted unavailable check", evidence: func() ReadyCheckpoint {
-			e := readyEvidence()
-			e.Checks[2].Result = "unavailable"
-			e.Checks[2].Decision = "proposed waiver"
-			return e
-		}(), reconcile: true, want: "operator acceptance"},
-		{name: "missing docs", evidence: readyEvidence(), reconcile: false, want: "does not mark"},
+		}(), reconcile: true},
+		{name: "unreported configured check", evidence: readyEvidence(), reconcile: true, extra: []RequiredCheck{{Command: "make lint", Source: "AGENTS.md"}}},
+		{name: "documentation for reviewer judgment", evidence: readyEvidence(), reconcile: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo, external, policy := testRepo(t)
 			agent := readyAgent(t, repo, external, tc.evidence, false, tc.reconcile)
 			result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent, RequiredChecks: tc.extra})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("expected %s, got %+v, %v", tc.want, result, err)
-			}
-			if result.Status != "recovery_required" || result.Snapshot.Hold != "recovery-required" || result.Snapshot.PendingRequest == "" || result.Snapshot.Candidate != nil || result.Snapshot.Phase != "engineering" {
-				t.Fatalf("invalid readiness froze candidate: %+v", result.Snapshot)
-			}
-			if result.Snapshot.Dispatch == nil || len(result.Snapshot.Dispatch.Attempts) != 1 || result.Snapshot.Dispatch.Attempts[0].Status != "completed" {
-				t.Fatalf("invalid readiness lost completed dispatch: %+v", result.Snapshot.Dispatch)
-			}
-			if _, err := os.Stat(filepath.Join(result.Workspace, "feature.go")); err != nil {
-				t.Fatalf("unfinished work not retained: %v", err)
+			if err != nil || result.Status != "ready_for_review" || result.Snapshot.Candidate == nil {
+				t.Fatalf("schema-valid agent handoff failed: %+v, %v", result, err)
 			}
 		})
 	}
@@ -266,26 +244,6 @@ func TestCompletedClaimWithInvalidDispositionOrMissingCheckpointRetainsRecovery(
 	}
 }
 
-func TestMandatoryGoCommandEquivalence(t *testing.T) {
-	for _, tc := range []struct {
-		need, actual string
-		matches      bool
-	}{
-		{"go test ./...", "GOTOOLCHAIN=local go test -count=1 -race ./...", true},
-		{"go build ./cmd/concoct", "go build -o /tmp/concoct ./cmd/concoct", true},
-		{"go test ./...", "go test -run '^$' ./...", false},
-		{"go test ./...", "go test -list . ./...", false},
-		{"go test ./...", "go test -count=1 ./... -run '^$'", false},
-		{"go build ./cmd/concoct", "go build -n ./cmd/concoct", false},
-		{"go build ./cmd/concoct", "go build -o /tmp/concoct -n ./cmd/concoct", false},
-		{"go vet ./...", "go vet -n ./...", false},
-	} {
-		if got := commandMatches(tc.need, tc.actual, nil, ""); got != tc.matches {
-			t.Errorf("commandMatches(%q, %q) = %v, want %v", tc.need, tc.actual, got, tc.matches)
-		}
-	}
-}
-
 func TestReadyRequiresIdleToolsAndResolvedCallbacks(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -338,14 +296,14 @@ func TestMalformedReadyResultRetainsBoundedRecovery(t *testing.T) {
 	}
 }
 
-func TestExplicitlyAcceptedUnavailableCheck(t *testing.T) {
+func TestUnavailableCheckNarrativeRemainsAgentJudgment(t *testing.T) {
 	repo, external, policy := testRepo(t)
 	evidence := readyEvidence()
 	evidence.Checks[2].Result = "unavailable"
 	evidence.Checks[2].Evidence = "Local vet command unavailable in this fixture."
-	evidence.Checks[2].Decision = "Operator accepted the unavailable vet check for this candidate."
+	evidence.Checks[2].Decision = ""
 	agent := readyAgent(t, repo, external, evidence, false, true)
-	result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent, AcceptedUnavailable: []string{"go vet ./..."}})
+	result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent})
 	if err != nil || result.Status != "ready_for_review" || result.Snapshot.Candidate == nil {
 		t.Fatalf("explicit unavailable-check acceptance: %+v, %v", result, err)
 	}

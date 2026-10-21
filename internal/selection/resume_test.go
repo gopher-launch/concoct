@@ -272,6 +272,34 @@ func TestRetainedAssessmentAcknowledgmentSurvivesMissingHistoricalItem(t *testin
 	}
 }
 
+type resultOnlyReviewer struct{ *observedReviewer }
+
+func (a *resultOnlyReviewer) RunTurn(_ context.Context, id, _ string, _ codexapp.RoleSettings, _ codexapp.ToolHandler, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+	a.turns++
+	return codexapp.TurnOutcome{ThreadID: id, TurnID: "observed-review-turn", Status: "completed", FinalText: `{"disposition":"approved","summary":"reviewed source"}`}, errors.New("response connection lost after provider completion")
+}
+
+func (a *resultOnlyReviewer) ReadTurn(_ context.Context, threadID, turnID string) (codexapp.ObservedTurn, error) {
+	a.reads++
+	if threadID != "reviewer-thread" || turnID != "observed-review-turn" {
+		return codexapp.ObservedTurn{}, errors.New("unexpected turn")
+	}
+	return codexapp.ObservedTurn{ID: turnID, Status: "completed", FinalText: `{"disposition":"approved","summary":"reviewed source"}`, ItemsKnown: true}, nil
+}
+
+func TestStructuredReviewRecoversWithoutHistoricalCallbackItems(t *testing.T) {
+	repo, external, policy := testRepo(t)
+	reviewer := &resultOnlyReviewer{observedReviewer: &observedReviewer{fakeReviewer: &fakeReviewer{}}}
+	first, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
+	if err == nil || first.Status != "recovery_required" || first.Snapshot.Review == nil || first.Snapshot.Review.Verdict != "" {
+		t.Fatalf("lost response was not retained: %+v, %v", first, err)
+	}
+	result, err := Continue(context.Background(), Config{Repository: repo, Root: external, Reviewer: reviewer})
+	if err != nil || result.Status != "approved" || result.Snapshot.Review.Verdict != "approved" || reviewer.turns != 1 || reviewer.reads != 1 {
+		t.Fatalf("structured review did not recover once: %+v, %v", result, err)
+	}
+}
+
 func TestHistoricalAssessmentItemRecoversMissedLiveCompletion(t *testing.T) {
 	repo, external, policy := testRepo(t)
 	callback := acknowledgedCallback("reviewer-thread", "observed-review-turn", "review-request", "observed-assessment", "save_assessment")

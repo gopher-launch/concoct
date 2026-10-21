@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-10-20
+updated: 2026-10-21
 ---
 
 # Concoct implementation roadmap
@@ -10,12 +10,12 @@ Implementation scope 0.5
 
 Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
 
-The source tree includes selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration, mechanical completion and the operator CLI. CON-056 remains the ready real-project proof task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-061 retain their identities here.
+The source tree includes selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration, mechanical completion and the operator CLI. CON-062 simplifies agent coordination before the ready CON-056 real-project proof task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-062 retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-056` is the next ready task after CON-061 delivery. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-056` is the next ready task after CON-062 delivery. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the runner to build itself. The CLI exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation.
@@ -30,7 +30,7 @@ The source tree includes selection, engineering, candidate freezing, bounded ind
 | M2: automatic candidate/review flow          | CON-047–CON-050                  | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance |
 | M3: durable interventions                    | CON-051–CON-052                  | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition                                       |
 | M4: accepted local delivery                  | CON-053–CON-054                  | Exact-candidate integration and mechanical completion/archive lifecycle                                                                |
-| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-061 | Correct callback/recovery handling and operator presentation before completing the real-task demonstration                             |
+| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-062 | Correct callback/recovery handling, agent coordination and operator presentation before completing the real-task demonstration                             |
 
 The order is deliberately sequential for the first delivery. The dependencies below identify concrete prerequisites rather than suggesting parallel agent work. Intermediate milestones are development checkpoints, not claims that a usable redesigned release has shipped.
 
@@ -96,7 +96,7 @@ Tasks CON-053–CON-054 implement guarded local integration and mechanical compl
 - Parent: CON-E001
 - Depends on: none
 
-CON-055 exposes the operator interface. CON-058 corrects dynamic-tool completion and recovery; CON-059 makes its output and first-use guidance usable. CON-060 corrects final-result extraction, and CON-061 uses retained callback acknowledgments when provider history omits them. CON-056 then completes fresh real-work acceptance with the retained first attempt accounted for.
+CON-055 exposes the operator interface. CON-058 corrects dynamic-tool completion and recovery; CON-059 makes its output and first-use guidance usable. CON-060 corrects final-result extraction, CON-061 uses retained callback acknowledgments when provider history omits them, and CON-062 simplifies agent coordination. CON-056 then completes fresh real-work acceptance with the retained first attempt accounted for.
 
 ## CON-043 — Reset the repository to a clean rebuild baseline
 
@@ -461,7 +461,7 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 ## CON-062 — Simplify agent coordination and operator interaction
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F005
 - Depends on: CON-061

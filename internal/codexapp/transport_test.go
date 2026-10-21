@@ -220,7 +220,7 @@ func TestInterleavedStreamingCallbackAndTerminalReceipt(t *testing.T) {
 				callbackReply.Store(true)
 			}
 			s.emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "call-1", "type": "dynamicToolCall", "tool": "checkpoint", "namespace": nil, "status": "completed", "success": true}}})
-			s.emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]string{"id": "final", "type": "agentMessage", "phase": "final_answer", "text": `{"disposition":"ready","summary":"done"}`}}})
+			s.emit(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]string{"id": "final", "type": "agentMessage", "phase": "final_answer", "text": `{"disposition":"ready_for_review","summary":"done"}`}}})
 			usage := map[string]int{"inputTokens": 4, "cachedInputTokens": 0, "outputTokens": 3, "reasoningOutputTokens": 1, "totalTokens": 7}
 			s.emit(map[string]any{"method": "thread/tokenUsage/updated", "params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "tokenUsage": map[string]any{"last": usage, "total": usage}}})
 			s.emit(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "completed", "items": []any{}}}})
@@ -245,7 +245,7 @@ func TestInterleavedStreamingCallbackAndTerminalReceipt(t *testing.T) {
 		t.Fatalf("turn=%#v err=%v streamed=%d callback=%v", result, err, streamed, callbackReply.Load())
 	}
 	role, err := ParseRoleResult(result.FinalText)
-	if err != nil || role.Disposition != "ready" {
+	if err != nil || role.Disposition != "ready_for_review" {
 		t.Fatalf("role=%#v, %v", role, err)
 	}
 	if _, err := ParseRoleResult(`{"summary":"no disposition"}`); !errors.Is(err, ErrMalformedRoleResult) {

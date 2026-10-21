@@ -10,6 +10,7 @@ import (
 
 	"github.com/gopher-launch/concoct/internal/activework"
 	"github.com/gopher-launch/concoct/internal/codexapp"
+	"github.com/gopher-launch/concoct/internal/integration"
 )
 
 type continuingAgent struct {
@@ -80,21 +81,16 @@ func TestCorrectedCandidateReturnsToSameReviewer(t *testing.T) {
 				t.Fatal("review checkout was not advanced")
 			}
 		}
-		body, _ := json.Marshal(map[string]string{"content": "Please correct feature.go"})
 		turn := "review-turn-1"
-		call := "assessment-one"
 		verdict := "changes_requested"
 		if snapshot.Review.Number == 2 {
-			turn, call, verdict = "review-turn-2", "assessment-two", "approved"
+			turn, verdict = "review-turn-2", "approved"
 		}
-		response, err := handler(context.Background(), codexapp.ToolCall{Role: "iragent", ThreadID: "reviewer-thread", TurnID: turn, CallID: call, Tool: "save_assessment", Arguments: body})
-		if err != nil || !response.Success {
-			t.Fatalf("save assessment: %v", err)
+		final := `{"disposition":"` + verdict + `","summary":"checked","task_id":"APP-002","candidate":"` + snapshot.Candidate.Commit + `"}`
+		if verdict == "changes_requested" {
+			final = `{"disposition":"changes_requested","summary":"checked","task_id":"APP-002","candidate":"` + snapshot.Candidate.Commit + `","findings":["Please correct feature.go"]}`
 		}
-		if err := response.Commit(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: turn, Status: "completed", FinalText: `{"disposition":"` + verdict + `","summary":"checked"}`}, nil
+		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: turn, Status: "completed", FinalText: final}, nil
 	}
 	result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: agent, Reviewer: reviewer})
 	if err != nil {
@@ -114,9 +110,22 @@ func TestCorrectedCandidateReturnsToSameReviewer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer owner.Close()
 	if err := owner.FinishAssessment(1, "approved", "stale-turn"); err == nil {
 		t.Fatal("stale approval was accepted")
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	approvalConfig := integration.Config{Repository: repo, Root: external, Reagent: agent, Reviewer: reviewer}
+	acceptance, err := integration.Offer(approvalConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := integration.Apply(context.Background(), approvalConfig, acceptance.ID); err != nil {
+		t.Fatal(err)
+	}
+	if head, _ := gitOutput(repo, "rev-parse", "HEAD"); head != result.Snapshot.Candidate.Commit {
+		t.Fatal("operator-authorized integration did not retain reviewed candidate")
 	}
 }
 

@@ -238,8 +238,8 @@ func TestReviewTurnVisibilityUsesCurrentCandidateDispatchEvidence(t *testing.T) 
 	}
 	var out bytes.Buffer
 	printStatus(&out, view(snapshot, request{}))
-	if !strings.Contains(out.String(), "independent review turn observed: true") {
-		t.Fatalf("recovery view hid observed review turn: %s", out.String())
+	if !strings.Contains(out.String(), "review turn incomplete") {
+		t.Fatalf("recovery view hid reason: %s", out.String())
 	}
 	out.Reset()
 	writePublicJSON(&out, view(snapshot, request{}))
@@ -287,7 +287,7 @@ func TestSelectionRecoveryAndLocalTimestampViews(t *testing.T) {
 	out.Reset()
 	recovery := view(activework.Snapshot{Active: true, TaskID: "APP-002", Hold: "recovery-required", Recovery: &activework.RecoveryIssue{Reason: "receipt missing", AgentResult: "ready for review"}}, request{})
 	printStatus(&out, recovery)
-	for _, want := range []string{"Agent reported: ready for review", "Controller verification: incomplete", "independent review turn observed: false", "Recovery: receipt missing", "missing proof keeps this hold"} {
+	for _, want := range []string{"Agent reported: ready for review", "paused: previous execution needs inspection", "Concoct could not continue: receipt missing", "task and source remain in place"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("recovery missing %q: %s", want, out.String())
 		}

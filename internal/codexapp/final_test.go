@@ -1,6 +1,10 @@
 package codexapp
 
-import "testing"
+import (
+	"encoding/json"
+	"errors"
+	"testing"
+)
 
 func TestFinalResultPrecedence(t *testing.T) {
 	good := `{"disposition":"ready_for_review","summary":"done"}`
@@ -26,5 +30,16 @@ func TestFinalResultPrecedence(t *testing.T) {
 				t.Fatalf("got %q, want %q", result.text, tc.want)
 			}
 		})
+	}
+}
+
+func TestRoleResultSchemaAndMalformedResponse(t *testing.T) {
+	if !json.Valid(RoleResultSchema) {
+		t.Fatal("role result schema is not JSON")
+	}
+	for _, value := range []string{`{"disposition":"approved","summary":"checked","unknown":"ignored?"}`, `{"disposition":"invented","summary":"done"}`, `{"disposition":"approved","summary":"done"} trailing`} {
+		if _, err := ParseRoleResult(value); !errors.Is(err, ErrMalformedRoleResult) {
+			t.Fatalf("invalid role result %q accepted: %v", value, err)
+		}
 	}
 }

@@ -326,6 +326,8 @@ func (l liveOperations) agentOperation(ctx context.Context, req request, store *
 		if err != nil {
 			return outcome{}, err
 		}
+		cfg.Policy.WatchdogElapsed = req.TurnTimeout
+		cfg.Policy.WatchdogStall = req.StallTimeout
 		if observation := readQuota(ctx, process); observation != nil {
 			cfg.Policy.Quota = observation
 		}
@@ -392,8 +394,8 @@ func approvalMaterials(store *activework.Store, snapshot activework.Snapshot) (*
 		return nil, err
 	}
 	var checkpoint selection.ReadyCheckpoint
-	if err := json.Unmarshal([]byte(inspection.Checkpoint), &checkpoint); err != nil {
-		return nil, fmt.Errorf("candidate checkpoint: %w", err)
+	if json.Unmarshal([]byte(inspection.Checkpoint), &checkpoint) != nil {
+		checkpoint.Progress = inspection.Checkpoint
 	}
 	base, candidate := snapshot.ParentCommit, snapshot.Candidate.Commit
 	git := "git -C " + shellQuote(store.Checkout) + " diff --no-ext-diff --binary " + base + " " + candidate + " --"

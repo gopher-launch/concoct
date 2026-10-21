@@ -15,10 +15,9 @@ import (
 
 	"github.com/gopher-launch/concoct/internal/activework"
 	"github.com/gopher-launch/concoct/internal/codexapp"
-	"github.com/gopher-launch/concoct/internal/roadmap"
 )
 
-func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store *activework.Store, session *hostSession, project projectSnapshot, parent parentBinding, outcome codexapp.TurnOutcome) (activework.Candidate, error) {
+func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store *activework.Store, session *hostSession, parent parentBinding, outcome codexapp.TurnOutcome) (activework.Candidate, error) {
 	var candidate activework.Candidate
 	if outcome.Status != "completed" || outcome.TurnID == "" || session.taskID == "" || !session.checkpointSaved {
 		return candidate, fmt.Errorf("ready result lacks completed turn, claim or checkpoint")
@@ -44,32 +43,16 @@ func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store
 	if err != nil {
 		return candidate, err
 	}
-	checkpoint, err := parseReadyCheckpoint(checkpointText)
-	if err != nil {
-		return candidate, err
-	}
+	deliverables, generatedOutputs := checkpointPaths(checkpointText)
 	exclusions, err := generatedExclusions(store.Checkout, cfg.GeneratedExclusions)
 	if err != nil {
 		return candidate, err
 	}
-	changed, untracked, err := workingPaths(session.workspace, parent.Commit, exclusions, checkpoint.GeneratedOutputs, checkpoint.Deliverables)
+	changed, untracked, err := workingPaths(session.workspace, parent.Commit, exclusions, generatedOutputs, deliverables)
 	if err != nil {
 		return candidate, err
 	}
-	if len(changed) == 0 {
-		return candidate, fmt.Errorf("ready task has no source change")
-	}
-	entry, err := eligibleEntry(project.Document, session.taskID)
-	if err != nil {
-		return candidate, err
-	}
-	if err := validateReadyCheckpoint(checkpoint, entry, project, session.workspace, changed, cfg.AcceptedUnavailable, cfg.RequiredChecks); err != nil {
-		return candidate, err
-	}
-	if err := validateReconciliation(project, session.workspace, entry); err != nil {
-		return candidate, err
-	}
-	generated := slices.Clone(checkpoint.GeneratedOutputs)
+	generated := slices.Clone(generatedOutputs)
 	sort.Strings(generated)
 	prior := ""
 	snapshot, err := store.Status()
@@ -86,7 +69,7 @@ func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store
 	if err != nil {
 		return candidate, err
 	}
-	if err := requireCleanIndexWorktree(session.workspace, checkpoint.GeneratedOutputs); err != nil {
+	if err := requireCleanIndexWorktree(session.workspace, generatedOutputs); err != nil {
 		return candidate, err
 	}
 	staged, err := gitBytes(session.workspace, "diff", "--cached", "--name-only", "-z", "HEAD")
@@ -106,7 +89,7 @@ func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store
 	if err != nil || tree != stagedTree {
 		return candidate, fmt.Errorf("candidate commit tree differs from validated source")
 	}
-	if err := requireCleanIndexWorktree(session.workspace, checkpoint.GeneratedOutputs); err != nil {
+	if err := requireCleanIndexWorktree(session.workspace, generatedOutputs); err != nil {
 		return candidate, err
 	}
 	if _, err := gitOutput(session.workspace, "diff", "--cached", "--quiet", "HEAD"); err != nil {
@@ -141,59 +124,6 @@ func freezeReady(ctx context.Context, cfg Config, owner *activework.Owner, store
 		return activework.Candidate{}, err
 	}
 	return candidate, nil
-}
-
-func validateReconciliation(base projectSnapshot, workspace string, selectedEntry roadmap.Entry) error {
-	updated, err := readProject(workspace)
-	if err != nil {
-		return fmt.Errorf("candidate documentation: %w", err)
-	}
-	baseline := base.Document.Entries()
-	proposed := updated.Document.Entries()
-	if len(baseline) != len(proposed) {
-		return fmt.Errorf("candidate roadmap changed task ID inventory")
-	}
-	byID := make(map[string]roadmap.Entry, len(proposed))
-	for _, entry := range proposed {
-		byID[entry.ID] = entry
-	}
-	for _, entry := range baseline {
-		if _, ok := byID[entry.ID]; !ok {
-			return fmt.Errorf("candidate roadmap removed ID %s", entry.ID)
-		}
-	}
-	selected := byID[selectedEntry.ID]
-	if selected.Kind != "task" || selected.Status != "delivered" {
-		return fmt.Errorf("candidate roadmap does not mark %s delivered", selectedEntry.ID)
-	}
-	baseObjective, baseAcceptance, err := taskScope(selectedEntry)
-	if err != nil {
-		return err
-	}
-	newObjective, newAcceptance, err := taskScope(selected)
-	if err != nil || baseObjective != newObjective || baseAcceptance != newAcceptance {
-		return fmt.Errorf("candidate changed agreed scope for %s", selectedEntry.ID)
-	}
-	for _, id := range append(capabilityIDs(base.Capabilities), selectedEntry.ID) {
-		if !slices.Contains(capabilityIDs(updated.Capabilities), id) {
-			return fmt.Errorf("candidate capabilities omitted delivery ID %s", id)
-		}
-	}
-	return nil
-}
-
-func capabilityIDs(markdown string) []string {
-	var ids []string
-	for _, line := range strings.Split(markdown, "\n") {
-		if !strings.HasPrefix(line, "## ") || !strings.Contains(line, " — ") {
-			continue
-		}
-		id := strings.TrimPrefix(strings.SplitN(line, " — ", 2)[0], "## ")
-		if id != "" {
-			ids = append(ids, id)
-		}
-	}
-	return ids
 }
 
 func sha256Hex(data []byte) string {

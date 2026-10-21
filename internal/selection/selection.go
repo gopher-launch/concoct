@@ -31,8 +31,6 @@ type Config struct {
 	StopTrigger func(codexapp.Event) bool
 	// GeneratedExclusions are explicit paths or patterns for build outputs.
 	GeneratedExclusions []string
-	// AcceptedUnavailable records operator acceptance of exact check commands.
-	AcceptedUnavailable []string
 	RequiredChecks      []RequiredCheck
 }
 
@@ -123,10 +121,10 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 	}
 	thread, err := cfg.Agent.StartThread(ctx, workspace, settings, toolSpecs())
 	if err != nil {
-		return result, err
+		return failedSelectionLaunch(owner, store, result, attemptID, err)
 	}
 	if thread.ID == "" {
-		return result, fmt.Errorf("reagent thread has no identity")
+		return failedSelectionLaunch(owner, store, result, attemptID, fmt.Errorf("reagent thread has no identity"))
 	}
 	if err := owner.UpdateOperational(activework.Operational{Phase: "selecting", RoleIDs: map[string]string{"reagent": thread.ID}, RoleSettings: map[string]string{"reagent-model": settings.Model, "reagent-effort": settings.Effort}}); err != nil {
 		return result, err
@@ -170,15 +168,15 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 		turnErr = observeErr
 	}
 	finish := "completed"
-	if turnErr != nil || outcome.Status != "completed" {
+	if turnCtx.Err() != nil || turnErr != nil || outcome.Status != "completed" {
 		finish = "uncertain"
 	}
 	tokens := dispatch.Receipt(outcome.Usage)
 	if err := owner.FinishDispatch(attemptID, finish, tokens); err != nil {
 		return result, err
 	}
-	if turnCtx.Err() != nil && turnErr != nil {
-		result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID)
+	if turnCtx.Err() != nil {
+		result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID, context.Cause(turnCtx))
 		result.Snapshot, _ = store.Status()
 		return result, err
 	}
@@ -203,6 +201,9 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 	}
 	result.Summary = verdict.Summary
 	result.TaskID = session.taskID
+	if verdict.TaskID != "" && verdict.TaskID != session.taskID {
+		return invalidCompletedResult(owner, store, &result, "invalid-task-binding", attemptID, fmt.Errorf("reagent result task %q differs from claimed task %q", verdict.TaskID, session.taskID))
+	}
 	if session.taskID == "" {
 		switch verdict.Disposition {
 		case "no_suitable_work":
@@ -246,7 +247,7 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 			return result, err
 		}
 		if verdict.Disposition == "ready_for_review" {
-			if _, err := freezeReady(ctx, cfg, owner, store, session, project, parent, outcome); err != nil {
+			if _, err := freezeReady(ctx, cfg, owner, store, session, parent, outcome); err != nil {
 				return invalidCompletedResult(owner, store, &result, "invalid-ready-candidate", attemptID, fmt.Errorf("candidate not ready: %w", err))
 			}
 			if outcome.TurnID != "" {
@@ -304,6 +305,16 @@ func Execute(ctx context.Context, cfg Config) (Result, error) {
 	}
 	result.Snapshot, err = store.Status()
 	return result, err
+}
+
+func failedSelectionLaunch(owner *activework.Owner, store *activework.Store, result Result, attemptID string, cause error) (Result, error) {
+	if err := owner.FinishDispatch(attemptID, "failed", nil); err != nil {
+		return result, fmt.Errorf("reagent launch failed: %w; record attempt: %v", cause, err)
+	}
+	if err := retainRecovery(owner, store, &result, "reagent-launch", attemptID, cause); err != nil {
+		return result, fmt.Errorf("reagent launch failed: %w; retain work: %v", cause, err)
+	}
+	return result, fmt.Errorf("reagent launch failed: %w", cause)
 }
 
 func invalidCompletedResult(owner *activework.Owner, store *activework.Store, result *Result, reason, attemptID string, cause error) (Result, error) {
@@ -430,7 +441,7 @@ func selectionPrompt(project projectSnapshot, parent parentBinding, workspace st
 	for _, check := range required {
 		fmt.Fprintf(&checks, "\n%s (source: %s)", check.Command, check.Source)
 	}
-	return fmt.Sprintf("You are reagent. Follow AGENTS.md and current repository sources. Select the highest-priority suitable ready task; explain any higher-priority skip, and request an operator decision for a material departure. Do not read historical task archives or reuse another task's context. The parent branch is %s at %s. Your task checkout is %s. Before changing source, create one task branch here from the baseline, call claim_task with the roadmap objective and acceptance criteria, and wait for its acknowledgment. Continue engineering, testing and self-review in this same turn, with at most three self-review passes per candidate cycle. Save a checkpoint after selection, material plan changes and meaningful progress, including evidence and next action. Reconcile roadmap.md and capabilities.md to the proposed post-integration state. Do not integrate, push or publish. If no suitable task exists, leave the detached checkout clean and return JSON with disposition no_suitable_work and a reason. For a material decision, save the safe progress and return decision_required with a question object containing objective, attempts/evidence, missing input/action, safe_work, next_step and optional stable-ID options with tradeoffs. Do not ask for known answers or use an answer as an unrelated authorization. To request independent review, save a final JSON checkpoint with TaskID, Plan, Progress, Criteria (each exact acceptance bullet with Result passed and Evidence), Checks (each exact Command, Source path, Result passed or unavailable, Evidence and accepted Decision for unavailable), SelfReview, NextAction, Deliverables and GeneratedOutputs (exact untracked output paths covered by explicit exclusions). Include every mandatory check from AGENTS.md and relevant project instructions, plus additional checks; leave any failed or unaccepted check in engineering. Then return JSON with disposition ready_for_review and summary. Otherwise return JSON with disposition engineering and a summary. Do not invent work or expand into siblings.\n\nAGENTS.md:\n%s\n\nroadmap.md:\n%s\n\ncapabilities.md:\n%s\n\nEligible tasks:\n%s\nConfigured mandatory checks:%s\nConfigured generated-output exclusions: %v\nRelevant design is at doc/implementation-design.md in this checkout; read the sections for the selected task. Current source and build configuration define implemented behavior.", parent.Branch, parent.Commit, workspace, project.Agents, project.Roadmap, project.Capabilities, ready.String(), checks.String(), exclusions)
+	return fmt.Sprintf("You are reagent. Follow AGENTS.md and current repository sources. Select one suitable ready task, using the roadmap entry by task ID; explain any higher-priority skip and request an operator decision for a material departure. Do not read historical task archives or reuse another task's context. The parent branch is %s at %s. Your task checkout is %s. Before changing source, create one task branch here from the baseline, call claim_task with task_id, task_branch and selection_rationale, and wait for acknowledgment. Continue engineering, testing and self-review in this same turn, with at most three self-review passes per candidate cycle. Save a concise checkpoint after selection, material decisions and meaningful progress. Judge criterion coverage, check sufficiency, findings resolution and documentation yourself. Reconcile roadmap.md and capabilities.md for the intended integrated state. Do not integrate, push or publish. If no suitable task exists, leave the detached checkout clean and return JSON with disposition no_suitable_work and a reason. For a genuine missing decision, return decision_required with a question object containing objective, evidence, missing, safe_work, next_step and optional options. To request independent review, save a final checkpoint containing the work, checks, self-review and next action; if excluding generated output, use a JSON checkpoint with GeneratedOutputs as exact paths and Deliverables for explicitly included ignored files. Return one JSON result with disposition ready_for_review, task_id and summary. Otherwise return engineering with task_id and summary. Do not invent work or expand into siblings.\n\nAGENTS.md:\n%s\n\nroadmap.md:\n%s\n\ncapabilities.md:\n%s\n\nEligible tasks:\n%s\nConfigured checks for reagent judgment:%s\nConfigured generated-output exclusions: %v\nRelevant design is at doc/implementation-design.md in this checkout; read the sections for the selected task. Current source and build configuration define implemented behavior.", parent.Branch, parent.Commit, workspace, project.Agents, project.Roadmap, project.Capabilities, ready.String(), checks.String(), exclusions)
 }
 
 func randomID() (string, error) {

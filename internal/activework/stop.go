@@ -56,6 +56,9 @@ func (o *Owner) FinishStop(result stop.Result) error {
 		st.Hold = "abnormal-stop"
 		st.PendingRequest = "verify cessation and reconcile stopped attempt " + st.Stop.AttemptID
 	}
+	if result.Problem != "" {
+		st.PendingRequest = result.Problem + "; " + st.PendingRequest
+	}
 	st.Revision++
 	return writeJSON(o.store.statePath(st.RunID), st)
 }

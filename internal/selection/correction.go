@@ -88,7 +88,7 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 		if err := owner.MarkTurnRequested(attemptID); err != nil {
 			return result, err
 		}
-		prompt := fmt.Sprintf("You are the bound reagent continuing %s on the existing task branch in %s. Address the completed independent assessment below within the agreed task scope. Preserve the parent baseline %s and review findings. Correct source, validate affected behavior, self-review within the recorded limit, reconcile product documentation for the intended integrated state, and save a new ready checkpoint with save_checkpoint. For a genuine blocker return decision_required with a question object containing objective, evidence, missing, safe_work, next_step and optional stable-ID options/tradeoffs. Return ready_for_review only after a completed correction. Do not integrate, push, publish or start another task.\n\nPrior candidate: %s\nPrior assessment:\n%s\nActive task:\n%s", prior.TaskID, workspace, prior.ParentCommit, prior.Candidate.Commit, findings, task)
+		prompt := fmt.Sprintf("You are the bound reagent continuing %s on the existing task branch in %s. Address the independent review findings below within the agreed task scope. Preserve the parent baseline %s. Judge the correction, affected checks and documentation yourself; self-review within the recorded limit and save a concise checkpoint. For a genuine missing decision return decision_required with a question object. Return one JSON result with disposition ready_for_review, task_id %s and summary only after completing the correction. Do not integrate, push, publish or start another task.\n\nPrior candidate: %s\nPrior assessment:\n%s\nActive task:\n%s", prior.TaskID, workspace, prior.ParentCommit, prior.TaskID, prior.Candidate.Commit, findings, task)
 		turnCtx, cancelTurn, stopEvent := turnstop.Context(ctx, prior.Dispatch.WatchdogElapsed, prior.Dispatch.WatchdogStall, cfg.StopTrigger)
 		var observeErr error
 		outcome, turnErr := cfg.Agent.RunTurn(turnCtx, thread.ID, prompt, settings, session.handle, func(event codexapp.Event) {
@@ -120,25 +120,34 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 			turnErr = observeErr
 		}
 		finish := "completed"
-		if turnErr != nil || outcome.Status != "completed" {
+		if turnCtx.Err() != nil || turnErr != nil || outcome.Status != "completed" {
 			finish = "uncertain"
 		}
 		if err := owner.FinishDispatch(attemptID, finish, dispatch.Receipt(outcome.Usage)); err != nil {
 			return result, err
 		}
-		if turnCtx.Err() != nil && turnErr != nil {
-			result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID)
+		if turnCtx.Err() != nil {
+			result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID, context.Cause(turnCtx))
 			result.Snapshot, _ = store.Status()
 			cancelTurn()
 			return result, err
 		}
 		cancelTurn()
 		if turnErr != nil || outcome.Status != "completed" || outcome.ThreadID != thread.ID || outcome.TurnID == "" {
-			return correctionHold(owner, store, result, "recovery-required", "correction turn interrupted or has invalid identity; reconcile recorded attempt "+attemptID)
+			reason := fmt.Sprintf("correction turn %s; inspect attempt %s", outcome.Status, attemptID)
+			if turnErr != nil {
+				reason += ": " + turnErr.Error()
+			} else if outcome.ProviderError != "" {
+				reason += ": " + outcome.ProviderError
+			}
+			return correctionHold(owner, store, result, "recovery-required", reason)
 		}
 		verdict, err := codexapp.ParseRoleResult(outcome.FinalText)
 		if err != nil {
 			return correctionHold(owner, store, result, "recovery-required", "correction returned invalid structured result; inspect attempt "+attemptID)
+		}
+		if verdict.TaskID != "" && verdict.TaskID != prior.TaskID {
+			return correctionHold(owner, store, result, "recovery-required", "correction result named another task")
 		}
 		if verdict.Disposition == "decision_required" || verdict.Disposition == "blocker" {
 			if verdict.Question != nil {
@@ -154,7 +163,7 @@ func correctionLoop(ctx context.Context, cfg Config, owner *activework.Owner, st
 		if verdict.Disposition != "ready_for_review" || !session.checkpointSaved {
 			return correctionHold(owner, store, result, "recovery-required", "correction did not provide a ready checkpoint; inspect attempt "+attemptID)
 		}
-		candidate, err := freezeReady(ctx, cfg, owner, store, session, project, session.parent, outcome)
+		candidate, err := freezeReady(ctx, cfg, owner, store, session, session.parent, outcome)
 		if err != nil {
 			return correctionHold(owner, store, result, "recovery-required", "corrected candidate could not be frozen: "+err.Error())
 		}

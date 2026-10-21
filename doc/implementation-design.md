@@ -57,7 +57,7 @@ Use two narrow host operations, callable within an agent turn:
 
 | Operation | Contract |
 | --- | --- |
-| `claim_task` | After selecting a task and creating its branch, reagent supplies that task ID/branch, selection rationale and bounded objective/acceptance text. Concoct validates eligibility and the branch/baseline, binds the run and records initial `task.md`; success lets reagent continue immediately. |
+| `claim_task` | After selecting a task and creating its branch, reagent supplies its task ID/branch and selection rationale. Concoct takes objective and acceptance prose from that roadmap entry, validates the mechanical task and branch binding, and records initial `task.md`; success lets reagent continue immediately. |
 | `save_checkpoint` | The current role supplies its current checkpoint. Concoct atomically updates only that role's permitted content in `task.md` or the pending review record. It does not authorize scope changes or produce a candidate approval. |
 
 The [documented app-server dynamic-tool interface](https://developers.openai.com/codex/app-server#dynamic-tool-calls-experimental) is experimental. The follow-up observed successful claim → edit → checkpoint → completion in one turn, and a restored checkpoint tool after restart/resume without redeclaration. This supports the proposed bridge on Codex 0.147.0. Validate supported installed versions/schemas rather than assuming all versions behave identically.
@@ -116,11 +116,11 @@ stateDiagram-v2
     Completed --> [*]
 ```
 
-Each agent returns a small structured disposition alongside a human summary; task/review prose remains in the evidence files.
+Each agent returns one schema-defined JSON result with a disposition, human summary and, where relevant, task ID, candidate ID, findings or an explicit operator question. Concoct validates the shape and any supplied identity against the active binding. It preserves summaries and findings as agent narrative without inferring engineering success from their wording. Task/review prose remains in the evidence files.
 
 | Role result | Controller action |
 | --- | --- |
-| Reagent: ready for independent review | Check checkpoint/verification evidence, freeze candidate, apply dispatch policy, start/resume iragent |
+| Reagent: ready for independent review | Verify the completed turn, task binding, checkpoint and idle source; freeze candidate and start iragent under dispatch policy |
 | Reagent: no suitable work | Return normal no-work, only during selection |
 | Either: needs input | Persist blocker and requesting role; stop until an answer supplies actionable input |
 | Either: unable within bounds | Preserve evidence and report consumed allowance and unresolved work |
@@ -135,13 +135,13 @@ Under the initial dispatch policy, readiness flows directly into independent rev
 
 ## 6. Candidate preparation, validation and review continuity
 
-Reagent implements, discovers established project checks, validates and self-reviews within its candidate cycle. The checkpoint maps task-specific criteria to evidence and names the actual instruction/document/script/CI paths behind required commands. It records relevant additional checks and any genuinely unavailable check with the necessary acceptance decision. Routine failed tests stay with reagent; Concoct does not rerun every test merely to reproduce evidence.
+Reagent implements, discovers established project checks, validates and self-reviews within its candidate cycle. The checkpoint records the reagent’s work, checks, self-review and next action in its own words. Reagent judges task suitability, criterion coverage, check sufficiency, documentation and unresolved findings. Concoct passes this narrative through without matching it against acceptance bullets or command strings. Routine failed tests stay with reagent.
 
 Before returning readiness, reagent reconciles `roadmap.md` and `capabilities.md` in the proposed source changes, preserving original task IDs. These edits describe the state that integration would deliver. They remain isolated candidate changes until approval and are reviewed with the implementation.
 
 Concoct freezes a candidate only after a normal ready result, completed turn and confirmed quiescence of its tool processes. It captures baseline revision/tree, candidate revision/tree, binary diff digest and changed paths. Reagent can create commits on its task branch as ordinary engineering. Concoct verifies the branch/baseline and records an immutable candidate; if a final commit is still needed, it can perform that mechanical operation without a commit-only agent turn. Parent integration remains an explicit operator-authorized action; full access does not physically prevent an agent from violating that instruction. Build outputs may be excluded under an explicit project policy, but untracked deliverable source cannot be silently omitted. Candidate evidence binds the verified source contents; creating a commit with identical contents does not manufacture a need to rerun unchanged tests.
 
-Iragent has a different thread and a source checkout pinned to that candidate, plus the current task and active assessments. Its role is read-only with respect to candidate source; this is an instruction under full access, not a special filesystem profile. Concoct verifies that candidate identity/content did not change during review. Iragent writes its pending assessment through the host checkpoint operation; Concoct does not allow updates to finalized assessments through that operation. Each verdict binds the candidate identity and agreed task revision. Approval of an older candidate never approves a later one.
+Iragent has a different thread and a source checkout pinned to that candidate, plus the current task and active assessments. Its role is read-only with respect to candidate source; this is an instruction under full access, not a special filesystem profile. Concoct verifies that candidate identity/content did not change during review. Iragent returns a structured verdict with a human summary and specific findings for requested changes. Concoct writes that result into candidate-bound review evidence. The optional assessment callback retains in-turn findings when an operator question about source changes needs them; finalized assessments cannot be edited through it. Each verdict binds the candidate identity and agreed task revision. Approval of an older candidate never approves a later one.
 
 When changes are requested, resume reagent with the findings. When its next candidate is ready, update the review checkout only after the previous review execution is demonstrably idle, then resume the same iragent thread with the exact revised identity and correction evidence. Session identity is not candidate identity: moving the review checkout is allowed; moving the candidate during an active assessment is not. An interrupted assessment keeps its number and pending state. A completed new assessment receives the next number.
 
@@ -179,7 +179,7 @@ Use stable named dispositions in JSON: `completed`, `ready_for_acceptance`, `dec
 
 Before every turn that starts agent work, resolve authorization, effective settings, remaining allowances, available quota and resume safety. Persist dispatch intent and reserve its attempt before making the provider request. A dispatch with an uncertain acknowledgement still consumes an attempt; querying metadata, saving checkpoints and mechanically integrating do not consume agent dispatches.
 
-The first `run` grants automatic selection, engineering, review and correction within the recorded task policy. Optional gates can require authorization at any dispatch. Plain `run` does not satisfy an already pending explicit gate. Approval to integrate is separate from all agent budget grants.
+The first `run` grants automatic selection, engineering, review and correction within the recorded task policy. Optional gates can require authorization at any dispatch. Plain `run` does not satisfy an already pending explicit gate. Fresh-run `--turn-timeout` and `--stall-timeout` set retained elapsed and inactivity limits; exceeding either cancels the turn and invokes owned-process cessation before continuation. Approval to integrate is separate from all agent budget grants.
 
 | Bound | Starting policy |
 | --- | --- |

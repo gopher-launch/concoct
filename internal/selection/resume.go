@@ -362,9 +362,6 @@ func verifyObservedCallbacks(owner *activework.Owner, attempt dispatch.Attempt, 
 			if verdict.Disposition == "ready_for_review" && attempt.Binding.Activity == dispatch.Selection && !verifiedTools["claim_task"] {
 				return fmt.Errorf("selected task lacks verified claim_task acknowledgment")
 			}
-			if (verdict.Disposition == "approved" || verdict.Disposition == "changes_requested") && !verifiedTools["save_assessment"] {
-				return fmt.Errorf("review result lacks verified save_assessment acknowledgment")
-			}
 		}
 	}
 	return nil
@@ -695,14 +692,14 @@ func runReagentContinuation(ctx context.Context, cfg Config, owner *activework.O
 		turnErr = observeErr
 	}
 	status := "completed"
-	if turnErr != nil || outcome.Status != "completed" {
+	if turnCtx.Err() != nil || turnErr != nil || outcome.Status != "completed" {
 		status = "uncertain"
 	}
 	if err := owner.FinishDispatch(attemptID, status, dispatch.Receipt(outcome.Usage)); err != nil {
 		return result, err
 	}
-	if turnCtx.Err() != nil && turnErr != nil {
-		result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID)
+	if turnCtx.Err() != nil {
+		result.Status, err = turnstop.Handle(owner, cfg.Agent, "reagent", thread.ID, outcome.TurnID, attemptID, context.Cause(turnCtx))
 		result.Snapshot, _ = store.Status()
 		return result, err
 	}
@@ -755,6 +752,9 @@ func applyReagentVerdict(ctx context.Context, cfg Config, owner *activework.Owne
 		return result, err
 	}
 	result.TaskID, result.Summary = snapshot.TaskID, verdict.Summary
+	if verdict.TaskID != "" && verdict.TaskID != snapshot.TaskID {
+		return holdContinuation(owner, store, result, "recovery-required", "reagent result names another task")
+	}
 	if snapshot.TaskID == "" {
 		if verdict.Disposition != "no_suitable_work" {
 			return holdContinuation(owner, store, result, "recovery-required", "unclaimed completion needs task claim or no-work verdict")
@@ -801,7 +801,7 @@ func applyReagentVerdict(ctx context.Context, cfg Config, owner *activework.Owne
 			return result, err
 		}
 		session := &hostSession{owner: owner, store: store, project: project, workspace: result.Workspace, parent: parentBinding{Branch: snapshot.ParentBranch, Commit: snapshot.ParentCommit}, threadID: threadID, taskID: snapshot.TaskID, taskBranch: snapshot.TaskBranch, checkpointSaved: true}
-		if _, err := freezeReady(ctx, cfg, owner, store, session, project, session.parent, codexapp.TurnOutcome{ThreadID: threadID, TurnID: turnID, Status: "completed"}); err != nil {
+		if _, err := freezeReady(ctx, cfg, owner, store, session, session.parent, codexapp.TurnOutcome{ThreadID: threadID, TurnID: turnID, Status: "completed"}); err != nil {
 			return holdContinuation(owner, store, result, "recovery-required", "candidate freeze requires reconciliation: "+err.Error())
 		}
 	}

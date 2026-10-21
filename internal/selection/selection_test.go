@@ -91,11 +91,7 @@ func invoke(t *testing.T, handler codexapp.ToolHandler, callID, tool string, arg
 }
 
 func claimArgs(id, branch string) map[string]string {
-	objective, acceptance := "implement the ready task.", "- Preserve the task boundary."
-	if id == "APP-003" {
-		objective, acceptance = "implement another task.", "- Keep it separate."
-	}
-	return map[string]string{"task_id": id, "task_branch": branch, "selection_rationale": "highest suitable priority", "objective": objective, "acceptance": acceptance}
+	return map[string]string{"task_id": id, "task_branch": branch, "selection_rationale": "highest suitable priority"}
 }
 
 func TestClaimAndEngineeringInOneTurn(t *testing.T) {
@@ -286,8 +282,8 @@ func TestDurableClaimWithoutReceiptCanBeAcknowledgedOnRetry(t *testing.T) {
 	if _, err := gitOutput(workspace, "switch", "-qc", "work/app-002"); err != nil {
 		t.Fatal(err)
 	}
-	args := claimArguments{TaskID: "APP-002", TaskBranch: "work/app-002", SelectionRationale: "highest suitable priority", Objective: "implement the ready task.", Acceptance: "- Preserve the task boundary."}
-	spec := activework.StartSpec{TaskID: args.TaskID, TaskBranch: args.TaskBranch, ParentBranch: parent.Branch, ParentCommit: parent.Commit, SelectionRationale: args.SelectionRationale, Objective: args.Objective, Acceptance: args.Acceptance}
+	args := claimArguments{TaskID: "APP-002", TaskBranch: "work/app-002", SelectionRationale: "highest suitable priority"}
+	spec := activework.StartSpec{TaskID: args.TaskID, TaskBranch: args.TaskBranch, ParentBranch: parent.Branch, ParentCommit: parent.Commit, SelectionRationale: args.SelectionRationale, Objective: "implement the ready task.", Acceptance: "- Preserve the task boundary."}
 	if err := owner.Claim(spec); err != nil {
 		t.Fatal(err)
 	}

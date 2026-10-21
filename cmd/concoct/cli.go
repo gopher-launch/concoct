@@ -27,6 +27,7 @@ type request struct {
 	ReviewLimit, DispatchLimit, RecoveryLimit, SelfReviewLimit int
 	ReagentModel, IragentModel, ReagentEffort, IragentEffort   string
 	Gate                                                       string
+	TurnTimeout, StallTimeout                                  time.Duration
 }
 
 type outcome struct {
@@ -232,12 +233,22 @@ func parseRequest(args []string) (request, error) {
 			r.IragentEffort = value
 		case "gate":
 			r.Gate = value
+		case "turn-timeout":
+			r.TurnTimeout, err = positiveDuration(value)
+			if err != nil {
+				return r, fmt.Errorf("invalid turn timeout: %w", err)
+			}
+		case "stall-timeout":
+			r.StallTimeout, err = positiveDuration(value)
+			if err != nil {
+				return r, fmt.Errorf("invalid stall timeout: %w", err)
+			}
 		default:
 			return r, fmt.Errorf("unsupported option --%s", name)
 		}
 	}
 	if r.Command == "status" {
-		for _, name := range []string{"codex", "answer", "text", "choice", "answer-file", "authorize", "approve", "extend", "defer", "abandon", "resume", "reason", "review-limit", "dispatch-limit", "recovery-limit", "self-review-limit", "reagent-model", "iragent-model", "reagent-effort", "iragent-effort", "gate"} {
+		for _, name := range []string{"codex", "answer", "text", "choice", "answer-file", "authorize", "approve", "extend", "defer", "abandon", "resume", "reason", "review-limit", "dispatch-limit", "recovery-limit", "self-review-limit", "reagent-model", "iragent-model", "reagent-effort", "iragent-effort", "gate", "turn-timeout", "stall-timeout"} {
 			if seen[name] {
 				return r, fmt.Errorf("status does not accept --%s", name)
 			}
@@ -272,7 +283,7 @@ func parseRequest(args []string) (request, error) {
 	if r.Extend != "" && !limits || r.Extend == "" && limits {
 		return r, fmt.Errorf("--extend requires a task ID and at least one limit")
 	}
-	policy := r.ReagentModel != "" || r.IragentModel != "" || r.ReagentEffort != "" || r.IragentEffort != "" || r.Gate != ""
+	policy := r.ReagentModel != "" || r.IragentModel != "" || r.ReagentEffort != "" || r.IragentEffort != "" || r.Gate != "" || r.TurnTimeout != 0 || r.StallTimeout != 0
 	if actions != 0 && policy {
 		return r, fmt.Errorf("role and gate choices apply only to a fresh run")
 	}
@@ -291,6 +302,14 @@ func positiveLimit(value string) (int, error) {
 		return 0, fmt.Errorf("invalid positive limit")
 	}
 	return n, nil
+}
+
+func positiveDuration(value string) (time.Duration, error) {
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 || duration > 24*time.Hour {
+		return 0, fmt.Errorf("use a duration above zero and at most 24h")
+	}
+	return duration, nil
 }
 
 // statusView omits provider final text and active narratives from machine output.
@@ -318,6 +337,8 @@ type statusView struct {
 	Assessments     int                       `json:"assessments"`
 	AssessmentLimit int                       `json:"assessment_limit"`
 	RecoveryLimit   int                       `json:"recovery_limit"`
+	TurnTimeout     string                    `json:"turn_timeout,omitempty"`
+	StallTimeout    string                    `json:"stall_timeout,omitempty"`
 	ObservedTokens  *int64                    `json:"observed_tokens,omitempty"`
 	ReviewTurnSeen  bool                      `json:"review_turn_observed"`
 	QuotaAge        string                    `json:"quota_age"`
@@ -385,6 +406,12 @@ func view(s activework.Snapshot, req request) statusView {
 		v.TargetCommit = s.ParentCommit
 	}
 	if s.Dispatch != nil {
+		if s.Dispatch.WatchdogElapsed > 0 {
+			v.TurnTimeout = s.Dispatch.WatchdogElapsed.String()
+		}
+		if s.Dispatch.WatchdogStall > 0 {
+			v.StallTimeout = s.Dispatch.WatchdogStall.String()
+		}
 		v.Attempts, v.DispatchLimit = len(s.Dispatch.Attempts), s.Dispatch.Limits.Dispatches
 		v.Assessments, v.AssessmentLimit, v.RecoveryLimit = len(s.Dispatch.Assessments), s.Dispatch.Limits.Assessments, s.Dispatch.Limits.Recovery
 		if s.Dispatch.Pending != nil {
@@ -430,30 +457,21 @@ func printStatus(w io.Writer, s statusView) {
 		fmt.Fprintf(w, "Task %s; phase %s", s.TaskID, publicName(s.Phase))
 	}
 	if s.Hold != "" {
-		fmt.Fprintf(w, "; hold %s", publicName(s.Hold))
+		fmt.Fprintf(w, "; paused: %s", pauseReason(s.Hold))
 	}
 	fmt.Fprintln(w)
 	if s.PendingRequest != "" {
 		fmt.Fprintln(w, "Pending action:", s.PendingRequest)
 	}
 	if s.Recovery != nil {
-		label := s.Recovery.Stage
-		if s.Recovery.Operation != "" {
-			label += " " + s.Recovery.Operation
-		}
 		if s.Recovery.AgentResult != "" {
 			fmt.Fprintln(w, "Agent reported:", s.Recovery.AgentResult)
 		}
-		fmt.Fprintln(w, "Controller verification: incomplete; independent review turn observed:", s.ReviewTurnSeen)
-		if label != "" {
-			fmt.Fprintf(w, "Recovery at %s: %s\n", publicName(label), s.Recovery.Reason)
-		} else {
-			fmt.Fprintf(w, "Recovery: %s\n", s.Recovery.Reason)
-		}
+		fmt.Fprintln(w, "Concoct could not continue:", s.Recovery.Reason)
 		if s.Recovery.EvidenceRef != "" {
-			fmt.Fprintln(w, "Evidence:", s.Recovery.EvidenceRef)
+			fmt.Fprintln(w, "Details:", s.Recovery.EvidenceRef)
 		}
-		fmt.Fprintln(w, "Next run reconciles retained evidence and source before any candidate or review step; missing proof keeps this hold.")
+		fmt.Fprintln(w, "The task and source remain in place. Inspect the details, then run the displayed next command.")
 	}
 	if s.Candidate != "" {
 		fmt.Fprintln(w, "Candidate:", s.Candidate)
@@ -465,6 +483,9 @@ func printStatus(w io.Writer, s statusView) {
 		fmt.Fprintf(w, "Roles: reagent %s; iragent %s\n", s.Profiles[string(dispatch.Reagent)], s.Profiles[string(dispatch.Iragent)])
 	}
 	fmt.Fprintf(w, "Bounds: attempts %d/%d; assessments %d/%d; recovery limit %d\n", s.Attempts, s.DispatchLimit, s.Assessments, s.AssessmentLimit, s.RecoveryLimit)
+	if s.TurnTimeout != "" || s.StallTimeout != "" {
+		fmt.Fprintf(w, "Time limits: turn %s; inactivity %s\n", durationOrOff(s.TurnTimeout), durationOrOff(s.StallTimeout))
+	}
 	if s.ObservedTokens == nil {
 		fmt.Fprintf(w, "Observed tokens: unavailable; quota observation age: %s\n", s.QuotaAge)
 	} else {
@@ -498,6 +519,30 @@ func printStatus(w io.Writer, s statusView) {
 	}
 	if s.AcceptanceID != "" {
 		fmt.Fprintln(w, "Acceptance:", s.AcceptanceID)
+	}
+}
+
+func durationOrOff(value string) string {
+	if value == "" {
+		return "off"
+	}
+	return value
+}
+
+func pauseReason(hold string) string {
+	switch hold {
+	case "operator-decision":
+		return "agent needs an answer"
+	case "dispatch-authorization":
+		return "agent launch needs authorization"
+	case "limit-exhausted":
+		return "execution limit reached"
+	case "recovery-required":
+		return "previous execution needs inspection"
+	case "abnormal-stop":
+		return "agent process could not be confirmed stopped"
+	default:
+		return publicName(hold)
 	}
 }
 
@@ -623,6 +668,6 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "       concoct run --authorize DISPATCH | --approve ACCEPTANCE")
 	fmt.Fprintln(w, "       concoct run --extend TASK (--dispatch-limit N|--review-limit N|--recovery-limit N)")
 	fmt.Fprintln(w, "       concoct run --defer TASK --reason TEXT | --abandon TASK --reason TEXT | --resume TASK")
-	fmt.Fprintln(w, "Fresh run options: --reagent-model MODEL --iragent-model MODEL --reagent-effort EFFORT --iragent-effort EFFORT --gate ACTIVITY[,ACTIVITY]")
+	fmt.Fprintln(w, "Fresh run options: --reagent-model MODEL --iragent-model MODEL --reagent-effort EFFORT --iragent-effort EFFORT --gate ACTIVITY[,ACTIVITY] --turn-timeout DURATION --stall-timeout DURATION")
 	fmt.Fprintln(w, "Use help for this summary. Workflow commands integrate locally; they never push or publish.")
 }

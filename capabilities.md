@@ -40,24 +40,24 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 
 - When no active work exists, the controller requires a clean named parent branch, captures its baseline and prepares an external detached checkout. Existing active work is reported before new selection.
 - A fresh reagent thread receives current repository instructions, roadmap and capabilities, eligible task context and an explicit parent binding. Dispatch is durably reserved before provider start.
-- The reagent can create one task branch and call `claim_task` before source edits. The host validates eligibility, roadmap scope, unchanged parent and clean baseline checkout, then records the task binding and callback receipt before acknowledgment. The same turn can continue engineering and save bounded checkpoints without changing agreed scope.
+- The reagent can create one task branch and call `claim_task` with its roadmap task ID before source edits. The host takes scope prose from that entry, validates eligibility, unchanged parent and clean baseline checkout, then records the task binding and callback receipt before acknowledgment. The same turn can continue engineering and save bounded checkpoints without changing agreed scope.
 - Normal no-work removes the clean unclaimed checkout and releases the active pointer; a material question retains active work. Focused fake-agent and disposable Git tests cover one-turn continuation, competing claims and dirty prerequisites.
 
 ## CON-048 — Internal candidate freeze
 
-- A completed reagent turn can request review readiness with a structured final checkpoint. The host checks each task criterion, required project checks with command and source paths, any explicitly accepted unavailable check, self-review and next action. Progress events still stream before verdict validation.
-- Readiness also requires resolved host callbacks, an idle provider background-terminal list and source documentation that marks the selected task delivered while preserving IDs and agreed scope. Invalid or uncertain results retain active work and do not create a candidate.
+- A completed reagent turn can request review readiness with a schema-defined result and checkpoint. Reagent owns criterion coverage, check sufficiency, self-review and documentation judgment; Concoct preserves this narrative without matching acceptance prose or command strings. Progress events still stream before result validation.
+- Readiness requires resolved claim/checkpoint callbacks, an idle provider background-terminal list and an unchanged parent and task branch. Invalid or uncertain results retain active work and do not create a candidate.
 - Candidate capture includes baseline and candidate revisions and trees, a binary diff digest, changed paths and the checkpoint digest. Existing reagent commits are preserved; dirty source can be staged and committed mechanically without another agent turn. Untracked deliverables are included even when ignored by Git; an omitted generated output must be individually declared and match an explicit exclusion.
 
 ## CON-049 — Internal initial independent review
 
 - A frozen candidate can flow directly into a candidate-bound iragent dispatch under the recorded policy. The reviewer gets a separate thread with explicit resolved settings and a detached checkout pinned to the candidate. The host instructions require source-read-only review and supply the agreed task, verification evidence, candidate identity and reviewer responsibility.
-- The active record binds review 01 to the candidate and agreed scope digest. Pending assessment text and the same review number survive interrupted or uncertain turns. Source or branch drift, unresolved tool activity, an invalid result or missing assessment cannot produce approval.
+- The active record binds review 01 to the candidate and agreed scope digest. Pending assessment text and the same review number survive interrupted or uncertain turns. Source or branch drift, unresolved tool activity, an invalid result or mismatched candidate cannot produce approval. A structured reviewer result supplies normal assessment prose without a mandatory callback.
 - A completed approved or changes-requested result finalizes one external review-01.md with candidate, scope and verdict bindings and consumes one assessment. A genuine blocker retains the pending review. Configured authorization can pause the initial dispatch. CON-051 reconciles interrupted and observed completed turns before continuation.
 
 ## CON-050 — Internal review correction loop
 
-- Completed findings and the active task record are sent to the bound reagent thread. A correction turn updates the checkpoint and freezes a distinct candidate against the original baseline after the same readiness checks.
+- Completed findings and the active task record are sent to the bound reagent thread. A correction turn updates the checkpoint and freezes a distinct candidate against the original baseline after the same mechanical source and execution checks.
 - Once the prior reviewer is idle, its clean detached checkout advances from the assessed candidate to the corrected commit. The same iragent thread receives the revised identity, prior findings and current validation evidence; completed reassessments receive successive review numbers.
 - Recorded dispatch and completed-assessment limits govern each cycle. An exhausted allowance or uncertain turn retains the current task, candidate and findings with a continuation request. Routine correction and reassessment use the recorded role settings and policy without automatic escalation.
 
@@ -94,8 +94,8 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 ## CON-058 — Dynamic-tool completion and retained recovery
 
 - The Codex 0.147.0 transport accepts a successful completed `dynamicToolCall` item for the matching host request, call, tool, thread and turn as provider acknowledgment. It records host receipt commit, response transport and provider completion separately. An unrelated `serverRequest/resolved` notification does not acknowledge a dynamic tool.
-- Callback failure, missing completion and mismatched identities hold candidate readiness. Returned transport outcomes retain bound callback evidence in active attempts; recovery holds retain the specific reason, stage, operation, evidence reference and agent-reported summary for consistent `run` and `status` output.
-- Restart reconciliation reads the exact completed provider turn and checks its dynamic-tool items against durable host receipts. Earlier active records remain readable. Incomplete evidence retains the hold; verified completion still passes through checkpoint, source, scope and candidate checks before independent review.
+- Callback failure, missing completion and mismatched identities hold required claim/checkpoint callbacks. Returned transport outcomes retain bound callback evidence in active attempts; diagnostic recovery records retain the specific reason, stage, operation, evidence reference and agent-reported summary.
+- Restart reconciliation reads the exact completed provider turn and checks available dynamic-tool items or retained live acknowledgments against durable host receipts. Earlier active records remain readable. Incomplete callback proof retains a pause; verified completion still passes through checkpoint, source, scope and candidate identity checks before independent review.
 
 ## CON-059 — Operator output and first use
 
@@ -106,11 +106,17 @@ This ledger describes implemented behavior in the source tree. Task IDs identify
 ## CON-060 — Final results in live and resumed turns
 
 - Codex 0.147.0 `final_answer` agent messages supply the role result in both live and historical turn reads. An explicit final answer overrides phase-less compatibility results, including when malformed; commentary cannot supply or replace a result. Phase-less compatibility accepts only a valid structured role result.
-- Recovery distinguishes exact-turn identity, terminal status, absent final text, invalid structured results and missing callback evidence. Existing callback receipts, source checks and candidate gates still determine whether work can advance.
+- Recovery distinguishes exact-turn identity, terminal status, absent final text, invalid structured results and missing required callback evidence. Existing callback receipts, source bindings and candidate gates still determine whether work can advance.
 
 ## CON-061 — Retained callback acknowledgments in recovery
 
 - Live verified callback outcomes are durably bound to the dispatch role, thread, turn, request, call and tool, with host receipt, response transport and provider completion recorded separately. Recovery can use a complete retained acknowledgment and matching host receipt when an exact completed provider turn omits historical dynamic-tool items. A matching successful historical item and host receipt can verify a call when its live completion record is incomplete but nonconflicting.
-- Claim, checkpoint and assessment use the same bounded check. Missing or conflicting proof retains a recovery hold; a receipt or agent result alone cannot establish acknowledgment. Candidate, review, correction and exact integration checks remain in force.
+- Claim, checkpoint and optional assessment callbacks use the same bounded check. Missing or conflicting proof for a callback retains a recovery pause; a receipt or agent result alone cannot establish callback acknowledgment. Candidate, review, correction and exact integration checks remain in force.
+
+## CON-062 — Agent-owned coordination
+
+- Reagent claims a ready roadmap task by ID and branch; Concoct supplies objective and acceptance from that entry. A ready result and checkpoint let Concoct freeze mechanically verified source without grading criterion text, checks or documentation prose.
+- Schema-defined role results carry dispositions and summaries, with task and candidate identities, review findings or operator questions when relevant. Concoct checks supplied identities against active bindings and passes narrative through. Normal review results create exact candidate-bound assessment evidence without an extra callback; requested changes return to the same reagent and revised candidates go back for reassessment within retained limits.
+- Fresh runs can set retained elapsed and inactivity limits. Exceeding one cancels the turn and invokes owned-process cessation, with the exceeded limit retained as the operator-facing reason. Human status gives plain pause reasons and next actions; exact reviewed-candidate approval still authorizes local integration only.
 
 CON-042 remains a frozen, undelivered historical reference.

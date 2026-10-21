@@ -68,7 +68,7 @@ func (a CodexAgent) RunTurn(ctx context.Context, threadID, prompt string, settin
 			}
 		}
 	}()
-	outcome, err := a.Client.RunTurn(ctx, threadID, prompt, settings, json.RawMessage(nil), onEvent)
+	outcome, err := a.Client.RunTurn(ctx, threadID, prompt, settings, codexapp.RoleResultSchema, onEvent)
 	close(done)
 	_, _ = a.Owned.Capture()
 	return outcome, err
@@ -105,7 +105,7 @@ func (a CodexAgent) Idle(ctx context.Context, threadID string) error {
 
 func toolSpecs() []codexapp.ToolSpec {
 	return []codexapp.ToolSpec{
-		{Type: "function", Name: "claim_task", Description: "Bind one eligible task after creating its branch from the baseline and before editing source. Continue engineering after acknowledgment.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"task_branch":{"type":"string"},"selection_rationale":{"type":"string"},"objective":{"type":"string"},"acceptance":{"type":"string"}},"required":["task_id","task_branch","selection_rationale","objective","acceptance"],"additionalProperties":false}`)},
+		{Type: "function", Name: "claim_task", Description: "Bind one eligible roadmap task by ID after creating its branch from the baseline and before editing source. Continue engineering after acknowledgment.", InputSchema: json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"task_branch":{"type":"string"},"selection_rationale":{"type":"string"}},"required":["task_id","task_branch","selection_rationale"],"additionalProperties":false}`)},
 		{Type: "function", Name: "save_checkpoint", Description: "Save current engineering progress and next action after an acknowledged claim, without changing the agreed task scope.", InputSchema: json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"}},"required":["content"],"additionalProperties":false}`)},
 	}
 }

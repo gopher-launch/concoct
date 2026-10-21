@@ -352,8 +352,15 @@ func (c *Client) onNotification(msg envelope) {
 type RoleResult struct {
 	Disposition string        `json:"disposition"`
 	Summary     string        `json:"summary"`
+	TaskID      string        `json:"task_id,omitempty"`
+	Candidate   string        `json:"candidate,omitempty"`
+	Findings    []string      `json:"findings,omitempty"`
 	Question    *RoleQuestion `json:"question,omitempty"`
 }
+
+// RoleResultSchema asks the provider for the same small coordination result
+// that ParseRoleResult validates on return. Host callbacks remain separate.
+var RoleResultSchema = json.RawMessage(`{"type":"object","properties":{"disposition":{"type":"string"},"summary":{"type":"string"},"task_id":{"type":"string"},"candidate":{"type":"string"},"findings":{"type":"array","items":{"type":"string"}},"question":{"type":"object","properties":{"objective":{"type":"string"},"evidence":{"type":"string"},"missing":{"type":"string"},"safe_work":{"type":"string"},"next_step":{"type":"string"},"source_change":{"type":"boolean"},"scope_change":{"type":"boolean"},"options":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"description":{"type":"string"},"tradeoff":{"type":"string"}},"required":["id","description","tradeoff"],"additionalProperties":false}}},"required":["objective","evidence","missing","safe_work","next_step"],"additionalProperties":false}},"required":["disposition","summary"],"additionalProperties":false}`)
 
 type RoleQuestion struct {
 	Objective    string               `json:"objective"`
@@ -375,8 +382,23 @@ type RoleQuestionOption struct {
 // ParseRoleResult keeps provider completion distinct from a valid role verdict.
 func ParseRoleResult(text string) (RoleResult, error) {
 	var result RoleResult
-	if strings.TrimSpace(text) == "" || json.Unmarshal([]byte(text), &result) != nil || strings.TrimSpace(result.Disposition) == "" || strings.TrimSpace(result.Summary) == "" {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.DisallowUnknownFields()
+	if strings.TrimSpace(text) == "" || decoder.Decode(&result) != nil || decoder.Decode(new(any)) != io.EOF || strings.TrimSpace(result.Summary) == "" {
 		return RoleResult{}, ErrMalformedRoleResult
+	}
+	switch result.Disposition {
+	case "engineering", "no_suitable_work", "decision_required", "blocker", "ready_for_review", "approved", "changes_requested":
+	default:
+		return RoleResult{}, ErrMalformedRoleResult
+	}
+	if len(result.Summary) > 4096 || len(result.TaskID) > 64 || len(result.Candidate) > 128 || len(result.Findings) > 64 || result.Question != nil && result.Disposition != "decision_required" && result.Disposition != "blocker" {
+		return RoleResult{}, ErrMalformedRoleResult
+	}
+	if result.Disposition == "decision_required" || result.Disposition == "blocker" {
+		if result.Question == nil || strings.TrimSpace(result.Question.Objective) == "" || strings.TrimSpace(result.Question.Evidence) == "" || strings.TrimSpace(result.Question.Missing) == "" || strings.TrimSpace(result.Question.SafeWork) == "" || strings.TrimSpace(result.Question.NextStep) == "" {
+			return RoleResult{}, ErrMalformedRoleResult
+		}
 	}
 	return result, nil
 }

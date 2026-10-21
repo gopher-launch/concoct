@@ -2,6 +2,7 @@ package turnstop
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -29,5 +30,8 @@ func TestConfiguredStopAndStallWatchdog(t *testing.T) {
 	case <-other.Done():
 	case <-time.After(time.Second):
 		t.Fatal("elapsed watchdog did not cancel turn")
+	}
+	if !errors.Is(context.Cause(other), ErrElapsedLimit) {
+		t.Fatalf("elapsed limit reason = %v", context.Cause(other))
 	}
 }

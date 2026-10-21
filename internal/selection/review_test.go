@@ -170,7 +170,11 @@ func TestReviewSourceDriftAndGenuineBlockerStayDistinct(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"` + tc.disposition + `","summary":"external decision required"}`}, nil
+				final := `{"disposition":"` + tc.disposition + `","summary":"external decision required"}`
+				if tc.name == "blocker" {
+					final = `{"disposition":"decision_required","summary":"external decision required","question":{"objective":"Assess candidate","evidence":"Decision unavailable in source","missing":"Choose the required behavior","safe_work":"Source remains frozen","next_step":"Answer the reviewer"}}`
+				}
+				return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: final}, nil
 			}
 			result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
 			if tc.name != "blocker" {
@@ -245,15 +249,34 @@ func TestReviewGateStopsBeforeReviewerThread(t *testing.T) {
 	}
 }
 
-func TestCompletedReviewWithoutAssessmentCannotApprove(t *testing.T) {
+func TestStructuredReviewApprovesWithoutAssessmentCallback(t *testing.T) {
 	repo, external, policy := testRepo(t)
 	reviewer := &fakeReviewer{}
 	reviewer.run = func(_ string, _ codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
 		return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: `{"disposition":"approved","summary":"claims approval"}`}, nil
 	}
 	result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
-	if err == nil || result.Status != "recovery_required" || result.Snapshot.Hold != "recovery-required" || result.Snapshot.Review.Verdict != "" || len(result.Snapshot.Dispatch.Assessments) != 0 {
-		t.Fatalf("provider completion implied review approval: %+v, %v", result, err)
+	if err != nil || result.Status != "approved" || result.Snapshot.Review.Verdict != "approved" || len(result.Snapshot.Dispatch.Assessments) != 1 {
+		t.Fatalf("structured review did not approve exact candidate: %+v, %v", result, err)
+	}
+}
+
+func TestStructuredReviewRejectsWrongCandidateAndMissingFindings(t *testing.T) {
+	for _, final := range []string{
+		`{"disposition":"approved","summary":"reviewed","task_id":"APP-002","candidate":"another-commit"}`,
+		`{"disposition":"changes_requested","summary":"needs work","task_id":"APP-002"}`,
+	} {
+		t.Run(final, func(t *testing.T) {
+			repo, external, policy := testRepo(t)
+			reviewer := &fakeReviewer{}
+			reviewer.run = func(_ string, _ codexapp.ToolHandler) (codexapp.TurnOutcome, error) {
+				return codexapp.TurnOutcome{ThreadID: "reviewer-thread", TurnID: "review-turn", Status: "completed", FinalText: final}, nil
+			}
+			result, err := Execute(context.Background(), Config{Repository: repo, Root: external, Policy: policy, Agent: readyAgent(t, repo, external, readyEvidence(), false, true), Reviewer: reviewer})
+			if err == nil || result.Status != "recovery_required" || result.Snapshot.Review.Verdict != "" || len(result.Snapshot.Dispatch.Assessments) != 0 {
+				t.Fatalf("invalid review passed: %+v, %v", result, err)
+			}
+		})
 	}
 }
 

@@ -28,7 +28,7 @@ type hostSession struct {
 }
 
 type claimArguments struct {
-	TaskID, TaskBranch, SelectionRationale, Objective, Acceptance string
+	TaskID, TaskBranch, SelectionRationale string
 }
 
 func (s *hostSession) handle(_ context.Context, call codexapp.ToolCall) (codexapp.PreparedToolResponse, error) {
@@ -41,13 +41,11 @@ func (s *hostSession) handle(_ context.Context, call codexapp.ToolCall) (codexap
 			TaskID             string `json:"task_id"`
 			TaskBranch         string `json:"task_branch"`
 			SelectionRationale string `json:"selection_rationale"`
-			Objective          string `json:"objective"`
-			Acceptance         string `json:"acceptance"`
 		}
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
 			return codexapp.PreparedToolResponse{}, err
 		}
-		claim := claimArguments{args.TaskID, args.TaskBranch, args.SelectionRationale, args.Objective, args.Acceptance}
+		claim := claimArguments{args.TaskID, args.TaskBranch, args.SelectionRationale}
 		return codexapp.PreparedToolResponse{Success: true, Text: "Claim acknowledged; continue engineering this task.", Commit: func(context.Context) error {
 			return s.claim(call.CallID, claim)
 		}}, nil
@@ -93,9 +91,6 @@ func (s *hostSession) claim(callID string, args claimArguments) error {
 	objective, acceptance, err := taskScope(entry)
 	if err != nil {
 		return err
-	}
-	if strings.TrimSpace(args.Objective) != objective || strings.TrimSpace(args.Acceptance) != acceptance {
-		return fmt.Errorf("claim objective or acceptance differs from current roadmap")
 	}
 	if s.existingBranches[args.TaskBranch] {
 		return fmt.Errorf("task branch %q existed before selection", args.TaskBranch)

@@ -254,18 +254,21 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		turnErr = observeErr
 	}
 	finish := "completed"
-	if turnErr != nil || outcome.Status != "completed" {
+	if turnCtx.Err() != nil || turnErr != nil || outcome.Status != "completed" {
 		finish = "uncertain"
 	}
 	if err := owner.FinishDispatch(binding.AttemptID, finish, dispatch.Receipt(outcome.Usage)); err != nil {
 		return result, err
 	}
-	if turnCtx.Err() != nil && turnErr != nil {
-		result.Status, err = turnstop.Handle(owner, cfg.Agent, "iragent", thread.ID, outcome.TurnID, binding.AttemptID)
+	if turnCtx.Err() != nil {
+		result.Status, err = turnstop.Handle(owner, cfg.Agent, "iragent", thread.ID, outcome.TurnID, binding.AttemptID, context.Cause(turnCtx))
 		result.Snapshot, _ = store.Status()
 		return result, err
 	}
 	if turnErr != nil || outcome.Status != "completed" {
+		if turnErr == nil {
+			turnErr = fmt.Errorf("provider reported %s: %s", outcome.Status, outcome.ProviderError)
+		}
 		return holdRecovery(owner, store, &result, "review turn interrupted or uncertain", turnErr)
 	}
 	if outcome.ThreadID != thread.ID || outcome.TurnID == "" {
@@ -280,6 +283,9 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 	verdict, err := codexapp.ParseRoleResult(outcome.FinalText)
 	if err != nil {
 		return holdRecovery(owner, store, &result, "invalid reviewer result", err)
+	}
+	if verdict.TaskID != "" && verdict.TaskID != snapshot.TaskID || verdict.Candidate != "" && verdict.Candidate != binding.Candidate {
+		return holdRecovery(owner, store, &result, "reviewer result binding differs from task or candidate", nil)
 	}
 	if verdict.Disposition == "decision_required" || verdict.Disposition == "blocker" {
 		if verdict.Question != nil {
@@ -307,7 +313,9 @@ func Run(ctx context.Context, cfg Config, owner *activework.Owner, store *active
 		return holdRecovery(owner, store, &result, "invalid reviewer disposition", fmt.Errorf("reviewer returned %q", verdict.Disposition))
 	}
 	if !session.saved {
-		return holdRecovery(owner, store, &result, "reviewer returned no assessment checkpoint", fmt.Errorf("completed reviewer verdict has no assessment"))
+		if err := session.saveResult(verdict, outcome.TurnID); err != nil {
+			return holdRecovery(owner, store, &result, "reviewer result could not be recorded", err)
+		}
 	}
 	if err := session.finalizeEvidence(verdict.Disposition, outcome.TurnID); err != nil {
 		return holdRecovery(owner, store, &result, "review evidence could not be finalized", err)
@@ -442,7 +450,7 @@ func holdLimit(owner *activework.Owner, store *activework.Store, result *Result,
 }
 
 func prompt(snapshot activework.Snapshot, binding activework.PendingReview, task, checkout string) string {
-	return fmt.Sprintf("You are iragent, an independent reviewer. Follow AGENTS.md and current repository sources. Review the agreed task and frozen candidate without editing source, branch, index or untracked files. Your separate checkout is %s, pinned to candidate %s with tree %s. The parent baseline is %s; the agreed scope SHA-256 is %s. Assess all acceptance criteria and candidate verification evidence from the active task below. Inspect source and relevant design; do not read unrelated archives or run a separate task. Stream concise progress. Save a pending assessment with save_assessment before returning a structured JSON result. Include specific findings, evidence and checks. Return disposition approved only if the exact candidate meets the scope, changes_requested for actionable source findings, or decision_required for a genuine blocker. A blocker result includes a question object with objective, evidence, missing, safe_work, next_step, optional stable-ID options/tradeoffs, and source_change or scope_change flags when applicable. A source-changing answer stays within the agreed scope unless separately authorized. Provider completion alone does not approve the candidate. Do not integrate, push or publish.\n\nActive task and verification record:\n%s", checkout, binding.Candidate, snapshot.Candidate.Tree, snapshot.ParentCommit, binding.ScopeSHA256, task)
+	return fmt.Sprintf("You are iragent, an independent reviewer. Follow AGENTS.md and current repository sources. Review the agreed task and frozen candidate without editing source, branch, index or untracked files. Your separate checkout is %s, pinned to candidate %s with tree %s. The parent baseline is %s; the agreed scope SHA-256 is %s. Judge the implementation, checks, documentation and any prior findings yourself. Inspect source and relevant design; do not read unrelated archives or run a separate task. Stream concise progress. Return one JSON result with disposition approved, changes_requested, or decision_required, summary, task_id %s, candidate %s, and findings as an array of specific actionable strings when changes are requested. A decision_required result includes a question object with objective, evidence, missing, safe_work, next_step, optional stable-ID options/tradeoffs, and source_change or scope_change flags when applicable. If a source-changing decision needs retained findings, save them with save_assessment. A source-changing answer stays within the agreed scope unless separately authorized. Do not integrate, push or publish.\n\nActive task and verification record:\n%s", checkout, binding.Candidate, snapshot.Candidate.Tree, snapshot.ParentCommit, binding.ScopeSHA256, snapshot.TaskID, binding.Candidate, task)
 }
 
 // ReconcileCompleted finalizes one provider-observed completed assessment
@@ -470,23 +478,18 @@ func ReconcileCompleted(ctx context.Context, agent Agent, owner *activework.Owne
 	if err != nil || (verdict.Disposition != "approved" && verdict.Disposition != "changes_requested") {
 		return result, fmt.Errorf("completed reviewer has no actionable verdict: %v", err)
 	}
-	content, err := owner.ReviewEvidence(snapshot.Review.Number)
-	if err != nil {
+	if verdict.TaskID != "" && verdict.TaskID != snapshot.TaskID || verdict.Candidate != "" && verdict.Candidate != snapshot.Review.Candidate {
+		return result, fmt.Errorf("reviewer result binding differs from task or candidate")
+	}
+	session := &hostSession{owner: owner, review: *snapshot.Review, threadID: snapshot.Review.ThreadID}
+	if err := owner.ReconcileCompletedDispatch(snapshot.Review.AttemptID, snapshot.Review.ThreadID, observed.ID, "provider completed exact review turn"); err != nil {
 		return result, err
 	}
-	session := &hostSession{owner: owner, review: *snapshot.Review, threadID: snapshot.Review.ThreadID, turnID: observed.ID, saved: true}
-	if !strings.HasPrefix(content, session.header()) {
-		return result, fmt.Errorf("pending assessment belongs to another candidate or scope")
+	if err := session.saveResult(verdict, observed.ID); err != nil {
+		return result, err
 	}
-	body := strings.TrimPrefix(content, session.header())
-	if suffix := fmt.Sprintf("\n\nVerdict: %s\nReviewer turn: %s\n", verdict.Disposition, observed.ID); strings.HasSuffix(body, suffix) {
-		body = strings.TrimSuffix(body, suffix)
-	}
-	receipted, err := owner.VerifiedTurnReceipt("assessment", observed.ID, strings.TrimSpace(body))
-	if err != nil || !receipted {
-		return result, fmt.Errorf("completed assessment lacks exact host receipt: %v", err)
-	}
-	if err := owner.ReconcileCompletedDispatch(snapshot.Review.AttemptID, snapshot.Review.ThreadID, observed.ID, "provider completed exact review turn"); err != nil {
+	content, err := owner.ReviewEvidence(snapshot.Review.Number)
+	if err != nil {
 		return result, err
 	}
 	if !strings.HasSuffix(content, fmt.Sprintf("\nVerdict: %s\nReviewer turn: %s\n", verdict.Disposition, observed.ID)) {
@@ -628,6 +631,46 @@ func (s *hostSession) handle(_ context.Context, call codexapp.ToolCall) (codexap
 
 func (s *hostSession) header() string {
 	return fmt.Sprintf("# Independent review %02d\n\nCandidate: %s\nAgreed scope SHA-256: %s\n\n## Assessment\n\n", s.review.Number, s.review.Candidate, s.review.ScopeSHA256)
+}
+
+func (s *hostSession) saveResult(verdict codexapp.RoleResult, turnID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saved {
+		return nil
+	}
+	body := strings.TrimSpace(verdict.Summary)
+	for _, finding := range verdict.Findings {
+		if strings.TrimSpace(finding) == "" {
+			return fmt.Errorf("empty review finding")
+		}
+		body += "\n- " + strings.TrimSpace(finding)
+	}
+	if prior, err := s.owner.ReviewEvidence(s.review.Number); err == nil {
+		if !strings.HasPrefix(prior, s.header()) {
+			return fmt.Errorf("pending assessment belongs to another candidate or scope")
+		}
+		priorBody := strings.TrimSpace(strings.TrimPrefix(prior, s.header()))
+		if suffix := fmt.Sprintf("\n\nVerdict: %s\nReviewer turn: %s", verdict.Disposition, turnID); strings.HasSuffix(priorBody, suffix) {
+			priorBody = strings.TrimSuffix(priorBody, suffix)
+		}
+		if priorBody != body {
+			verified, err := s.owner.VerifiedTurnReceipt("assessment", turnID, priorBody)
+			if err != nil || !verified {
+				return fmt.Errorf("pending assessment lacks exact reviewer receipt: %v", err)
+			}
+		}
+		s.saved, s.turnID = true, turnID
+		return nil
+	}
+	if verdict.Disposition == "changes_requested" && len(verdict.Findings) == 0 {
+		return fmt.Errorf("changes requested without findings")
+	}
+	if err := s.owner.SaveReview(s.review.Number, s.header()+body+"\n"); err != nil {
+		return err
+	}
+	s.saved, s.turnID = true, turnID
+	return nil
 }
 
 func (s *hostSession) finalizeEvidence(verdict, turnID string) error {

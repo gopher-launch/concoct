@@ -27,6 +27,23 @@ type fakeOperations struct {
 	event   *codexapp.Event
 }
 
+func TestFreshRunTimeLimits(t *testing.T) {
+	req, err := parseRequest([]string{"run", "--turn-timeout", "2m", "--stall-timeout", "30s"})
+	if err != nil || req.TurnTimeout != 2*time.Minute || req.StallTimeout != 30*time.Second {
+		t.Fatalf("time limits: %+v, %v", req, err)
+	}
+	for _, args := range [][]string{{"run", "--turn-timeout", "0s"}, {"run", "--stall-timeout", "25h"}, {"status", "--turn-timeout", "1m"}, {"run", "--approve", "a-1", "--turn-timeout", "1m"}} {
+		if _, err := parseRequest(args); err == nil {
+			t.Fatalf("invalid time limit options accepted: %v", args)
+		}
+	}
+	var output bytes.Buffer
+	printStatus(&output, view(activework.Snapshot{Active: true, TaskID: "APP-002", Dispatch: &dispatch.State{WatchdogElapsed: 2 * time.Minute, WatchdogStall: 30 * time.Second}}, request{}))
+	if !strings.Contains(output.String(), "Time limits: turn 2m0s; inactivity 30s") {
+		t.Fatalf("time limits hidden from operator: %s", output.String())
+	}
+}
+
 func TestRecoveryStatusShowsRetainedReasonBeforeReadyPhase(t *testing.T) {
 	snapshot := activework.Snapshot{Active: true, TaskID: "APP-002", Phase: "ready-for-review", Hold: "recovery-required", PendingRequest: "reconcile callback", Recovery: &activework.RecoveryIssue{AttemptID: "attempt-1", Stage: "provider-completion", Operation: "save_checkpoint", Reason: "matching completed item missing", EvidenceRef: "turn turn-1; call call-1", AgentResult: "ready for review"}}
 	if got := disposition(snapshot); got != "recovery_required" {
@@ -35,7 +52,7 @@ func TestRecoveryStatusShowsRetainedReasonBeforeReadyPhase(t *testing.T) {
 	status := view(snapshot, request{})
 	var output bytes.Buffer
 	printStatus(&output, status)
-	for _, fragment := range []string{"matching completed item missing", "save-checkpoint", "ready for review", "turn turn-1"} {
+	for _, fragment := range []string{"matching completed item missing", "paused: previous execution needs inspection", "ready for review", "turn turn-1"} {
 		if !strings.Contains(output.String(), fragment) {
 			t.Fatalf("missing %q in status: %s", fragment, output.String())
 		}
