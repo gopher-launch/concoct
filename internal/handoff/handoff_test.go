@@ -39,6 +39,9 @@ func (f *fakeRunner) StartThread(_ context.Context, cwd string, s codexapp.RoleS
 	}
 	return codexapp.Thread{ID: s.Role + "-thread"}, nil
 }
+func (f *fakeRunner) ResumeThread(_ context.Context, id string, _ bool, _ codexapp.RoleSettings) (codexapp.Thread, error) {
+	return codexapp.Thread{ID: id}, nil
+}
 func (f *fakeRunner) RunRoleTurn(ctx context.Context, id, prompt string, s codexapp.RoleSettings, emit func(codexapp.Event)) (codexapp.TurnOutcome, error) {
 	f.prompts = append(f.prompts, prompt)
 	f.turns++
@@ -123,7 +126,7 @@ func TestSelectionToIndependentReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Phase != "reviewed" || s.Verdict != "approved" || s.Attempts != 2 || fake.turns != 2 {
+	if s.Phase != "awaiting_approval" || s.Verdict != "approved" || s.ApprovedCommit != s.Candidate || s.Attempts != 2 || fake.turns != 2 {
 		t.Fatalf("wrong handoff: %+v", s)
 	}
 	if !strings.Contains(fake.prompts[0], "roadmap.md") || !strings.Contains(fake.prompts[1], s.Candidate) || !strings.Contains(fake.prompts[1], s.Evidence) {

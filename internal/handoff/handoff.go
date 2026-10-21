@@ -19,30 +19,41 @@ import (
 )
 
 // State contains coordination facts. Engineering and review prose belongs in
-// task.md and review-01.md, which the agents maintain with ordinary tools.
+// task.md and numbered review files, which agents maintain with ordinary tools.
 type State struct {
-	Repository     string                                  `json:"repository"`
-	Parent         string                                  `json:"parent"`
-	Base           string                                  `json:"base"`
-	Branch         string                                  `json:"branch,omitempty"`
-	TaskID         string                                  `json:"task_id,omitempty"`
-	Candidate      string                                  `json:"candidate,omitempty"`
-	Phase          string                                  `json:"phase"`
-	Evidence       string                                  `json:"evidence,omitempty"`
-	ReviewEvidence string                                  `json:"review_evidence,omitempty"`
-	Verdict        string                                  `json:"verdict,omitempty"`
-	Summary        string                                  `json:"summary,omitempty"`
-	Question       *codexapp.RoleQuestion                  `json:"question,omitempty"`
-	Profiles       map[dispatch.Role]codexapp.RoleSettings `json:"profiles"`
-	Threads        map[string]string                       `json:"threads,omitempty"`
-	InFlight       *InFlight                               `json:"in_flight,omitempty"`
-	Attempts       int                                     `json:"attempts"`
-	MaxAttempts    int                                     `json:"max_attempts"`
-	TurnTimeout    time.Duration                           `json:"turn_timeout,omitempty"`
-	StallTimeout   time.Duration                           `json:"stall_timeout,omitempty"`
-	LastResult     *codexapp.RoleResult                    `json:"last_result,omitempty"`
-	LastError      string                                  `json:"last_error,omitempty"`
-	Updated        time.Time                               `json:"updated"`
+	Repository       string                                  `json:"repository"`
+	Parent           string                                  `json:"parent"`
+	Base             string                                  `json:"base"`
+	Branch           string                                  `json:"branch,omitempty"`
+	TaskID           string                                  `json:"task_id,omitempty"`
+	Candidate        string                                  `json:"candidate,omitempty"`
+	Phase            string                                  `json:"phase"`
+	Evidence         string                                  `json:"evidence,omitempty"`
+	ReviewEvidence   string                                  `json:"review_evidence,omitempty"`
+	Verdict          string                                  `json:"verdict,omitempty"`
+	Summary          string                                  `json:"summary,omitempty"`
+	ReagentSummary   string                                  `json:"reagent_summary,omitempty"`
+	ReviewSummary    string                                  `json:"review_summary,omitempty"`
+	Findings         []string                                `json:"findings,omitempty"`
+	Assessments      int                                     `json:"assessments"`
+	MaxAssessments   int                                     `json:"max_assessments"`
+	ApprovedCommit   string                                  `json:"approved_commit,omitempty"`
+	AuthorizedCommit string                                  `json:"authorized_commit,omitempty"`
+	Question         *codexapp.RoleQuestion                  `json:"question,omitempty"`
+	QuestionRole     dispatch.Role                           `json:"question_role,omitempty"`
+	BlockedPhase     string                                  `json:"blocked_phase,omitempty"`
+	Answer           string                                  `json:"answer,omitempty"`
+	Profiles         map[dispatch.Role]codexapp.RoleSettings `json:"profiles"`
+	Threads          map[string]string                       `json:"threads,omitempty"`
+	RoleTurns        map[string]bool                         `json:"role_turns,omitempty"`
+	InFlight         *InFlight                               `json:"in_flight,omitempty"`
+	Attempts         int                                     `json:"attempts"`
+	MaxAttempts      int                                     `json:"max_attempts"`
+	TurnTimeout      time.Duration                           `json:"turn_timeout,omitempty"`
+	StallTimeout     time.Duration                           `json:"stall_timeout,omitempty"`
+	LastResult       *codexapp.RoleResult                    `json:"last_result,omitempty"`
+	LastError        string                                  `json:"last_error,omitempty"`
+	Updated          time.Time                               `json:"updated"`
 }
 
 // InFlight is saved with the invocation count before dispatch. A later run
@@ -54,8 +65,9 @@ type InFlight struct {
 
 type Options struct {
 	Repository, Root, Codex                                  string
+	Approve, Answer                                          string
 	ReagentModel, IragentModel, ReagentEffort, IragentEffort string
-	MaxAttempts                                              int
+	MaxAttempts, MaxAssessments                              int
 	TurnTimeout, StallTimeout                                time.Duration
 	OnEvent                                                  func(string, codexapp.Event)
 }
@@ -63,6 +75,7 @@ type Options struct {
 type Runner interface {
 	Models(context.Context) ([]codexapp.Model, error)
 	StartThread(context.Context, string, codexapp.RoleSettings, []codexapp.ToolSpec) (codexapp.Thread, error)
+	ResumeThread(context.Context, string, bool, codexapp.RoleSettings) (codexapp.Thread, error)
 	RunRoleTurn(context.Context, string, string, codexapp.RoleSettings, func(codexapp.Event)) (codexapp.TurnOutcome, error)
 	Stop(context.Context, string, string) stop.Result
 	Close() error
@@ -71,6 +84,7 @@ type Runner interface {
 type Provider struct {
 	process *codexapp.Process
 	probe   *stop.Probe
+	known   map[string]bool
 }
 
 func Launch(ctx context.Context, executable string) (*Provider, error) {
@@ -83,13 +97,27 @@ func Launch(ctx context.Context, executable string) (*Provider, error) {
 		p.Close()
 		return nil, err
 	}
-	return &Provider{p, probe}, nil
+	return &Provider{process: p, probe: probe, known: make(map[string]bool)}, nil
 }
 func (p *Provider) Models(ctx context.Context) ([]codexapp.Model, error) {
 	return p.process.Models(ctx)
 }
 func (p *Provider) StartThread(ctx context.Context, cwd string, s codexapp.RoleSettings, t []codexapp.ToolSpec) (codexapp.Thread, error) {
-	return p.process.StartThread(ctx, cwd, s, t)
+	thread, err := p.process.StartThread(ctx, cwd, s, t)
+	if err == nil {
+		p.known[thread.ID] = true
+	}
+	return thread, err
+}
+func (p *Provider) ResumeThread(ctx context.Context, id string, hadTurn bool, s codexapp.RoleSettings) (codexapp.Thread, error) {
+	if p.known[id] {
+		return codexapp.Thread{ID: id}, nil
+	}
+	thread, err := p.process.ResumeThread(ctx, id, hadTurn, s)
+	if err == nil {
+		p.known[id] = true
+	}
+	return thread, err
 }
 func (p *Provider) RunRoleTurn(ctx context.Context, id, prompt string, s codexapp.RoleSettings, event func(codexapp.Event)) (codexapp.TurnOutcome, error) {
 	done := make(chan struct{})
@@ -270,13 +298,16 @@ func Run(ctx context.Context, o Options, open func(context.Context, string) (Run
 	if s.Repository != "" && s.Repository != repo {
 		return s, fmt.Errorf("state belongs to %s", s.Repository)
 	}
+	if o.Approve != "" && o.Answer != "" {
+		return s, fmt.Errorf("approval and blocker answer cannot be combined")
+	}
 	if s.Phase == "no_suitable_work" {
 		s = State{}
 	}
-	if s.Phase != "" && (o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
+	if s.Phase != "" && (o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
 		return s, fmt.Errorf("role settings and limits cannot change an active run")
 	}
-	if s.InFlight != nil && (s.Phase == "engineering" || s.Phase == "reviewing") {
+	if s.InFlight != nil && (s.Phase == "engineering" || s.Phase == "reviewing" || s.Phase == "correcting" || s.Phase == "integrating") {
 		s.Phase = "execution_uncertain"
 		s.LastError = fmt.Sprintf("%s turn in thread %s has no recorded outcome; inspect source and external evidence before any further dispatch", s.InFlight.Role, s.InFlight.ThreadID)
 		if err := save(dir, s); err != nil {
@@ -284,10 +315,37 @@ func Run(ctx context.Context, o Options, open func(context.Context, string) (Run
 		}
 		return s, nil
 	}
-	if s.Phase == "reviewed" || s.Phase == "blocked" || s.Phase == "limit_exhausted" || s.Phase == "execution_failed" || s.Phase == "execution_uncertain" || s.Phase == "invalid_result" || s.Phase == "source_changed" {
+	if s.MaxAssessments == 0 {
+		s.MaxAssessments = 3
+	}
+	// CON-064 records can continue from an exact completed review boundary.
+	if s.Phase == "reviewed" {
+		if s.Verdict == "approved" {
+			s.ApprovedCommit = s.Candidate
+			s.Phase = "awaiting_approval"
+		} else if s.Verdict == "changes_requested" {
+			if s.Assessments == 0 {
+				s.Assessments = 1
+			}
+			s.Phase = "correcting"
+		} else {
+			return halt(dir, s, "invalid_result", fmt.Errorf("reviewed state lacks a verdict"))
+		}
+		if err := save(dir, s); err != nil {
+			return s, err
+		}
+	}
+	switch s.Phase {
+	case "integrated", "integration_failed", "execution_failed", "execution_uncertain", "invalid_result", "source_changed", "limit_exhausted":
+		if o.Approve != "" || o.Answer != "" {
+			return s, fmt.Errorf("active run is stopped at %s", s.Phase)
+		}
 		return s, nil
 	}
 	if s.Phase == "" {
+		if o.Approve != "" || o.Answer != "" {
+			return s, fmt.Errorf("no active work to approve or answer")
+		}
 		branch, err := git(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
 		if err != nil {
 			return s, fmt.Errorf("new work requires a named branch: %w", err)
@@ -303,17 +361,49 @@ func Run(ctx context.Context, o Options, open func(context.Context, string) (Run
 		if err != nil {
 			return s, err
 		}
-		s = State{Repository: repo, Parent: branch, Base: base, Phase: "engineering", Profiles: map[dispatch.Role]codexapp.RoleSettings{}, Threads: map[string]string{}, MaxAttempts: 12, TurnTimeout: o.TurnTimeout, StallTimeout: o.StallTimeout}
+		s = State{Repository: repo, Parent: branch, Base: base, Phase: "engineering", Profiles: map[dispatch.Role]codexapp.RoleSettings{}, Threads: map[string]string{}, RoleTurns: map[string]bool{}, MaxAttempts: 12, MaxAssessments: 3, TurnTimeout: o.TurnTimeout, StallTimeout: o.StallTimeout}
 		if o.MaxAttempts > 0 {
 			s.MaxAttempts = o.MaxAttempts
+		}
+		if o.MaxAssessments > 0 {
+			s.MaxAssessments = o.MaxAssessments
 		}
 		if err = save(dir, s); err != nil {
 			return s, err
 		}
 	}
-	if s.Attempts >= s.MaxAttempts {
+	if o.Approve != "" {
+		if s.Phase != "awaiting_approval" || s.ApprovedCommit == "" || o.Approve != s.ApprovedCommit {
+			return s, fmt.Errorf("approval does not match the exact independently approved candidate")
+		}
+		s.AuthorizedCommit = o.Approve
+		s.Phase = "integrating"
+		if err = save(dir, s); err != nil {
+			return s, err
+		}
+	}
+	if o.Answer != "" {
+		if s.Phase != "blocked" || s.Question == nil || s.BlockedPhase == "" {
+			return s, fmt.Errorf("no active blocker is awaiting an answer")
+		}
+		if strings.TrimSpace(o.Answer) == "" {
+			return s, fmt.Errorf("answer must not be empty")
+		}
+		s.Answer = o.Answer
+		s.Phase = s.BlockedPhase
+		if err = save(dir, s); err != nil {
+			return s, err
+		}
+	}
+	if s.Phase == "blocked" || s.Phase == "awaiting_approval" {
+		return s, nil
+	}
+	if s.Phase != "engineering" && s.Phase != "reviewing" && s.Phase != "correcting" && s.Phase != "integrating" {
+		return s, fmt.Errorf("unsupported active phase %q", s.Phase)
+	}
+	if s.Attempts >= s.MaxAttempts || (s.Assessments >= s.MaxAssessments && (s.Phase == "reviewing" || s.Phase == "correcting")) {
 		s.Phase = "limit_exhausted"
-		s.LastError = "invocation limit exhausted"
+		s.LastError = "invocation or assessment limit exhausted"
 		_ = save(dir, s)
 		return s, nil
 	}
@@ -335,22 +425,29 @@ func Run(ctx context.Context, o Options, open func(context.Context, string) (Run
 			return s, err
 		}
 	}
-	if s.Phase == "engineering" {
-		s, err = turn(ctx, runner, dir, s, dispatch.Reagent, o)
+	for {
+		if s.Attempts >= s.MaxAttempts || (s.Assessments >= s.MaxAssessments && (s.Phase == "reviewing" || s.Phase == "correcting")) {
+			s.Phase = "limit_exhausted"
+			s.LastError = "invocation or assessment limit exhausted"
+			_ = save(dir, s)
+			return s, nil
+		}
+		step := s.Phase
+		role := dispatch.Reagent
+		if step == "reviewing" {
+			role = dispatch.Iragent
+		}
+		s, err = turn(ctx, runner, dir, s, role, step, o)
 		if err != nil {
 			return s, err
 		}
-		if s.Phase != "reviewing" {
+		if s.Phase != "reviewing" && s.Phase != "correcting" {
 			return s, nil
 		}
 	}
-	if s.Phase == "reviewing" {
-		return turn(ctx, runner, dir, s, dispatch.Iragent, o)
-	}
-	return s, nil
 }
 
-func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch.Role, o Options) (State, error) {
+func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch.Role, step string, o Options) (State, error) {
 	if s.Attempts >= s.MaxAttempts {
 		s.Phase = "limit_exhausted"
 		s.LastError = "invocation limit exhausted"
@@ -358,7 +455,14 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		return s, nil
 	}
 	settings := s.Profiles[role]
-	thread, err := runner.StartThread(ctx, s.Repository, settings, nil)
+	var thread codexapp.Thread
+	var err error
+	if id := s.Threads[string(role)]; id != "" {
+		thread, err = runner.ResumeThread(ctx, id, s.RoleTurns[string(role)], settings)
+	}
+	if s.Threads[string(role)] == "" || err != nil {
+		thread, err = runner.StartThread(ctx, s.Repository, settings, nil)
+	}
 	if err != nil {
 		return s, err
 	}
@@ -368,10 +472,7 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 	if err = save(dir, s); err != nil {
 		return s, err
 	}
-	prompt := ReagentPrompt(s, dir)
-	if role == dispatch.Iragent {
-		prompt = IragentPrompt(s, dir)
-	}
+	prompt := promptForStep(s, dir, step)
 	turnCtx := ctx
 	var activity chan struct{}
 	cancel := func() {}
@@ -444,30 +545,56 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		return s, fmt.Errorf("%s", s.LastError)
 	}
 	s.InFlight = nil
+	if s.RoleTurns == nil {
+		s.RoleTurns = make(map[string]bool)
+	}
+	s.RoleTurns[string(role)] = true
 	result, err := codexapp.ParseRoleResult(outcome.FinalText)
 	if err != nil {
 		return halt(dir, s, "invalid_result", fmt.Errorf("%s returned an invalid structured result", role))
 	}
+	return routeResult(dir, s, role, step, result)
+}
+
+func routeResult(dir string, s State, role dispatch.Role, step string, result codexapp.RoleResult) (State, error) {
 	s.LastResult = &result
 	s.Summary = result.Summary
 	s.LastError = ""
 	if result.Disposition == "decision_required" || result.Disposition == "blocker" {
 		s.Phase = "blocked"
 		s.Question = result.Question
-		_ = save(dir, s)
+		s.QuestionRole = role
+		s.BlockedPhase = step
+		s.Answer = ""
+		if err := save(dir, s); err != nil {
+			return s, err
+		}
 		return s, nil
 	}
-	if role == dispatch.Reagent {
+	s.Question, s.QuestionRole, s.BlockedPhase, s.Answer = nil, "", "", ""
+	switch step {
+	case "engineering", "correcting":
 		switch result.Disposition {
 		case "no_suitable_work":
+			if step != "engineering" {
+				return halt(dir, s, "invalid_result", fmt.Errorf("correction cannot report no suitable work"))
+			}
 			s.Phase = "no_suitable_work"
 		case "ready_for_review":
 			if result.TaskID == "" || result.Candidate == "" {
 				return halt(dir, s, "invalid_result", fmt.Errorf("ready result requires task ID and candidate commit"))
 			}
+			if step == "correcting" && (result.TaskID != s.TaskID || result.Candidate == s.Candidate) {
+				return halt(dir, s, "invalid_result", fmt.Errorf("correction requires same task and a distinct candidate"))
+			}
+			priorBranch := s.Branch
 			s.TaskID = result.TaskID
 			s.Candidate = result.Candidate
-			s.Branch, _ = git(s.Repository, "symbolic-ref", "--quiet", "--short", "HEAD")
+			if step == "engineering" {
+				s.Branch, _ = git(s.Repository, "symbolic-ref", "--quiet", "--short", "HEAD")
+			} else {
+				s.Branch = priorBranch
+			}
 			if err := verifyCandidate(s); err != nil {
 				return halt(dir, s, "source_changed", err)
 			}
@@ -479,18 +606,20 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 				return halt(dir, s, "invalid_result", fmt.Errorf("task evidence: %w", err))
 			}
 			s.Evidence = evidence
+			s.ReagentSummary = result.Summary
+			s.ReviewEvidence, s.ReviewSummary, s.Findings, s.Verdict, s.ApprovedCommit = "", "", nil, "", ""
 			s.Phase = "reviewing"
 		default:
 			return halt(dir, s, "invalid_result", fmt.Errorf("unexpected reagent disposition %q", result.Disposition))
 		}
-	} else {
+	case "reviewing":
 		if result.TaskID != s.TaskID || result.Candidate != s.Candidate {
 			return halt(dir, s, "invalid_result", fmt.Errorf("review result identity differs from candidate"))
 		}
 		if result.Disposition != "approved" && result.Disposition != "changes_requested" {
 			return halt(dir, s, "invalid_result", fmt.Errorf("unexpected iragent disposition %q", result.Disposition))
 		}
-		reviewEvidence := filepath.Join(dir, "evidence", s.TaskID, "review-01.md")
+		reviewEvidence := reviewPath(dir, s.TaskID, s.Assessments+1)
 		if result.Evidence != "" {
 			reviewEvidence = result.Evidence
 		}
@@ -501,8 +630,30 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 			return halt(dir, s, "invalid_result", fmt.Errorf("review evidence: %w", err))
 		}
 		s.ReviewEvidence = reviewEvidence
+		s.ReviewSummary = result.Summary
+		s.Findings = append([]string(nil), result.Findings...)
+		s.Assessments++
 		s.Verdict = result.Disposition
-		s.Phase = "reviewed"
+		if result.Disposition == "approved" {
+			s.ApprovedCommit = s.Candidate
+			s.Phase = "awaiting_approval"
+		} else {
+			s.Phase = "correcting"
+		}
+	case "integrating":
+		if result.TaskID != s.TaskID || result.Candidate != s.AuthorizedCommit || s.AuthorizedCommit == "" || s.AuthorizedCommit != s.ApprovedCommit {
+			return halt(dir, s, "invalid_result", fmt.Errorf("integration result identity differs from authorized candidate"))
+		}
+		switch result.Disposition {
+		case "integrated":
+			s.Phase = "integrated"
+		case "integration_failed":
+			s.Phase = "integration_failed"
+		default:
+			return halt(dir, s, "invalid_result", fmt.Errorf("unexpected integration disposition %q", result.Disposition))
+		}
+	default:
+		return halt(dir, s, "invalid_result", fmt.Errorf("unsupported step %q", step))
 	}
 	if err := save(dir, s); err != nil {
 		return s, err

@@ -388,7 +388,7 @@ func ParseRoleResult(text string) (RoleResult, error) {
 		return RoleResult{}, ErrMalformedRoleResult
 	}
 	switch result.Disposition {
-	case "engineering", "no_suitable_work", "decision_required", "blocker", "ready_for_review", "approved", "changes_requested":
+	case "engineering", "no_suitable_work", "decision_required", "blocker", "ready_for_review", "approved", "changes_requested", "integrated", "integration_failed":
 	default:
 		return RoleResult{}, ErrMalformedRoleResult
 	}

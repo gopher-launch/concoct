@@ -568,7 +568,7 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 ## CON-065 — Complete correction routing and operator-approved agent integration
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F005
 - Depends on: CON-064
@@ -625,4 +625,4 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 
 ## Next task boundary
 
-CON-065 is the next implementation task after the operator-confirmed CON-064 documentation trial. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+CON-056 is the next ready acceptance task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.

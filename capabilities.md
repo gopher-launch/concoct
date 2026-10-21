@@ -24,7 +24,14 @@ This ledger describes behavior in the current candidate's intended post-integrat
 
 - A fresh plain `concoct run` requires a clean named parent checkout. In one initial turn, reagent selects a ready roadmap task, creates its task branch in that checkout, maintains external task evidence, engineers and verifies it, and reports a committed candidate.
 - Concoct uses no host claim/checkpoint/assessment callbacks. It does not stage, commit, classify or assess the candidate's engineering contents. It checks the reported commit against the clean task-branch HEAD and recorded base before launching a separate iragent session in the same checkout.
-- Iragent receives the exact candidate and a readable external task evidence file, assesses independently and records external review evidence. A completed verdict must explicitly identify the task and candidate and have a readable external review file. This slice displays the verdict and evidence location; it stops before correction routing and integration. Concoct checks file presence without grading narrative.
+- Iragent receives the exact candidate and a readable external task evidence file, assesses independently and records external review evidence. A completed verdict must explicitly identify the task and candidate and have a readable external review file. Concoct checks file presence without grading narrative.
 - Prose streams with role labels; structured result summaries stay separate from Concoct's coordination status. Atomic external state retains minimal bindings, role settings, phase, latest result, invocation count and an in-flight turn marker saved before dispatch. An unrecorded turn outcome stops later runs as uncertain rather than replaying work. An execution lock prevents concurrent runs. Invocation and optional turn/inactivity limits stop further work; timeout stopping invokes provider cleanup and owned-process cessation checks.
 
-CON-042 remains a frozen, undelivered historical reference. Correction routing and operator-approved integration are planned under CON-065.
+## CON-065 — Correction, approval and integration handoff
+
+- Requested changes route back to reagent with the prior assessment and findings. A distinct corrected commit returns to iragent for another numbered assessment. Concoct forwards agent narrative without deciding its merit.
+- Reagent and iragent sessions are reused when available; a replacement session receives current source and external evidence context. Replacement turns, reassessments and integration turns retain the same invocation and assessment consumption. Elapsed and inactivity limits apply to each turn.
+- An explicit blocker stops the current step with a simple question. An operator answer resumes the requesting role with the answer and retained context. Completed handoff boundaries can continue in a later `run`; uncertain in-flight execution remains stopped for inspection.
+- An approved assessment exposes the exact reviewed commit, role summaries and review evidence, then waits for `run --approve COMMIT`. Concoct binds that authorization to the approved commit and asks reagent to perform local guarded fast-forward integration. Reagent owns Git checks and reports integrated, failed or blocked; Concoct does not perform a Git integration transaction or publish.
+
+CON-042 remains a frozen, undelivered historical reference.

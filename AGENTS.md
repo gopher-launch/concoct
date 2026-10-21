@@ -10,4 +10,4 @@ Keep active task plans, decisions, checks and review records outside the product
 
 For Go changes, run `gofmt` on changed Go files, `go test ./...`, `go vet ./...`, `go build ./cmd/concoct`, and `git diff --check`. Run focused smoke checks for CLI behavior. Update these checks only when the task introduces a new build or test contract.
 
-The old Concoct skill, persona handoffs, `.concoct/current/` notes, self-hosting workflow and generated init templates are outside this rebuild. Use ordinary manually directed implementation and independent review sessions until the new controller is delivered.
+The old Concoct skill, persona handoffs, `.concoct/current/` notes, self-hosting workflow and generated init templates are outside this rebuild. Use ordinary manually directed implementation and independent review sessions for construction tasks.
