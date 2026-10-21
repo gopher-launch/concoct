@@ -30,7 +30,7 @@ The source tree includes selection, engineering, candidate freezing, bounded ind
 | M2: automatic candidate/review flow          | CON-047–CON-050                  | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance |
 | M3: durable interventions                    | CON-051–CON-052                  | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition                                       |
 | M4: accepted local delivery                  | CON-053–CON-054                  | Exact-candidate integration and mechanical completion/archive lifecycle                                                                |
-| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-062 | Correct callback/recovery handling, agent coordination and operator presentation before completing the real-task demonstration                             |
+| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-062 | Correct callback/recovery handling, agent coordination and operator presentation before completing the real-task demonstration         |
 
 The order is deliberately sequential for the first delivery. The dependencies below identify concrete prerequisites rather than suggesting parallel agent work. Intermediate milestones are development checkpoints, not claims that a usable redesigned release has shipped.
 
@@ -494,6 +494,38 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 **Scope boundary:** Simplify the existing implementation. No new orchestration framework, broader recovery machinery or salvage requirement for previous Curu trials.
 
 **Follow-up:** After independent review and operator-authorized integration, perform a fresh CON-056 trial on CURU-001, using successful automatic agent handoffs as the primary acceptance target.
+
+## CON-063 — Correct provider response schemas and report rejected requests clearly
+
+- Kind: task
+- Status: ready
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-062
+
+**Objective:** Supply provider-compatible structured result schemas so agent execution can start, and clearly report requests rejected before agent work begins.
+
+**Context:** The latest live trial was rejected because Concoct’s result schema declares `task_id` without including it in `required`. Other fields, including nested question properties, have the same incompatibility. Existing JSON-syntax validation does not establish compatibility with the provider’s structured-output contract.
+
+**Acceptance criteria:**
+
+- Correct the complete result schema actually sent to Codex. Every object lists all declared properties in `required` and sets `additionalProperties: false`. Represent values that are optional for particular dispositions using provider-supported nullable types.
+- Apply the correction consistently to reagent and iragent results, including nested questions and options. Preserve the small coordination contract established by CON-062.
+- Ensure result parsing handles schema-produced nulls consistently. Valid results for engineering, review, requested changes, approval, no suitable work and operator questions remain usable for their defined handoffs.
+- Add focused compatibility tests against the actual outbound schema and request payload. Verify the provider’s relevant schema rules recursively and validate representative result fixtures. Checking JSON syntax or a separate test-only schema is insufficient.
+- Recognize the demonstrated invalid-schema request rejection as a definite execution startup failure. Do not describe it as an uncertain outcome requiring investigation, and do not recommend an unchanged retry.
+- Normal operator output identifies Concoct as the source, explains that the agent could not start because Concoct supplied an invalid response schema, and states that a code correction is required. Retain the full provider error in external diagnostic evidence without dumping raw JSON or repeating truncated errors in ordinary stdout/stderr.
+
+**Verification:**
+
+- Demonstrate that the regression test rejects the previously shipped schema and accepts the corrected outbound schema.
+- Exercise representative schema-valid results from both roles, including null optional values and a populated operator question.
+- Simulate the observed provider rejection and verify the startup-failure classification and human-readable output.
+- Run applicable formatting, tests, vet, build and whitespace checks. Record verification and independent review externally.
+
+**Scope boundary:** No new recovery subsystem, general schema framework, provider upgrade or additional assessment of agent work. No billable provider probe or live Curu restart is required during implementation.
+
+**Follow-up:** After independent review and operator-authorized integration, rebuild Concoct and prepare a fresh CON-056 live trial.
 
 ## CON-056 — Prove the golden path on fresh real work
 
