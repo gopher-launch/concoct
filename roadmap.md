@@ -23,14 +23,14 @@ The source tree includes selection, engineering, candidate freezing, bounded ind
 
 ## Delivery checkpoints
 
-| Checkpoint                                   | Tasks                            | Reviewable result                                                                                                                      |
-| -------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| M0: clean rebuild baseline                   | CON-043                          | Integrated minimal buildable CLI and current guidance, with no legacy engine or skill active                                           |
-| M1: trusted execution foundation             | CON-057, CON-044–CON-046         | Small roadmap parser, external active store, app-server client and enforced dispatch policy, verified with fixtures/fakes              |
-| M2: automatic candidate/review flow          | CON-047–CON-050                  | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance |
-| M3: durable interventions                    | CON-051–CON-052                  | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition                                       |
-| M4: accepted local delivery                  | CON-053–CON-054                  | Exact-candidate integration and mechanical completion/archive lifecycle                                                                |
-| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-063 | Correct callback/recovery handling, agent coordination, response schemas and operator presentation before completing the real-task demonstration         |
+| Checkpoint                                   | Tasks                            | Reviewable result                                                                                                                                |
+| -------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| M0: clean rebuild baseline                   | CON-043                          | Integrated minimal buildable CLI and current guidance, with no legacy engine or skill active                                                     |
+| M1: trusted execution foundation             | CON-057, CON-044–CON-046         | Small roadmap parser, external active store, app-server client and enforced dispatch policy, verified with fixtures/fakes                        |
+| M2: automatic candidate/review flow          | CON-047–CON-050                  | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance           |
+| M3: durable interventions                    | CON-051–CON-052                  | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition                                                 |
+| M4: accepted local delivery                  | CON-053–CON-054                  | Exact-candidate integration and mechanical completion/archive lifecycle                                                                          |
+| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-063 | Correct callback/recovery handling, agent coordination, response schemas and operator presentation before completing the real-task demonstration |
 
 The order is deliberately sequential for the first delivery. The dependencies below identify concrete prerequisites rather than suggesting parallel agent work. Intermediate milestones are development checkpoints, not claims that a usable redesigned release has shipped.
 
@@ -528,6 +528,80 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 **Scope boundary:** No new recovery subsystem, general schema framework, provider upgrade or additional assessment of agent work. No billable provider probe or live Curu restart is required during implementation.
 
 **Follow-up:** After independent review and operator-authorized integration, rebuild Concoct and prepare a fresh CON-056 live trial.
+
+## CON-064 — Replace the verification controller with a simple agent handoff
+
+- Kind: task
+- Status: ready
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-063
+
+**Objective:** Reuse the working Codex interface to deliver one real selection → implementation → independent review sequence. Concoct invokes agents, streams prose, routes deterministic results and enforces execution limits. Agents own all engineering and verification work.
+
+**Operating contract:** A task claim means the reagent has selected work and created its branch and external evidence. It establishes no exclusive ownership or binding to a session. The iragent receives a specific candidate commit to review.
+
+**Acceptance criteria:**
+
+- Replace conflicting requirements in the active design, AGENTS.md and contributor guidance with this operating contract. Remove requirements for host-acknowledged claims, mandatory checkpoint callbacks, controller-established candidate readiness and recovery proof before ordinary handoffs.
+- Adapt the demonstrated manual reagent and iragent prompts into reusable templates. Preserve their engineering responsibilities, documentation rules and instructions to stop for genuine blockers.
+- Plain `concoct run` invokes reagent to assess the roadmap, select a suitable task, create its task branch in the current checkout, maintain external evidence, implement, test, self-review and commit a candidate. Selection and implementation occur in the same initial turn.
+- Use one checkout sequentially for implementation and independent review. Concoct does not create a separate review checkout, stage files, create candidate commits or classify deliverables/generated outputs.
+- A completed, schema-valid reagent result reporting readiness automatically invokes a separate iragent session with the task, evidence location and specific candidate commit. Concoct does not independently assess eligibility, acceptance coverage, check sufficiency or candidate contents.
+- Remove `claim_task`, `save_checkpoint` and `save_assessment` callbacks from this workflow. Agents maintain task and review Markdown using ordinary tools. Concoct does not parse those documents to authorize handoffs.
+- Use a small provider-compatible structured result for routing. Carry task identity, candidate commit, disposition, summary, findings/evidence location and an explicit blocker question where needed. Treat narrative content as opaque.
+- Stream operator-visible progress as prose with role labels and blank lines between messages. If the provider emits a defined structured envelope during commentary, render its human summary. Keep raw control JSON out of normal output. Concoct messages describe activity and outcomes without claiming independent engineering verification.
+- Retain only the ordinary bookkeeping needed for coordination: repository/task context, role sessions/settings, current step, reported candidate, latest result and execution counts. An execution lock prevents simultaneous coordinator runs; it does not establish task ownership.
+- Enforce configured invocation and time limits, including termination of owned child processes when stopping execution. Report execution failures, invalid results and explicit agent blockers clearly. Do not automatically reconstruct historical callback evidence or replay interrupted work.
+- End this first slice after the independent assessment, displaying its verdict and evidence location. Correction routing and integration are delivered by CON-065.
+- Remove superseded controller code and tests as their responsibilities leave the executable path. Do not retain the old controller as a selectable fallback.
+
+**Verification:**
+
+- Exercise the actual outbound schemas, prompts and routing through focused adapter tests.
+- Verify prose output, representative execution failure, malformed result, invocation exhaustion and timeout termination.
+- Run applicable formatting, tests, vet, build and whitespace checks.
+- Before CON-065 starts, obtain operator confirmation of a real, deliberately small documentation trial: reagent selects and implements from a roadmap, then Concoct automatically invokes iragent and presents its assessment. No manual prompt transfer or checkpoint repair is permitted. Record the observed outcome externally.
+
+**Scope boundary:** Preserve the working provider integration. No repository reset, general orchestration framework, old-run migration or recovery expansion. Historical failed trials need not be salvaged.
+
+## CON-065 — Complete correction routing and operator-approved agent integration
+
+- Kind: task
+- Status: planned
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-064
+
+**Objective:** Complete the demonstrated manual workflow by automatically routing review findings and revised candidates, then passing explicit integration authorization to reagent.
+
+**Operating contract:** Sessions provide convenient continuity. Each independent assessment identifies the candidate commit reviewed, and operator integration approval identifies that exact approved commit. Task branches and external evidence remain available to any agent or operator continuing the work.
+
+**Acceptance criteria:**
+
+- On an iragent result requesting changes, continue reagent with the assessment location and correction instructions. When reagent reports a revised candidate, automatically request another independent assessment of that specific commit.
+- Reuse the existing reagent and iragent sessions by default. Session availability is not task ownership: a replacement session can continue from repository source and external task/review records. Do not require an ownership transfer, callback history reconstruction or reapproval of the task.
+- Pass findings and summaries through without deciding whether they are justified or resolved. Those judgments remain with reagent and iragent.
+- Continue the correction/reassessment loop within invocation, assessment and time limits. Count replacement sessions and integration executions toward the applicable invocation limit. Exhaustion stops further launches without resetting consumption.
+- A legitimate blocker explicitly reported by either agent stops the loop and presents its question in ordinary language. An operator answer is passed to the appropriate agent. Concoct does not infer blockers from prose or require a multi-field justification ceremony.
+- On independent approval, present the task, exact reviewed commit, agent summaries and review location, then request operator integration approval. Do not integrate automatically.
+- Associate that authorization with the exact independently approved commit. A different commit requires its own review and authorization. This is a deterministic coordination check; it introduces no source, scope or evidence-digest verification.
+- After explicit approval, prompt reagent to integrate that exact commit locally using the demonstrated manual integration instructions. Reagent performs Git checks and integration and stops if unable to proceed. Concoct does not implement a separate Git integration transaction or publish changes.
+- Report the integration agent’s result clearly and stop after this task. The operator controls publication and initiation of subsequent work.
+- Permit ordinary continuation from completed handoff boundaries, such as pending operator input or approval, using recorded context and counts. Interrupted or ambiguous agent execution may remain stopped for an explicit restart decision; automatic recovery is not required.
+- Update active documentation and remove remaining superseded controller dependencies. Preserve external evidence as ordinary context and operator history rather than a proof chain.
+
+**Verification:**
+
+- Demonstrate a scripted requested-changes → correction → reassessment → approval sequence using the actual routing contract.
+- Verify that operator approval identifies the reviewed commit and that the integration prompt names that same commit.
+- Verify session replacement using existing source/evidence context, blocker-answer routing and limits without consumption reset.
+- Run applicable formatting, tests, vet, build and whitespace checks.
+- Complete a small real operator-run trial through independent approval and explicitly authorized reagent integration. Record which handoffs occurred automatically and any manual intervention.
+
+**Scope boundary:** No controller assessment of engineering work, task ownership system, candidate-freezing subsystem, publication automation or general recovery framework.
+
+**Follow-up:** Once delivered, perform the CON-056 Curu acceptance trial against the completed workflow.
 
 ## CON-056 — Prove the golden path on fresh real work
 
