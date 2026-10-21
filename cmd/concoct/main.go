@@ -6,10 +6,10 @@ import (
 	"os/signal"
 )
 
-const version = "0.5.0-dev"
+const version = "0.6.0-dev"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr, liveOperations{}))
+	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr, liveOpen))
 }

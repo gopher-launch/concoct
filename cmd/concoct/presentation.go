@@ -140,6 +140,16 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 			s.phases[body.Item.ID] = body.Item.Phase
 		}
 		if event.Kind == "item/completed" {
+			if body.Item.Phase == "" {
+				if summary, ok := commentarySummary(body.Item.Text); ok {
+					s.emitDelta(body.Item.ID, summary)
+					delete(s.pending, body.Item.ID)
+					if body.Item.ID == s.item {
+						s.closeMessage()
+					}
+					return
+				}
+			}
 			result, parseErr := codexapp.ParseRoleResult(body.Item.Text)
 			control := body.Item.Phase == "final_answer" || body.Item.Phase == "" && (parseErr == nil || malformedOrResultShapedObject(body.Item.Text))
 			if control {
@@ -246,4 +256,17 @@ func (s *messageStream) finish() {
 		fmt.Fprint(s.w, "\n")
 	}
 	s.open = false
+}
+
+// commentarySummary recognizes the provider's small human-summary envelope.
+// It is display prose, never a role result or controller transition.
+func commentarySummary(value string) (string, bool) {
+	var v struct {
+		Summary     string  `json:"summary"`
+		Disposition *string `json:"disposition"`
+	}
+	if json.Unmarshal([]byte(value), &v) != nil || v.Disposition != nil || strings.TrimSpace(v.Summary) == "" {
+		return "", false
+	}
+	return v.Summary, true
 }

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -169,4 +170,56 @@ func processTable() (map[int]processRow, error) {
 		rows[pid] = processRow{Identity: Identity{PID: pid, Start: start}, Parent: parent, State: fields[0][0]}
 	}
 	return rows, nil
+}
+
+// TerminateOwned signals only captured child identities that still match their
+// Linux start ticks. It is the fallback when provider cleanup cannot establish
+// cessation. The app-server root itself is closed by its Process owner.
+func (p *Probe) TerminateOwned(ctx context.Context) error {
+	if _, err := p.Capture(); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	ids := make([]Identity, 0, len(p.owned))
+	for id := range p.owned {
+		ids = append(ids, id)
+	}
+	p.mu.Unlock()
+	for _, signal := range []syscall.Signal{syscall.SIGTERM, syscall.SIGKILL} {
+		rows, err := processTable()
+		if err != nil {
+			return err
+		}
+		live := false
+		for _, id := range ids {
+			row, ok := rows[id.PID]
+			if !ok || row.Start != id.Start || row.State == 'Z' {
+				continue
+			}
+			live = true
+			if err := syscall.Kill(id.PID, signal); err != nil && err != syscall.ESRCH {
+				return err
+			}
+		}
+		if !live {
+			return nil
+		}
+		wait := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return ctx.Err()
+		case <-wait.C:
+		}
+	}
+	rows, err := processTable()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if row, ok := rows[id.PID]; ok && row.Start == id.Start && row.State != 'Z' {
+			return fmt.Errorf("owned process %d remains live", id.PID)
+		}
+	}
+	return nil
 }

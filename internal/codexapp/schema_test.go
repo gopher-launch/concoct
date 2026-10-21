@@ -161,17 +161,12 @@ func TestOutboundRoleResultSchemaCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := schema["properties"].(map[string]any)
-	question := root["question"].(map[string]any)["properties"].(map[string]any)
-	for _, name := range []string{"task_id", "candidate", "findings", "question"} {
+	for _, name := range []string{"task_id", "candidate", "findings", "evidence", "question"} {
 		if !hasType(root[name].(map[string]any), "null") {
-			t.Fatalf("optional result field %s is not nullable", name)
+			t.Fatalf("%s must be nullable", name)
 		}
 	}
-	for _, name := range []string{"source_change", "scope_change", "options"} {
-		if !hasType(question[name].(map[string]any), "null") {
-			t.Fatalf("optional question field %s is not nullable", name)
-		}
-	}
+
 }
 
 func TestSchemaProducedRoleResults(t *testing.T) {
@@ -183,13 +178,13 @@ func TestSchemaProducedRoleResults(t *testing.T) {
 		name, value, disposition string
 		question                 bool
 	}{
-		{"no work", `{"disposition":"no_suitable_work","summary":"nothing ready","task_id":null,"candidate":null,"findings":null,"question":null}`, "no_suitable_work", false},
-		{"engineering", `{"disposition":"engineering","summary":"work in progress","task_id":"APP-002","candidate":null,"findings":null,"question":null}`, "engineering", false},
-		{"ready", `{"disposition":"ready_for_review","summary":"ready","task_id":"APP-002","candidate":null,"findings":null,"question":null}`, "ready_for_review", false},
-		{"approved", `{"disposition":"approved","summary":"checked","task_id":"APP-002","candidate":"abc123","findings":null,"question":null}`, "approved", false},
-		{"changes", `{"disposition":"changes_requested","summary":"fix it","task_id":"APP-002","candidate":"abc123","findings":["Correct feature.go"],"question":null}`, "changes_requested", false},
-		{"question", `{"disposition":"decision_required","summary":"input needed","task_id":"APP-002","candidate":null,"findings":null,"question":{"objective":"Choose behavior","evidence":"Two options work","missing":"Required choice","safe_work":"Source is frozen","next_step":"Answer the question","source_change":true,"scope_change":null,"options":[{"id":"A","description":"Use A","tradeoff":"More work"}]}}`, "decision_required", true},
-		{"question without options", `{"disposition":"decision_required","summary":"input needed","task_id":null,"candidate":null,"findings":null,"question":{"objective":"Complete task","evidence":"Condition unknown","missing":"Provide evidence","safe_work":"Wait","next_step":"Answer","source_change":null,"scope_change":null,"options":null}}`, "decision_required", true},
+		{"no work", `{"disposition":"no_suitable_work","summary":"nothing ready","task_id":null,"candidate":null,"findings":null,"evidence":null,"question":null}`, "no_suitable_work", false},
+		{"engineering", `{"disposition":"engineering","summary":"work in progress","task_id":"APP-002","candidate":null,"findings":null,"evidence":null,"question":null}`, "engineering", false},
+		{"ready", `{"disposition":"ready_for_review","summary":"ready","task_id":"APP-002","candidate":null,"findings":null,"evidence":null,"question":null}`, "ready_for_review", false},
+		{"approved", `{"disposition":"approved","summary":"checked","task_id":"APP-002","candidate":"abc123","findings":null,"evidence":null,"question":null}`, "approved", false},
+		{"changes", `{"disposition":"changes_requested","summary":"fix it","task_id":"APP-002","candidate":"abc123","findings":["Correct feature.go"],"evidence":null,"question":null}`, "changes_requested", false},
+		{"question", `{"disposition":"decision_required","summary":"input needed","task_id":"APP-002","candidate":null,"findings":null,"evidence":null,"question":{"text":"Choose behavior A or B"}}`, "decision_required", true},
+		{"question without options", `{"disposition":"decision_required","summary":"input needed","task_id":null,"candidate":null,"findings":null,"evidence":null,"question":{"text":"Provide the missing evidence"}}`, "decision_required", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var value any
@@ -203,12 +198,10 @@ func TestSchemaProducedRoleResults(t *testing.T) {
 			if err != nil || parsed.Disposition != tc.disposition || (parsed.Question != nil) != tc.question {
 				t.Fatalf("parsed result = %+v, %v", parsed, err)
 			}
-			if tc.name == "question" && (!parsed.Question.SourceChange || parsed.Question.ScopeChange || len(parsed.Question.Options) != 1 || parsed.Question.Options[0].ID != "A") {
-				t.Fatalf("question fields were not parsed: %+v", parsed.Question)
+			if tc.question && parsed.Question.Text == "" {
+				t.Fatal("question text was lost")
 			}
-			if tc.name == "question without options" && (parsed.Question.SourceChange || parsed.Question.ScopeChange || len(parsed.Question.Options) != 0) {
-				t.Fatalf("nullable question fields were not parsed: %+v", parsed.Question)
-			}
+
 		})
 	}
 }

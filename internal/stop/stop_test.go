@@ -139,3 +139,42 @@ func stringJoin(items []string) string {
 	return result
 }
 func itoa(value int) string { return strconv.Itoa(value) }
+
+func TestHostFallbackTerminatesOnlyCapturedChild(t *testing.T) {
+	provider := exec.Command("bash", "-c", "sleep 30 & wait; while :; do :; done")
+	if err := provider.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = provider.Process.Kill(); _ = provider.Wait() })
+	unrelated := exec.Command("sleep", "30")
+	if err := unrelated.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unrelated.Process.Kill(); _ = unrelated.Wait() })
+	probe, err := NewProbe(provider.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var owned []Identity
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		owned, err = probe.Capture()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(owned) > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(owned) == 0 {
+		t.Fatal("owned child not observed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := probe.TerminateOwned(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := unrelated.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("unrelated process affected: %v", err)
+	}
+}

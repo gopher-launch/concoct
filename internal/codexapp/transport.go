@@ -356,6 +356,7 @@ type RoleResult struct {
 	TaskID      string        `json:"task_id,omitempty"`
 	Candidate   string        `json:"candidate,omitempty"`
 	Findings    []string      `json:"findings,omitempty"`
+	Evidence    string        `json:"evidence,omitempty"`
 	Question    *RoleQuestion `json:"question,omitempty"`
 }
 
@@ -369,36 +370,13 @@ var RoleResultSchema = json.RawMessage(`{
     "task_id":{"type":["string","null"]},
     "candidate":{"type":["string","null"]},
     "findings":{"type":["array","null"],"items":{"type":"string"}},
-    "question":{"type":["object","null"],"properties":{
-      "objective":{"type":"string"},
-      "evidence":{"type":"string"},
-      "missing":{"type":"string"},
-      "safe_work":{"type":"string"},
-      "next_step":{"type":"string"},
-      "source_change":{"type":["boolean","null"]},
-      "scope_change":{"type":["boolean","null"]},
-      "options":{"type":["array","null"],"items":{"type":"object","properties":{
-        "id":{"type":"string"},"description":{"type":"string"},"tradeoff":{"type":"string"}
-      },"required":["id","description","tradeoff"],"additionalProperties":false}}
-    },"required":["objective","evidence","missing","safe_work","next_step","source_change","scope_change","options"],"additionalProperties":false}
-  },"required":["disposition","summary","task_id","candidate","findings","question"],"additionalProperties":false
+    "evidence":{"type":["string","null"]},
+    "question":{"type":["object","null"],"properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false}
+  },"required":["disposition","summary","task_id","candidate","findings","evidence","question"],"additionalProperties":false
 }`)
 
 type RoleQuestion struct {
-	Objective    string               `json:"objective"`
-	Evidence     string               `json:"evidence"`
-	Missing      string               `json:"missing"`
-	SafeWork     string               `json:"safe_work"`
-	NextStep     string               `json:"next_step"`
-	Options      []RoleQuestionOption `json:"options,omitempty"`
-	SourceChange bool                 `json:"source_change,omitempty"`
-	ScopeChange  bool                 `json:"scope_change,omitempty"`
-}
-
-type RoleQuestionOption struct {
-	ID          string `json:"id"`
-	Description string `json:"description"`
-	Tradeoff    string `json:"tradeoff"`
+	Text string `json:"text"`
 }
 
 // ParseRoleResult keeps provider completion distinct from a valid role verdict.
@@ -414,11 +392,11 @@ func ParseRoleResult(text string) (RoleResult, error) {
 	default:
 		return RoleResult{}, ErrMalformedRoleResult
 	}
-	if len(result.Summary) > 4096 || len(result.TaskID) > 64 || len(result.Candidate) > 128 || len(result.Findings) > 64 || result.Question != nil && result.Disposition != "decision_required" && result.Disposition != "blocker" {
+	if len(result.Summary) > 4096 || len(result.TaskID) > 64 || len(result.Candidate) > 128 || len(result.Findings) > 64 || len(result.Evidence) > 1024 || result.Question != nil && result.Disposition != "decision_required" && result.Disposition != "blocker" {
 		return RoleResult{}, ErrMalformedRoleResult
 	}
 	if result.Disposition == "decision_required" || result.Disposition == "blocker" {
-		if result.Question == nil || strings.TrimSpace(result.Question.Objective) == "" || strings.TrimSpace(result.Question.Evidence) == "" || strings.TrimSpace(result.Question.Missing) == "" || strings.TrimSpace(result.Question.SafeWork) == "" || strings.TrimSpace(result.Question.NextStep) == "" {
+		if result.Question == nil || strings.TrimSpace(result.Question.Text) == "" {
 			return RoleResult{}, ErrMalformedRoleResult
 		}
 	}
