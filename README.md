@@ -18,7 +18,7 @@ go build -o /tmp/concoct ./cmd/concoct
 /tmp/concoct run
 ```
 
-`--repo PATH` selects the checkout and `--root PATH` selects an external Concoct storage root. `status` reads retained state without contacting Codex. Agent prose streams with role labels and blank lines between messages. `--quiet` suppresses progress; `--json` emits JSON. Structured result summaries and the final Concoct coordination status are separate. A malformed result, execution failure, timeout, explicit blocker or invocation exhaustion retains source and external state and reports the issue. No old-run migration or automatic historical callback recovery is provided in this slice.
+`--repo PATH` selects the checkout and `--root PATH` selects an external Concoct storage root. `status` reads retained state without contacting Codex. Agent prose streams with role labels and blank lines between messages. `--quiet` suppresses progress; `--json` emits JSON. Structured result summaries and the final Concoct coordination status are separate. A malformed result, execution failure, timeout, explicit blocker or invocation exhaustion retains source and external state and reports the issue. An unrecorded in-flight turn is reported as uncertain on the next `run`; it is not dispatched again automatically. Task and review evidence files must be readable and outside the project before their paths are used in a handoff or displayed as an assessment. No old-run migration or automatic historical callback recovery is provided in this slice.
 
 ## Construction
 

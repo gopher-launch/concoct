@@ -1,6 +1,9 @@
 package handoff
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 // These templates give engineering judgment to the agents. Concoct routes
 // their completed structured results without reading or grading evidence.
@@ -14,8 +17,9 @@ Return one structured result. For readiness use disposition ready_for_review, th
 }
 
 func IragentPrompt(s State, root string) string {
+	reviewEvidence := filepath.Join(root, "evidence", s.TaskID, "review-01.md")
 	return fmt.Sprintf(`Act as independent iragent for task %s. Review exact candidate commit %s on branch %s in %s against its roadmap scope, acceptance criteria, relevant design, repository instructions, current source and tests. Read the reagent checkpoint at %s. This is the same checkout used by reagent. Do not edit source, documentation, branch or candidate while reviewing. Independently run appropriate read-only checks and inspect the diff from base %s. State actionable findings with evidence; treat summaries as claims to verify.
 
 Write your assessment outside the product repository to %s. Include task ID, exact candidate commit, verdict, findings, checks and remaining risks. Stream concise progress. Return one structured result with task_id %s, candidate %s, disposition approved or changes_requested, a brief summary, findings and evidence path. If a genuine missing decision blocks review, return decision_required with an explicit question. Null unused fields. Do not integrate, push or publish.
-`, s.TaskID, s.Candidate, s.Branch, s.Repository, s.Evidence, s.Base, s.ReviewEvidence, s.TaskID, s.Candidate)
+`, s.TaskID, s.Candidate, s.Branch, s.Repository, s.Evidence, s.Base, reviewEvidence, s.TaskID, s.Candidate)
 }

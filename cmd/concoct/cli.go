@@ -59,6 +59,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 		return 18
 	case "blocked", "limit_exhausted":
 		return 10
+	case "execution_uncertain", "execution_failed", "invalid_result", "source_changed":
+		return 18
 	default:
 		return 0
 	}

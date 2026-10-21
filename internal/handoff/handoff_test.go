@@ -13,18 +13,23 @@ import (
 	"time"
 
 	"github.com/gopher-launch/concoct/internal/codexapp"
+	"github.com/gopher-launch/concoct/internal/dispatch"
 	"github.com/gopher-launch/concoct/internal/stop"
 )
 
 type fakeRunner struct {
-	repo      string
-	turns     int
-	prompts   []string
-	output    []string
-	stopCalls int
-	fail      error
-	immediate error
-	models    []codexapp.Model
+	repo               string
+	turns              int
+	prompts            []string
+	output             []string
+	stopCalls          int
+	fail               error
+	immediate          error
+	models             []codexapp.Model
+	evidenceDir        string
+	skipTaskEvidence   bool
+	skipReviewEvidence bool
+	beforeTurn         func(string)
 }
 
 func (f *fakeRunner) Models(context.Context) ([]codexapp.Model, error) { return f.models, nil }
@@ -38,6 +43,9 @@ func (f *fakeRunner) RunRoleTurn(ctx context.Context, id, prompt string, s codex
 	f.prompts = append(f.prompts, prompt)
 	f.turns++
 	emit(codexapp.Event{Kind: "turn/started", ThreadID: id, TurnID: s.Role + "-turn"})
+	if f.beforeTurn != nil {
+		f.beforeTurn(s.Role)
+	}
 	if f.immediate != nil {
 		return codexapp.TurnOutcome{ThreadID: id, TurnID: s.Role + "-turn"}, f.immediate
 	}
@@ -54,6 +62,11 @@ func (f *fakeRunner) RunRoleTurn(ctx context.Context, id, prompt string, s codex
 		for i := range f.output {
 			f.output[i] = strings.ReplaceAll(f.output[i], "CANDIDATE", head)
 		}
+		if f.evidenceDir != "" && !f.skipTaskEvidence {
+			writeEvidence(filepath.Join(f.evidenceDir, "evidence", "APP-002", "task.md"))
+		}
+	} else if f.evidenceDir != "" && !f.skipReviewEvidence {
+		writeEvidence(filepath.Join(f.evidenceDir, "evidence", "APP-002", "review-01.md"))
 	}
 	result := f.output[f.turns-1]
 	return codexapp.TurnOutcome{ThreadID: id, TurnID: s.Role + "-turn", Status: "completed", FinalText: result}, nil
@@ -63,6 +76,14 @@ func (f *fakeRunner) Stop(context.Context, string, string) stop.Result {
 	return stop.Result{Status: "stopped_safely"}
 }
 func (f *fakeRunner) Close() error { return nil }
+func writeEvidence(path string) {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(path, []byte("# Agent evidence\n"), 0600); err != nil {
+		panic(err)
+	}
+}
 func gitTest(repo string, args ...string) string {
 	out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput()
 	if err != nil {
@@ -94,9 +115,11 @@ func result(disposition, summary, task, candidate string) string {
 }
 func TestSelectionToIndependentReview(t *testing.T) {
 	repo := testRepo(t)
+	root := t.TempDir()
 	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("ready_for_review", "Candidate ready", "APP-002", "CANDIDATE"), result("approved", "Looks good", "APP-002", "CANDIDATE")}}
+	fake.evidenceDir, _ = storage(repo, root)
 	open := func(context.Context, string) (Runner, error) { return fake, nil }
-	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir(), OnEvent: func(role string, e codexapp.Event) {}}, open)
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root, OnEvent: func(role string, e codexapp.Event) {}}, open)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +135,10 @@ func TestSelectionToIndependentReview(t *testing.T) {
 }
 func TestInvocationLimitStopsBeforeReview(t *testing.T) {
 	repo := testRepo(t)
+	root := t.TempDir()
 	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("ready_for_review", "Candidate ready", "APP-002", "CANDIDATE")}}
-	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir(), MaxAttempts: 1}, func(context.Context, string) (Runner, error) { return fake, nil })
+	fake.evidenceDir, _ = storage(repo, root)
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root, MaxAttempts: 1}, func(context.Context, string) (Runner, error) { return fake, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,5 +203,93 @@ func TestWrongCandidateCannotReachReview(t *testing.T) {
 	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir()}, func(context.Context, string) (Runner, error) { return fake, nil })
 	if err == nil || s.Phase != "source_changed" || fake.turns != 1 {
 		t.Fatalf("candidate binding: %+v %v", s, err)
+	}
+}
+
+func TestMissingAgentEvidenceStopsHandoff(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		skipTask, skipReview bool
+		wantTurns            int
+		wantError            string
+	}{
+		{"task", true, false, 1, "task evidence"},
+		{"review", false, true, 2, "review evidence"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := testRepo(t)
+			root := t.TempDir()
+			dir, err := storage(repo, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &fakeRunner{repo: repo, evidenceDir: dir, skipTaskEvidence: tc.skipTask, skipReviewEvidence: tc.skipReview, models: model(), output: []string{result("ready_for_review", "Ready", "APP-002", "CANDIDATE"), result("approved", "Approved", "APP-002", "CANDIDATE")}}
+			s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string) (Runner, error) { return fake, nil })
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) || s.Phase != "invalid_result" || fake.turns != tc.wantTurns || s.Verdict != "" || (tc.skipTask && s.Evidence != "") || (tc.skipReview && s.ReviewEvidence != "") {
+				t.Fatalf("evidence handoff: %+v %v turns=%d", s, err, fake.turns)
+			}
+		})
+	}
+}
+
+func TestReviewRequiresExplicitExactIdentity(t *testing.T) {
+	for _, tc := range []struct{ name, task, candidate string }{
+		{"missing task", "", "CANDIDATE"}, {"missing candidate", "APP-002", ""},
+		{"wrong task", "OTHER-002", "CANDIDATE"}, {"wrong candidate", "APP-002", "wrong"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := testRepo(t)
+			root := t.TempDir()
+			dir, err := storage(repo, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &fakeRunner{repo: repo, evidenceDir: dir, models: model(), output: []string{result("ready_for_review", "Ready", "APP-002", "CANDIDATE"), result("approved", "Approved", tc.task, tc.candidate)}}
+			s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string) (Runner, error) { return fake, nil })
+			if err == nil || !strings.Contains(err.Error(), "review result identity") || s.Phase != "invalid_result" || s.Verdict != "" || fake.turns != 2 {
+				t.Fatalf("identity binding: %+v %v", s, err)
+			}
+		})
+	}
+}
+
+func TestInterruptedDispatchDoesNotReplay(t *testing.T) {
+	for _, crashRole := range []string{"reagent", "iragent"} {
+		t.Run(crashRole, func(t *testing.T) {
+			repo := testRepo(t)
+			root := t.TempDir()
+			dir, err := storage(repo, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &fakeRunner{repo: repo, evidenceDir: dir, models: model(), output: []string{result("ready_for_review", "Ready", "APP-002", "CANDIDATE"), result("approved", "Approved", "APP-002", "CANDIDATE")}}
+			fake.beforeTurn = func(role string) {
+				if role == crashRole {
+					stored, err := read(dir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if stored.InFlight == nil || stored.InFlight.Role != dispatch.Role(role) || stored.Attempts != fake.turns {
+						t.Fatalf("dispatch not persisted before provider turn: %+v", stored)
+					}
+					panic("simulated process loss")
+				}
+			}
+			opens := 0
+			open := func(context.Context, string) (Runner, error) { opens++; return fake, nil }
+			func() {
+				defer func() {
+					if value := recover(); value == nil {
+						t.Fatal("expected simulated process loss")
+					}
+				}()
+				_, _ = Run(context.Background(), Options{Repository: repo, Root: root}, open)
+			}()
+			before := fake.turns
+			s, err := Run(context.Background(), Options{Repository: repo, Root: root}, open)
+			if err != nil || s.Phase != "execution_uncertain" || s.InFlight == nil || s.Attempts != before || fake.turns != before || opens != 1 {
+				t.Fatalf("uncertain turn replayed: %+v %v turns=%d opens=%d", s, err, fake.turns, opens)
+			}
+		})
 	}
 }

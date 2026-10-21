@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,7 @@ type State struct {
 	Question       *codexapp.RoleQuestion                  `json:"question,omitempty"`
 	Profiles       map[dispatch.Role]codexapp.RoleSettings `json:"profiles"`
 	Threads        map[string]string                       `json:"threads,omitempty"`
+	InFlight       *InFlight                               `json:"in_flight,omitempty"`
 	Attempts       int                                     `json:"attempts"`
 	MaxAttempts    int                                     `json:"max_attempts"`
 	TurnTimeout    time.Duration                           `json:"turn_timeout,omitempty"`
@@ -41,6 +43,13 @@ type State struct {
 	LastResult     *codexapp.RoleResult                    `json:"last_result,omitempty"`
 	LastError      string                                  `json:"last_error,omitempty"`
 	Updated        time.Time                               `json:"updated"`
+}
+
+// InFlight is saved with the invocation count before dispatch. A later run
+// cannot assume an unrecorded provider outcome means the turn never ran.
+type InFlight struct {
+	Role     dispatch.Role `json:"role"`
+	ThreadID string        `json:"thread_id"`
 }
 
 type Options struct {
@@ -267,7 +276,15 @@ func Run(ctx context.Context, o Options, open func(context.Context, string) (Run
 	if s.Phase != "" && (o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
 		return s, fmt.Errorf("role settings and limits cannot change an active run")
 	}
-	if s.Phase == "reviewed" || s.Phase == "blocked" || s.Phase == "limit_exhausted" || s.Phase == "execution_failed" || s.Phase == "invalid_result" || s.Phase == "source_changed" {
+	if s.InFlight != nil && (s.Phase == "engineering" || s.Phase == "reviewing") {
+		s.Phase = "execution_uncertain"
+		s.LastError = fmt.Sprintf("%s turn in thread %s has no recorded outcome; inspect source and external evidence before any further dispatch", s.InFlight.Role, s.InFlight.ThreadID)
+		if err := save(dir, s); err != nil {
+			return s, err
+		}
+		return s, nil
+	}
+	if s.Phase == "reviewed" || s.Phase == "blocked" || s.Phase == "limit_exhausted" || s.Phase == "execution_failed" || s.Phase == "execution_uncertain" || s.Phase == "invalid_result" || s.Phase == "source_changed" {
 		return s, nil
 	}
 	if s.Phase == "" {
@@ -347,6 +364,7 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 	}
 	s.Threads[string(role)] = thread.ID
 	s.Attempts++
+	s.InFlight = &InFlight{Role: role, ThreadID: thread.ID}
 	if err = save(dir, s); err != nil {
 		return s, err
 	}
@@ -425,6 +443,7 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		_ = save(dir, s)
 		return s, fmt.Errorf("%s", s.LastError)
 	}
+	s.InFlight = nil
 	result, err := codexapp.ParseRoleResult(outcome.FinalText)
 	if err != nil {
 		return halt(dir, s, "invalid_result", fmt.Errorf("%s returned an invalid structured result", role))
@@ -452,28 +471,36 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 			if err := verifyCandidate(s); err != nil {
 				return halt(dir, s, "source_changed", err)
 			}
-			s.Evidence = filepath.Join(dir, "evidence", s.TaskID, "task.md")
+			evidence := filepath.Join(dir, "evidence", s.TaskID, "task.md")
 			if result.Evidence != "" {
-				s.Evidence = result.Evidence
+				evidence = result.Evidence
 			}
-			s.ReviewEvidence = filepath.Join(dir, "evidence", s.TaskID, "review-01.md")
+			if err := verifyEvidence(s.Repository, evidence); err != nil {
+				return halt(dir, s, "invalid_result", fmt.Errorf("task evidence: %w", err))
+			}
+			s.Evidence = evidence
 			s.Phase = "reviewing"
 		default:
 			return halt(dir, s, "invalid_result", fmt.Errorf("unexpected reagent disposition %q", result.Disposition))
 		}
 	} else {
-		if result.TaskID != "" && result.TaskID != s.TaskID || result.Candidate != "" && result.Candidate != s.Candidate {
+		if result.TaskID != s.TaskID || result.Candidate != s.Candidate {
 			return halt(dir, s, "invalid_result", fmt.Errorf("review result identity differs from candidate"))
 		}
 		if result.Disposition != "approved" && result.Disposition != "changes_requested" {
 			return halt(dir, s, "invalid_result", fmt.Errorf("unexpected iragent disposition %q", result.Disposition))
 		}
+		reviewEvidence := filepath.Join(dir, "evidence", s.TaskID, "review-01.md")
 		if result.Evidence != "" {
-			s.ReviewEvidence = result.Evidence
+			reviewEvidence = result.Evidence
 		}
 		if err := verifyCandidate(s); err != nil {
 			return halt(dir, s, "source_changed", err)
 		}
+		if err := verifyEvidence(s.Repository, reviewEvidence); err != nil {
+			return halt(dir, s, "invalid_result", fmt.Errorf("review evidence: %w", err))
+		}
+		s.ReviewEvidence = reviewEvidence
 		s.Verdict = result.Disposition
 		s.Phase = "reviewed"
 	}
@@ -481,6 +508,42 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		return s, err
 	}
 	return s, nil
+}
+
+// Evidence is agent-owned Markdown. Only its external location and readable
+// regular-file presence are checked; Concoct does not parse its narrative.
+func verifyEvidence(repo, path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("path %q is not absolute", path)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(repo, resolved)
+	if err != nil {
+		return err
+	}
+	if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path %q is inside the product repository", path)
+	}
+	f, err := os.Open(resolved)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("path %q is not a regular file", path)
+	}
+	var first [1]byte
+	if _, err := f.Read(first[:]); err != nil && err != io.EOF {
+		return err
+	}
+	return nil
 }
 
 // verifyCandidate binds review to the commit the reagent reported. It does
