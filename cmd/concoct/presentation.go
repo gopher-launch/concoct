@@ -75,26 +75,25 @@ type agentReport struct {
 	TurnID      string `json:"turn-id,omitempty"`
 	Disposition string `json:"disposition,omitempty"`
 	Summary     string `json:"summary,omitempty"`
-	Error       string `json:"error,omitempty"`
 }
 
 type messageStream struct {
-	w        io.Writer
-	json     bool
-	quiet    bool
-	role     string
-	thread   string
-	turn     string
-	item     string
-	open     bool
-	seen     bool
-	breaks   int
-	phases   map[string]string
-	pending  map[string]string
-	ordinary map[string]bool
-	emitted  map[string]bool
-	report   *agentReport
-	explicit bool
+	w          io.Writer
+	json       bool
+	quiet      bool
+	role       string
+	thread     string
+	turn       string
+	item       string
+	open       bool
+	seen       bool
+	breaks     int
+	phases     map[string]string
+	pending    map[string]string
+	ordinary   map[string]bool
+	emitted    map[string]bool
+	candidates []string
+	explicit   bool
 }
 
 func newMessageStream(w io.Writer, jsonMode, quiet bool) *messageStream {
@@ -110,9 +109,8 @@ func (s *messageStream) resetItems() {
 
 func (s *messageStream) event(event codexapp.Event, roleForThread func(string) string) {
 	if event.Kind == "turn/started" {
-		s.showReport()
 		s.closeMessage()
-		s.report = nil
+		s.candidates = nil
 		s.explicit = false
 		s.thread, s.turn, s.item = event.ThreadID, event.TurnID, ""
 		s.role = roleForThread(event.ThreadID)
@@ -121,7 +119,7 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 	}
 	if event.ThreadID != "" && (event.ThreadID != s.thread || event.TurnID != "" && event.TurnID != s.turn) {
 		s.closeMessage()
-		s.report = nil
+		s.candidates = nil
 		s.explicit = false
 		s.thread, s.turn, s.item = event.ThreadID, event.TurnID, ""
 		s.role = roleForThread(event.ThreadID)
@@ -145,6 +143,25 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 			if value == "" {
 				value = s.pending[body.Item.ID]
 			}
+			if body.Item.Phase == "final_answer" {
+				s.flushCandidates()
+				s.explicit = true
+				delete(s.pending, body.Item.ID)
+				s.closeMessage()
+				return
+			}
+			if body.Item.Phase == "" {
+				if result, err := codexapp.ParseRoleResult(value); err == nil {
+					s.flushCandidates()
+					s.candidates = append(s.candidates, result.Summary)
+					delete(s.pending, body.Item.ID)
+					s.closeMessage()
+					return
+				}
+			}
+			if body.Item.Phase == "" {
+				s.flushCandidates()
+			}
 			if body.Item.Phase != "final_answer" {
 				if summary, ok := commentarySummary(value); ok {
 					s.emitDelta(body.Item.ID, summary)
@@ -155,21 +172,8 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 					return
 				}
 			}
-			result, parseErr := codexapp.ParseRoleResult(value)
-			control := body.Item.Phase == "final_answer" || body.Item.Phase == "" && (parseErr == nil || malformedOrResultShapedObject(value))
-			if control {
-				if body.Item.Phase == "final_answer" || !s.explicit {
-					s.closeMessage()
-					if body.Item.Phase == "final_answer" {
-						s.explicit = true
-					}
-					s.report = &agentReport{Role: s.role, TurnID: s.turn}
-					if parseErr != nil {
-						s.report.Error = "malformed structured agent result; inspect the role turn and run status"
-					} else {
-						s.report.Disposition, s.report.Summary = publicName(result.Disposition), result.Summary
-					}
-				}
+			if body.Item.Phase == "" && malformedOrResultShapedObject(value) {
+				s.closeMessage()
 			} else if buffered := s.pending[body.Item.ID]; buffered != "" {
 				s.emitDelta(body.Item.ID, buffered)
 			} else if !s.emitted[body.Item.ID] && value != "" {
@@ -188,6 +192,9 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 		if json.Unmarshal(event.Raw, &body) != nil || body.Delta == "" || s.phases[body.ItemID] == "final_answer" {
 			return
 		}
+		if s.phases[body.ItemID] == "" && len(s.candidates) > 0 && body.ItemID != s.item {
+			s.flushCandidates()
+		}
 		if !s.ordinary[body.ItemID] {
 			s.pending[body.ItemID] += body.Delta
 			trimmed := strings.TrimSpace(s.pending[body.ItemID])
@@ -199,17 +206,6 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 			delete(s.pending, body.ItemID)
 		}
 		s.emitDelta(body.ItemID, body.Delta)
-	case "turn/completed":
-		var body struct {
-			Turn struct {
-				Status string `json:"status"`
-			} `json:"turn"`
-		}
-		if json.Unmarshal(event.Raw, &body) == nil && body.Turn.Status == "completed" {
-			s.showReport()
-		} else {
-			s.report = nil
-		}
 	}
 }
 
@@ -267,17 +263,31 @@ func (s *messageStream) emitDelta(itemID, delta string) {
 
 func (s *messageStream) closeMessage() { s.open = false }
 
-func (s *messageStream) showReport() {
-	if s.report == nil {
-		return
+func (s *messageStream) flushCandidates() {
+	for index, summary := range s.candidates {
+		s.emitDelta(fmt.Sprintf("structured-commentary-%d", index), summary)
+		s.closeMessage()
 	}
-	report := s.report
-	s.report = nil
+	s.candidates = nil
+}
+
+// result is called only after handoff accepts the completed role result.
+func (s *messageStream) result(role string, result codexapp.RoleResult) {
+	count := len(s.candidates)
+	if !s.explicit && count > 0 {
+		count-- // the last phase-less result is the accepted final result
+	}
+	for index, summary := range s.candidates[:count] {
+		s.emitDelta(fmt.Sprintf("structured-commentary-%d", index), summary)
+		s.closeMessage()
+	}
+	s.candidates = nil
+	report := agentReport{Role: role, TurnID: s.turn, Disposition: publicName(result.Disposition), Summary: result.Summary}
 	if s.quiet {
 		return
 	}
 	if s.json {
-		writePublicJSON(s.w, map[string]any{"type": "agent-result", "role": report.Role, "turn-id": report.TurnID, "disposition": report.Disposition, "summary": report.Summary, "error": report.Error})
+		writePublicJSON(s.w, map[string]any{"type": "agent-result", "role": report.Role, "turn-id": report.TurnID, "disposition": report.Disposition, "summary": report.Summary})
 		return
 	}
 	if s.seen {
@@ -286,16 +296,11 @@ func (s *messageStream) showReport() {
 			s.breaks++
 		}
 	}
-	if report.Error != "" {
-		fmt.Fprintf(s.w, "[%s result] %s\n", report.Role, report.Error)
-	} else {
-		fmt.Fprintf(s.w, "[%s result] %s: %s\n", report.Role, report.Disposition, report.Summary)
-	}
+	fmt.Fprintf(s.w, "[%s result] %s: %s\n", report.Role, report.Disposition, report.Summary)
 	s.seen, s.breaks, s.open = true, 1, false
 }
 
 func (s *messageStream) finish() {
-	s.showReport()
 	if s.seen && !s.json && !s.quiet && s.breaks == 0 {
 		fmt.Fprint(s.w, "\n")
 	}

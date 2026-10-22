@@ -43,10 +43,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 	}
 	stream := newMessageStream(stdout, jsonMode, quiet)
 	o.OnEvent = func(role string, event codexapp.Event) { stream.event(event, func(string) string { return role }) }
+	o.OnResult = stream.result
 	state, err := handoff.Run(ctx, o, open)
-	if err != nil {
-		stream.report = nil
-	}
 	stream.finish()
 	if err != nil {
 		fmt.Fprintln(stderr, "concoct:", err)
@@ -183,7 +181,7 @@ func display(w io.Writer, s handoff.State, jsonMode bool) {
 	if s.ReviewEvidence != "" {
 		fmt.Fprintln(w, "Review evidence:", s.ReviewEvidence)
 	}
-	if s.Summary != "" && s.Summary != s.ReagentSummary && s.Summary != s.ReviewSummary {
+	if s.Phase != "invalid_result" && s.Phase != "source_changed" && s.Summary != "" && s.Summary != s.ReagentSummary && s.Summary != s.ReviewSummary {
 		source := "agent"
 		if s.LastRole != "" {
 			source = string(s.LastRole)

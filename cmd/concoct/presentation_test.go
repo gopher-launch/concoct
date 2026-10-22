@@ -31,6 +31,7 @@ func TestRoleLabeledProseAndStructuredSummary(t *testing.T) {
 	emit("item/agentMessage/delta", "review", "two", map[string]any{"itemId": "c", "delta": "Reviewing now."})
 	emit("item/completed", "review", "two", map[string]any{"item": map[string]any{"id": "c", "type": "agentMessage", "text": "Reviewing now."}})
 	emit("item/completed", "review", "two", map[string]any{"item": map[string]any{"id": "final", "type": "agentMessage", "phase": "final_answer", "text": "{\"disposition\":\"approved\",\"summary\":\"Checked candidate\",\"task_id\":null,\"candidate\":null,\"findings\":null,\"evidence\":null,\"question\":null}"}})
+	s.result("iragent", codexapp.RoleResult{Disposition: "approved", Summary: "Checked candidate"})
 	s.finish()
 	text := out.String()
 	for _, want := range []string{"[reagent] Selected task.\n\n[reagent] Committed candidate.", "[iragent] Reviewing now."} {
@@ -39,7 +40,7 @@ func TestRoleLabeledProseAndStructuredSummary(t *testing.T) {
 		}
 	}
 	if strings.Contains(text, "\"disposition\"") || !strings.Contains(text, "[iragent result] approved: Checked candidate") {
-		t.Fatalf("structured result leaked or lost: %q %+v", text, s.report)
+		t.Fatalf("structured result leaked or lost: %q", text)
 	}
 }
 
@@ -106,6 +107,7 @@ func TestAbsentPhaseIntermediateDoesNotBecomeResultPresentation(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{"item": map[string]any{"id": item.phase + item.text[:1], "type": "agentMessage", "phase": item.phase, "text": item.text}})
 		s.event(codexapp.Event{Kind: "item/completed", ThreadID: "review", TurnID: "one", Raw: raw}, role)
 	}
+	s.result("iragent", codexapp.RoleResult{Disposition: "changes_requested", Summary: "Found a defect"})
 	s.finish()
 	text := out.String()
 	if !strings.Contains(text, "Still checking files") || !strings.Contains(text, "[iragent result] changes-requested: Found a defect") || strings.Contains(text, "[iragent result] approved") {
@@ -138,6 +140,7 @@ func TestExplicitJSONPresentationKeepsProgressAndResult(t *testing.T) {
 		s.event(codexapp.Event{Kind: "item/completed", ThreadID: "review", TurnID: "one", Raw: raw}, role)
 	}
 	s.event(codexapp.Event{Kind: "turn/completed", ThreadID: "review", TurnID: "one", Raw: []byte(`{"turn":{"status":"completed"}}`)}, role)
+	s.result("iragent", codexapp.RoleResult{Disposition: "approved", Summary: "Checked evidence"})
 	s.finish()
 	lines := bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n"))
 	if len(lines) != 2 {
@@ -146,5 +149,22 @@ func TestExplicitJSONPresentationKeepsProgressAndResult(t *testing.T) {
 	var progress, result map[string]any
 	if json.Unmarshal(lines[0], &progress) != nil || json.Unmarshal(lines[1], &result) != nil || progress["type"] != "agent-progress" || progress["text"] != "Checking evidence" || result["type"] != "agent-result" || result["summary"] != "Checked evidence" {
 		t.Fatalf("JSON presentation lost source separation: %s", out.String())
+	}
+}
+
+func TestPhaseLessFinalIsLabeledOnlyAfterAcceptedResult(t *testing.T) {
+	var out bytes.Buffer
+	s := newMessageStream(&out, false, false)
+	role := func(string) string { return "iragent" }
+	message := []byte(`{"item":{"id":"final","type":"agentMessage","phase":null,"text":"{\"disposition\":\"approved\",\"summary\":\"Checked candidate\"}"}}`)
+	s.event(codexapp.Event{Kind: "item/completed", ThreadID: "review", TurnID: "one", Raw: message}, role)
+	s.event(codexapp.Event{Kind: "turn/completed", ThreadID: "review", TurnID: "one", Raw: []byte(`{"turn":{"status":"completed"}}`)}, role)
+	if out.Len() != 0 {
+		t.Fatalf("phase-less result was announced before validation: %q", out.String())
+	}
+	s.result("iragent", codexapp.RoleResult{Disposition: "approved", Summary: "Checked candidate"})
+	s.finish()
+	if strings.Contains(out.String(), "[iragent] Checked candidate") || !strings.Contains(out.String(), "[iragent result] approved: Checked candidate") {
+		t.Fatalf("phase-less result presentation: %q", out.String())
 	}
 }

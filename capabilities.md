@@ -36,7 +36,7 @@ This ledger describes behavior in the current candidate's intended post-integrat
 
 ## CON-066 — Readable progress and external provider diagnostics
 
-- Agent prose streams under reagent or iragent labels with blank lines between messages. Structured commentary across supported phases displays its human summary without showing control fields or treating intermediate dispositions as workflow decisions. Completed agent results and Concoct coordination identify their sources; explicit JSON output and quiet progress suppression remain available.
+- Agent prose streams under reagent or iragent labels with blank lines between messages. Structured commentary across supported phases displays its human summary without showing control fields or treating intermediate dispositions as workflow decisions. A completed result is announced only after handoff accepts its routing and evidence bindings, including phase-less final results. Agent results and Concoct coordination identify their sources; explicit JSON output and quiet progress suppression remain available.
 - Each provider execution retains startup and execution stderr in an external diagnostic file whose path appears in status. Recoverable stderr messages do not turn a successful agent result into failure. Execution failure is reported from the provider outcome with concise terminal text and a retained diagnostic location.
 
 CON-042 remains a frozen, undelivered historical reference.

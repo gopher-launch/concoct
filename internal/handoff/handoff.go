@@ -72,6 +72,7 @@ type Options struct {
 	MaxAttempts, MaxAssessments                              int
 	TurnTimeout, StallTimeout                                time.Duration
 	OnEvent                                                  func(string, codexapp.Event)
+	OnResult                                                 func(string, codexapp.RoleResult)
 }
 
 type Runner interface {
@@ -467,6 +468,9 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		s, err = turn(ctx, runner, dir, s, role, step, o)
 		if err != nil {
 			return s, err
+		}
+		if o.OnResult != nil && s.LastResult != nil {
+			o.OnResult(string(role), *s.LastResult)
 		}
 		if s.Phase != "reviewing" && s.Phase != "correcting" {
 			return s, nil
