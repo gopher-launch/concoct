@@ -33,5 +33,3 @@ A run defaults to twelve agent invocations and three completed independent asses
 ## Active source and future work
 
 The repository retains its module identity and license. The active source is authoritative. CON-042 remains a frozen historical reference and is not merged into the active tree. The old Concoct skill, self-hosting workflow, repository-local operational notes and generated templates are outside the rebuild. Construction uses ordinary manually directed Codex sessions and independent review.
-
-CON-056 tests the complete path on useful fresh work.
