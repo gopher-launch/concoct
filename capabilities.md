@@ -34,4 +34,9 @@ This ledger describes behavior in the current candidate's intended post-integrat
 - An explicit blocker stops the current step with a simple question. An operator answer resumes the requesting role with the answer and retained context. Completed handoff boundaries can continue in a later `run`; uncertain in-flight execution remains stopped for inspection.
 - An approved assessment exposes the exact reviewed commit, role summaries and review evidence. If an invocation remains, it waits for `run --approve COMMIT`; otherwise it stops at the exhausted limit without offering unusable approval. Concoct binds authorization to the approved commit and asks reagent to perform local guarded fast-forward integration. Reagent owns Git checks and reports integrated, failed or blocked; Concoct does not perform a Git integration transaction or publish.
 
+## CON-066 — Readable progress and external provider diagnostics
+
+- Agent prose streams under reagent or iragent labels with blank lines between messages. Structured commentary across supported phases displays its human summary without showing control fields or treating intermediate dispositions as workflow decisions. Completed agent results and Concoct coordination identify their sources; explicit JSON output and quiet progress suppression remain available.
+- Each provider execution retains startup and execution stderr in an external diagnostic file whose path appears in status. Recoverable stderr messages do not turn a successful agent result into failure. Execution failure is reported from the provider outcome with concise terminal text and a retained diagnostic location.
+
 CON-042 remains a frozen, undelivered historical reference.

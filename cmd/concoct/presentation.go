@@ -110,6 +110,7 @@ func (s *messageStream) resetItems() {
 
 func (s *messageStream) event(event codexapp.Event, roleForThread func(string) string) {
 	if event.Kind == "turn/started" {
+		s.showReport()
 		s.closeMessage()
 		s.report = nil
 		s.explicit = false
@@ -140,8 +141,12 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 			s.phases[body.Item.ID] = body.Item.Phase
 		}
 		if event.Kind == "item/completed" {
-			if body.Item.Phase == "" {
-				if summary, ok := commentarySummary(body.Item.Text); ok {
+			value := body.Item.Text
+			if value == "" {
+				value = s.pending[body.Item.ID]
+			}
+			if body.Item.Phase != "final_answer" {
+				if summary, ok := commentarySummary(value); ok {
 					s.emitDelta(body.Item.ID, summary)
 					delete(s.pending, body.Item.ID)
 					if body.Item.ID == s.item {
@@ -150,8 +155,8 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 					return
 				}
 			}
-			result, parseErr := codexapp.ParseRoleResult(body.Item.Text)
-			control := body.Item.Phase == "final_answer" || body.Item.Phase == "" && (parseErr == nil || malformedOrResultShapedObject(body.Item.Text))
+			result, parseErr := codexapp.ParseRoleResult(value)
+			control := body.Item.Phase == "final_answer" || body.Item.Phase == "" && (parseErr == nil || malformedOrResultShapedObject(value))
 			if control {
 				if body.Item.Phase == "final_answer" || !s.explicit {
 					s.closeMessage()
@@ -167,8 +172,8 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 				}
 			} else if buffered := s.pending[body.Item.ID]; buffered != "" {
 				s.emitDelta(body.Item.ID, buffered)
-			} else if !s.emitted[body.Item.ID] && body.Item.Text != "" {
-				s.emitDelta(body.Item.ID, body.Item.Text)
+			} else if !s.emitted[body.Item.ID] && value != "" {
+				s.emitDelta(body.Item.ID, value)
 			}
 			delete(s.pending, body.Item.ID)
 			if body.Item.ID == s.item {
@@ -183,7 +188,7 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 		if json.Unmarshal(event.Raw, &body) != nil || body.Delta == "" || s.phases[body.ItemID] == "final_answer" {
 			return
 		}
-		if s.phases[body.ItemID] == "" && !s.ordinary[body.ItemID] {
+		if !s.ordinary[body.ItemID] {
 			s.pending[body.ItemID] += body.Delta
 			trimmed := strings.TrimSpace(s.pending[body.ItemID])
 			if trimmed == "" || trimmed[0] == '{' {
@@ -194,6 +199,17 @@ func (s *messageStream) event(event codexapp.Event, roleForThread func(string) s
 			delete(s.pending, body.ItemID)
 		}
 		s.emitDelta(body.ItemID, body.Delta)
+	case "turn/completed":
+		var body struct {
+			Turn struct {
+				Status string `json:"status"`
+			} `json:"turn"`
+		}
+		if json.Unmarshal(event.Raw, &body) == nil && body.Turn.Status == "completed" {
+			s.showReport()
+		} else {
+			s.report = nil
+		}
 	}
 }
 
@@ -251,22 +267,57 @@ func (s *messageStream) emitDelta(itemID, delta string) {
 
 func (s *messageStream) closeMessage() { s.open = false }
 
+func (s *messageStream) showReport() {
+	if s.report == nil {
+		return
+	}
+	report := s.report
+	s.report = nil
+	if s.quiet {
+		return
+	}
+	if s.json {
+		writePublicJSON(s.w, map[string]any{"type": "agent-result", "role": report.Role, "turn-id": report.TurnID, "disposition": report.Disposition, "summary": report.Summary, "error": report.Error})
+		return
+	}
+	if s.seen {
+		for s.breaks < 2 {
+			fmt.Fprint(s.w, "\n")
+			s.breaks++
+		}
+	}
+	if report.Error != "" {
+		fmt.Fprintf(s.w, "[%s result] %s\n", report.Role, report.Error)
+	} else {
+		fmt.Fprintf(s.w, "[%s result] %s: %s\n", report.Role, report.Disposition, report.Summary)
+	}
+	s.seen, s.breaks, s.open = true, 1, false
+}
+
 func (s *messageStream) finish() {
+	s.showReport()
 	if s.seen && !s.json && !s.quiet && s.breaks == 0 {
 		fmt.Fprint(s.w, "\n")
 	}
 	s.open = false
 }
 
-// commentarySummary recognizes the provider's small human-summary envelope.
-// It is display prose, never a role result or controller transition.
+// commentarySummary recognizes the provider's human-summary envelope without
+// using its intermediate disposition or question for coordination.
 func commentarySummary(value string) (string, bool) {
-	var v struct {
-		Summary     string  `json:"summary"`
-		Disposition *string `json:"disposition"`
-	}
-	if json.Unmarshal([]byte(value), &v) != nil || v.Disposition != nil || strings.TrimSpace(v.Summary) == "" {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(value), &fields) != nil || len(fields) == 0 {
 		return "", false
 	}
-	return v.Summary, true
+	allowed := map[string]bool{"disposition": true, "summary": true, "task_id": true, "candidate": true, "findings": true, "evidence": true, "question": true}
+	for key := range fields {
+		if !allowed[key] {
+			return "", false
+		}
+	}
+	var summary string
+	if json.Unmarshal(fields["summary"], &summary) != nil || strings.TrimSpace(summary) == "" {
+		return "", false
+	}
+	return summary, true
 }

@@ -84,7 +84,9 @@ func Launch(ctx context.Context, executable string, stderr io.Writer) (*Process,
 	if executable == "" {
 		executable = "codex"
 	}
-	version, err := exec.CommandContext(ctx, executable, "--version").Output()
+	versionCommand := exec.CommandContext(ctx, executable, "--version")
+	versionCommand.Stderr = stderr
+	version, err := versionCommand.Output()
 	if err != nil {
 		return nil, fmt.Errorf("check Codex runner: %w", err)
 	}

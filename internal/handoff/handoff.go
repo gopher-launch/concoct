@@ -52,7 +52,9 @@ type State struct {
 	TurnTimeout      time.Duration                           `json:"turn_timeout,omitempty"`
 	StallTimeout     time.Duration                           `json:"stall_timeout,omitempty"`
 	LastResult       *codexapp.RoleResult                    `json:"last_result,omitempty"`
+	LastRole         dispatch.Role                           `json:"last_role,omitempty"`
 	LastError        string                                  `json:"last_error,omitempty"`
+	Diagnostics      string                                  `json:"diagnostics,omitempty"`
 	Updated          time.Time                               `json:"updated"`
 }
 
@@ -87,8 +89,8 @@ type Provider struct {
 	known   map[string]bool
 }
 
-func Launch(ctx context.Context, executable string) (*Provider, error) {
-	p, err := codexapp.Launch(ctx, executable, os.Stderr)
+func Launch(ctx context.Context, executable string, diagnostics io.Writer) (*Provider, error) {
+	p, err := codexapp.Launch(ctx, executable, diagnostics)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +272,7 @@ func Status(o Options) (State, error) {
 	return s, nil
 }
 
-func Run(ctx context.Context, o Options, open func(context.Context, string) (Runner, error)) (State, error) {
+func Run(ctx context.Context, o Options, open func(context.Context, string, io.Writer) (Runner, error)) (State, error) {
 	repo, err := canonical(o.Repository)
 	if err != nil {
 		return State{}, err
@@ -414,8 +416,26 @@ func Run(ctx context.Context, o Options, open func(context.Context, string) (Run
 		_ = save(dir, s)
 		return s, nil
 	}
-	runner, err := open(ctx, o.Codex)
+	diagnosticFile, err := os.CreateTemp(dir, "provider-*.log")
 	if err != nil {
+		return s, err
+	}
+	diagnosticPath := diagnosticFile.Name()
+	if err := diagnosticFile.Close(); err != nil {
+		return s, err
+	}
+	diagnosticFile, err = os.OpenFile(diagnosticPath, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return s, err
+	}
+	defer diagnosticFile.Close()
+	s.Diagnostics = diagnosticPath
+	if err := save(dir, s); err != nil {
+		return s, err
+	}
+	runner, err := open(ctx, o.Codex, diagnosticFile)
+	if err != nil {
+		_ = recordDiagnostic(s.Diagnostics, "provider", err)
 		return s, err
 	}
 	defer runner.Close()
@@ -531,7 +551,7 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 	})
 	if runErr != nil {
 		s.Phase = "execution_failed"
-		_ = recordDiagnostic(dir, role, runErr)
+		_ = recordDiagnostic(s.Diagnostics, string(role), runErr)
 		if turnID == "" {
 			turnID = outcome.TurnID
 		}
@@ -546,7 +566,7 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		} else if errors.Is(runErr, codexapp.ErrInvalidResponseSchema) {
 			s.LastError = "Concoct supplied an invalid response schema; correct Concoct's code before retrying"
 		} else {
-			s.LastError = fmt.Sprintf("%s execution failed: %v", role, runErr)
+			s.LastError = fmt.Sprintf("%s execution failed; inspect diagnostics", role)
 		}
 		_ = save(dir, s)
 		return s, fmt.Errorf("%s", s.LastError)
@@ -565,6 +585,7 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 
 func routeResult(dir string, s State, role dispatch.Role, step string, result codexapp.RoleResult) (State, error) {
 	s.LastResult = &result
+	s.LastRole = role
 	s.Summary = result.Summary
 	s.LastError = ""
 	if result.Disposition == "decision_required" || result.Disposition == "blocker" {
@@ -757,8 +778,7 @@ func verifyCandidate(s State) error {
 	return nil
 }
 
-func recordDiagnostic(dir string, role dispatch.Role, err error) error {
-	path := filepath.Join(dir, "diagnostic.log")
+func recordDiagnostic(path, role string, err error) error {
 	f, openErr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if openErr != nil {
 		return openErr

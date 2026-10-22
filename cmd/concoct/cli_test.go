@@ -51,3 +51,20 @@ func TestApprovalAndBlockerPresentation(t *testing.T) {
 		t.Fatalf("exhausted approval output: %s", out.String())
 	}
 }
+
+func TestDiagnosticsAndQuietSummaryPresentation(t *testing.T) {
+	var out bytes.Buffer
+	s := handoff.State{Phase: "no_suitable_work", Summary: "Nothing ready", LastRole: "reagent", Diagnostics: "/tmp/provider-123.log", MaxAttempts: 12, MaxAssessments: 3}
+	display(&out, s, false)
+	if !strings.Contains(out.String(), "reagent result: Nothing ready") || !strings.Contains(out.String(), "Provider diagnostics: /tmp/provider-123.log") {
+		t.Fatalf("missing source or diagnostic location: %s", out.String())
+	}
+	out.Reset()
+	stream := newMessageStream(&out, false, true)
+	stream.event(codexapp.Event{Kind: "item/completed", ThreadID: "reagent", TurnID: "one", Raw: []byte(`{"item":{"id":"message","type":"agentMessage","phase":"commentary","text":"Working"}}`)}, func(string) string { return "reagent" })
+	stream.finish()
+	display(&out, s, false)
+	if strings.Contains(out.String(), "Working") || !strings.Contains(out.String(), "reagent result: Nothing ready") {
+		t.Fatalf("quiet hid result or showed progress: %s", out.String())
+	}
+}

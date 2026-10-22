@@ -1,6 +1,7 @@
 package codexapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -282,11 +283,15 @@ func TestRevertedSettingsZeroTurnLossAndUnsupportedRunner(t *testing.T) {
 		t.Fatalf("resume access reversion=%v", err)
 	}
 	script := filepath.Join(t.TempDir(), "fake-codex")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'codex-cli 0.146.0\\n'\n"), 0700); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'startup diagnostic\\n' >&2\nprintf 'codex-cli 0.146.0\\n'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Launch(ctx, script, io.Discard); err == nil || !strings.Contains(err.Error(), "unsupported Codex runner") {
+	var diagnostics bytes.Buffer
+	if _, err := Launch(ctx, script, &diagnostics); err == nil || !strings.Contains(err.Error(), "unsupported Codex runner") {
 		t.Fatalf("unsupported runner=%v", err)
+	}
+	if !strings.Contains(diagnostics.String(), "startup diagnostic") {
+		t.Fatalf("startup stderr was not retained: %q", diagnostics.String())
 	}
 }
 

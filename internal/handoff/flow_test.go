@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,7 +213,7 @@ func (f *flowRunner) RunRoleTurn(_ context.Context, id, prompt string, s codexap
 }
 func testFlow(t *testing.T, options Options, f *flowRunner) (State, error) {
 	t.Helper()
-	return Run(context.Background(), options, func(context.Context, string) (Runner, error) { return f, nil })
+	return Run(context.Background(), options, func(context.Context, string, io.Writer) (Runner, error) { return f, nil })
 }
 func TestRequestedChangesCorrectionReassessmentApprovalIntegration(t *testing.T) {
 	repo := testRepo(t)
@@ -351,7 +352,7 @@ func TestApprovedReviewWithNoIntegrationInvocationStopsBeforeApproval(t *testing
 		t.Fatal(err)
 	}
 	nominal := &fakeRunner{repo: repo, evidenceDir: dir, models: model(), output: []string{result("ready_for_review", "Ready", "APP-002", "CANDIDATE"), result("approved", "Approved", "APP-002", "CANDIDATE")}}
-	open := func(context.Context, string) (Runner, error) { return nominal, nil }
+	open := func(context.Context, string, io.Writer) (Runner, error) { return nominal, nil }
 	s, err := Run(context.Background(), Options{Repository: repo, Root: root, MaxAttempts: 2}, open)
 	if err != nil || s.Phase != "limit_exhausted" || s.Verdict != "approved" || s.ApprovedCommit != s.Candidate || s.Attempts != 2 || !strings.Contains(s.LastError, "no integration turn") {
 		t.Fatalf("exhausted approval boundary: %+v %v", s, err)

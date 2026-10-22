@@ -13,10 +13,10 @@ import (
 	"github.com/gopher-launch/concoct/internal/handoff"
 )
 
-type opener func(context.Context, string) (handoff.Runner, error)
+type opener func(context.Context, string, io.Writer) (handoff.Runner, error)
 
-func liveOpen(ctx context.Context, executable string) (handoff.Runner, error) {
-	return handoff.Launch(ctx, executable)
+func liveOpen(ctx context.Context, executable string, diagnostics io.Writer) (handoff.Runner, error) {
+	return handoff.Launch(ctx, executable, diagnostics)
 }
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, open opener) int {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
@@ -44,6 +44,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 	stream := newMessageStream(stdout, jsonMode, quiet)
 	o.OnEvent = func(role string, event codexapp.Event) { stream.event(event, func(string) string { return role }) }
 	state, err := handoff.Run(ctx, o, open)
+	if err != nil {
+		stream.report = nil
+	}
 	stream.finish()
 	if err != nil {
 		fmt.Fprintln(stderr, "concoct:", err)
@@ -181,13 +184,24 @@ func display(w io.Writer, s handoff.State, jsonMode bool) {
 		fmt.Fprintln(w, "Review evidence:", s.ReviewEvidence)
 	}
 	if s.Summary != "" && s.Summary != s.ReagentSummary && s.Summary != s.ReviewSummary {
-		fmt.Fprintln(w, s.Summary)
+		source := "agent"
+		if s.LastRole != "" {
+			source = string(s.LastRole)
+		}
+		fmt.Fprintf(w, "%s result: %s\n", source, s.Summary)
 	}
 	if s.Question != nil {
-		fmt.Fprintln(w, "Question:", s.Question.Text)
+		if s.QuestionRole != "" {
+			fmt.Fprintf(w, "Question from %s: %s\n", s.QuestionRole, s.Question.Text)
+		} else {
+			fmt.Fprintln(w, "Question:", s.Question.Text)
+		}
 	}
 	if s.LastError != "" {
 		fmt.Fprintln(w, "Execution issue:", s.LastError)
+	}
+	if s.Diagnostics != "" {
+		fmt.Fprintln(w, "Provider diagnostics:", s.Diagnostics)
 	}
 	fmt.Fprintf(w, "Invocations: %d/%d\n", s.Attempts, s.MaxAttempts)
 	if s.MaxAssessments > 0 {

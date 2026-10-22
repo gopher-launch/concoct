@@ -16,6 +16,8 @@ func TestFinalResultPrecedence(t *testing.T) {
 		{"explicit with surrounding commentary", [][2]string{{"commentary", "before"}, {"final_answer", good}, {"commentary", "after"}}, good},
 		{"explicit replaces absent", [][2]string{{"", good}, {"final_answer", "{bad"}, {"", good}}, "{bad"},
 		{"null compatibility", [][2]string{{"", "commentary"}, {"", good}}, good},
+		{"intermediate null result followed by prose", [][2]string{{"", good}, {"", "No response is needed."}}, ""},
+		{"intermediate null result followed by empty item", [][2]string{{"", good}, {"", ""}}, ""},
 		{"commentary cannot supply result", [][2]string{{"commentary", good}}, ""},
 		{"malformed null is not result", [][2]string{{"", "{bad"}}, ""},
 		{"empty explicit masks fallback", [][2]string{{"", good}, {"final_answer", ""}}, ""},

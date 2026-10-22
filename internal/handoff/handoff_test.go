@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,7 +122,7 @@ func TestSelectionToIndependentReview(t *testing.T) {
 	root := t.TempDir()
 	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("ready_for_review", "Candidate ready", "APP-002", "CANDIDATE"), result("approved", "Looks good", "APP-002", "CANDIDATE")}}
 	fake.evidenceDir, _ = storage(repo, root)
-	open := func(context.Context, string) (Runner, error) { return fake, nil }
+	open := func(context.Context, string, io.Writer) (Runner, error) { return fake, nil }
 	s, err := Run(context.Background(), Options{Repository: repo, Root: root, OnEvent: func(role string, e codexapp.Event) {}}, open)
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +142,7 @@ func TestInvocationLimitStopsBeforeReview(t *testing.T) {
 	root := t.TempDir()
 	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("ready_for_review", "Candidate ready", "APP-002", "CANDIDATE")}}
 	fake.evidenceDir, _ = storage(repo, root)
-	s, err := Run(context.Background(), Options{Repository: repo, Root: root, MaxAttempts: 1}, func(context.Context, string) (Runner, error) { return fake, nil })
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root, MaxAttempts: 1}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +153,7 @@ func TestInvocationLimitStopsBeforeReview(t *testing.T) {
 func TestMalformedResultKeepsWork(t *testing.T) {
 	repo := testRepo(t)
 	fake := &fakeRunner{repo: repo, models: model(), output: []string{`{"summary":"missing disposition"}`}}
-	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir()}, func(context.Context, string) (Runner, error) { return fake, nil })
+	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir()}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 	if err == nil || !strings.Contains(err.Error(), "invalid structured") || s.Phase != "invalid_result" || s.Attempts != 1 {
 		t.Fatalf("malformed result: %+v %v", s, err)
 	}
@@ -160,7 +161,7 @@ func TestMalformedResultKeepsWork(t *testing.T) {
 func TestTimeoutStopsTurn(t *testing.T) {
 	repo := testRepo(t)
 	fake := &fakeRunner{repo: repo, models: model(), fail: errors.New("wait")}
-	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir(), TurnTimeout: 20 * time.Millisecond}, func(context.Context, string) (Runner, error) { return fake, nil })
+	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir(), TurnTimeout: 20 * time.Millisecond}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 	if err == nil || fake.stopCalls != 1 || s.Attempts != 1 || s.Phase != "execution_failed" {
 		t.Fatalf("timeout: %+v %v", s, err)
 	}
@@ -170,23 +171,41 @@ func TestExecutionFailureRetainsDiagnostic(t *testing.T) {
 	repo := testRepo(t)
 	root := t.TempDir()
 	fake := &fakeRunner{repo: repo, models: model(), immediate: fmt.Errorf("%w: provider rejected detailed schema", codexapp.ErrInvalidResponseSchema)}
-	s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string) (Runner, error) { return fake, nil })
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 	if err == nil || strings.Contains(err.Error(), "provider rejected detailed") || !strings.Contains(err.Error(), "invalid response schema") || s.Attempts != 1 {
 		t.Fatalf("failure classification: %+v %v", s, err)
 	}
-	dir, e := storage(repo, root)
-	if e != nil {
-		t.Fatal(e)
-	}
-	log, e := os.ReadFile(filepath.Join(dir, "diagnostic.log"))
+	log, e := os.ReadFile(s.Diagnostics)
 	if e != nil || !strings.Contains(string(log), "provider rejected detailed schema") {
 		t.Fatalf("missing private diagnostic: %s %v", log, e)
+	}
+}
+
+func TestProviderDiagnosticsDoNotTurnSuccessfulExecutionIntoFailure(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("no_suitable_work", "Nothing ready", "", "")}}
+	var diagnostics io.Writer
+	fake.beforeTurn = func(string) {
+		_, _ = io.WriteString(diagnostics, "model-cache error: recovered\nrecoverable tool failure: retried\n")
+	}
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(_ context.Context, _ string, log io.Writer) (Runner, error) {
+		diagnostics = log
+		_, _ = io.WriteString(log, "app-server startup diagnostic\n")
+		return fake, nil
+	})
+	if err != nil || s.Phase != "no_suitable_work" || s.LastError != "" || s.Diagnostics == "" {
+		t.Fatalf("recoverable diagnostics changed outcome: %+v %v", s, err)
+	}
+	log, err := os.ReadFile(s.Diagnostics)
+	if err != nil || !strings.Contains(string(log), "app-server startup diagnostic") || !strings.Contains(string(log), "model-cache error") || !strings.Contains(string(log), "recoverable tool failure") {
+		t.Fatalf("provider diagnostics missing: %s %v", log, err)
 	}
 }
 func TestStallTimeoutStopsTurn(t *testing.T) {
 	repo := testRepo(t)
 	fake := &fakeRunner{repo: repo, models: model(), fail: errors.New("wait")}
-	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir(), StallTimeout: 20 * time.Millisecond}, func(context.Context, string) (Runner, error) { return fake, nil })
+	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir(), StallTimeout: 20 * time.Millisecond}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 	if err == nil || fake.stopCalls != 1 || s.Attempts != 1 {
 		t.Fatalf("stall: %+v %v", s, err)
 	}
@@ -195,7 +214,7 @@ func TestStallTimeoutStopsTurn(t *testing.T) {
 func TestNoSuitableWorkDoesNotLaunchReview(t *testing.T) {
 	repo := testRepo(t)
 	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("no_suitable_work", "Nothing ready", "", "")}}
-	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir()}, func(context.Context, string) (Runner, error) { return fake, nil })
+	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir()}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 	if err != nil || s.Phase != "no_suitable_work" || fake.turns != 1 {
 		t.Fatalf("no-work routing: %+v %v", s, err)
 	}
@@ -203,7 +222,7 @@ func TestNoSuitableWorkDoesNotLaunchReview(t *testing.T) {
 func TestWrongCandidateCannotReachReview(t *testing.T) {
 	repo := testRepo(t)
 	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("ready_for_review", "Ready", "APP-002", "wrong")}}
-	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir()}, func(context.Context, string) (Runner, error) { return fake, nil })
+	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir()}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 	if err == nil || s.Phase != "source_changed" || fake.turns != 1 {
 		t.Fatalf("candidate binding: %+v %v", s, err)
 	}
@@ -227,7 +246,7 @@ func TestMissingAgentEvidenceStopsHandoff(t *testing.T) {
 				t.Fatal(err)
 			}
 			fake := &fakeRunner{repo: repo, evidenceDir: dir, skipTaskEvidence: tc.skipTask, skipReviewEvidence: tc.skipReview, models: model(), output: []string{result("ready_for_review", "Ready", "APP-002", "CANDIDATE"), result("approved", "Approved", "APP-002", "CANDIDATE")}}
-			s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string) (Runner, error) { return fake, nil })
+			s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 			if err == nil || !strings.Contains(err.Error(), tc.wantError) || s.Phase != "invalid_result" || fake.turns != tc.wantTurns || s.Verdict != "" || (tc.skipTask && s.Evidence != "") || (tc.skipReview && s.ReviewEvidence != "") {
 				t.Fatalf("evidence handoff: %+v %v turns=%d", s, err, fake.turns)
 			}
@@ -248,7 +267,7 @@ func TestReviewRequiresExplicitExactIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			fake := &fakeRunner{repo: repo, evidenceDir: dir, models: model(), output: []string{result("ready_for_review", "Ready", "APP-002", "CANDIDATE"), result("approved", "Approved", tc.task, tc.candidate)}}
-			s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string) (Runner, error) { return fake, nil })
+			s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
 			if err == nil || !strings.Contains(err.Error(), "review result identity") || s.Phase != "invalid_result" || s.Verdict != "" || fake.turns != 2 {
 				t.Fatalf("identity binding: %+v %v", s, err)
 			}
@@ -279,7 +298,7 @@ func TestInterruptedDispatchDoesNotReplay(t *testing.T) {
 				}
 			}
 			opens := 0
-			open := func(context.Context, string) (Runner, error) { opens++; return fake, nil }
+			open := func(context.Context, string, io.Writer) (Runner, error) { opens++; return fake, nil }
 			func() {
 				defer func() {
 					if value := recover(); value == nil {
