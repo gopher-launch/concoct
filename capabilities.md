@@ -39,4 +39,10 @@ This ledger describes behavior in the current candidate's intended post-integrat
 - Agent prose streams under reagent or iragent labels with blank lines between messages. Structured commentary across supported phases displays its human summary without showing control fields or treating intermediate dispositions as workflow decisions. A completed result is announced only after handoff accepts its routing and evidence bindings, including phase-less final results. Agent results and Concoct coordination identify their sources; explicit JSON output and quiet progress suppression remain available.
 - Each provider execution retains startup and execution stderr in an external diagnostic file whose path appears in status. Recoverable stderr messages do not turn a successful agent result into failure. Execution failure is reported from the provider outcome with concise terminal text and a retained diagnostic location.
 
+## CON-056 — Prove the agent handoff workflow on real work
+- Completed through operator-run Linux/Codex trials.
+- First live trial demonstrated task selection, implementation, independent approval and exact-commit local integration.
+- Second live trial demonstrated the complete correction loop: independent review requested changes, reagent corrected the candidate, iragent approved the replacement, and explicit operator authorization led to local integration. The workflow used five agent invocations and two independent assessments without manual prompt relaying.
+- Both integrations ended on clean `main` at the approved commit. Durable evidence was retained.
+
 CON-042 remains a frozen, undelivered historical reference.

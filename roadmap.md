@@ -636,26 +636,30 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 
 **Scope boundary:** Do not repair, delete or migrate Codex’s model cache, upgrade the runner, classify arbitrary log prose, or expand recovery behavior. The cache incompatibility is a separate provider/environment concern; this task corrects how its diagnostics reach the operator.
 
-## CON-056 — Prove the golden path on fresh real work
+## CON-056 — Prove the agent handoff workflow on real work
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F005
-- Depends on: CON-055, CON-058, CON-059, CON-060, CON-061
+- Depends on: CON-064, CON-065, CON-066
 
-**Objective:** demonstrate the complete supported Linux/Codex workflow on one fresh, genuinely useful bounded task in a small external project and report its practical limits. This does not require Concoct to build itself.
+**Objective:** demonstrate that Concoct replaces manual prompt shuttling between reagent and iragent for useful work in an external project, through independent approval and operator-authorized local integration.
 
 **Acceptance criteria:**
 
-- A healthy roadmap and clean parent let one `concoct run` select one task, create its branch, engineer/validate/self-review, invoke iragent/high and present a reviewed candidate without persona copying, archive questions or operator relaying.
-- The operator inspects/approves the exact candidate; Concoct integrates it locally, finalizes external evidence and leaves the agreed parent clean. No push/deployment is implied.
-- Correction, intervention, limits, interruption/recovery and integration faults have focused automated evidence from preceding tasks. Do not manufacture all failures in this billable real trial or require a defect solely to force a correction cycle.
-- Record supported runner/configuration, actual role settings, observed turns/token/quota evidence, task-criterion results and any limitations. Do not report account deltas as exact task spend or claim universal provider compatibility.
-- Preserve the interrupted CURU-001 attempt and its recorded settings/consumption as evidence of the historical callback hold. Its missing live acknowledgment record need not be recoverable; keep its disposition separate from the fresh nominal trial. Require an explicit useful task purpose and dispatch budget for new live work.
+- Starting from a clean parent branch and an actionable roadmap, reagent selects one eligible task, creates its task branch and external evidence, implements the task, performs appropriate checks and self-review, and produces a specific candidate commit.
+- Concoct automatically invokes iragent to assess that exact candidate. When changes are requested, it passes the findings to reagent and requests another independent assessment of the replacement candidate.
+- Agents own engineering judgment, validation, review findings and task evidence. Concoct coordinates their execution and handoffs without interpreting acceptance prose or duplicating their engineering assessments.
+- Agent progress streams as readable prose. Execution remains within configured invocation, assessment and time limits.
+- Following independent approval, Concoct waits for explicit operator authorization identifying the exact approved commit. It then prompts reagent to integrate that commit locally and report the outcome. No push or publication is implied.
+- The operator confirms that the parent branch contains the approved commit and the checkout is clean. Task and review evidence remain outside the project.
+- Record practical limitations and observed usage without treating account quota changes as exact task consumption. Preserve earlier failed trials as historical evidence; recovering them is not a completion requirement.
 
-**Verification:** one real-task run and normal operator acceptance, within configured bounds. The task's product/acceptance must actually be ready; do not invent requirements. Review source/checkpoint/reviews and normal project checks. Further live dispatches require an explicit task/budget reason, not an open-ended convergence experiment.
+**Verification:** completed through operator-run Linux/Codex trials in Curu:
 
-## Next task boundary
+- CURU-001 demonstrated task selection, implementation, independent approval and exact-commit local integration at `b4c0f1ae445444ae8c11acb91dea956bfbe44e8f`.
+- CURU-014 demonstrated the complete correction loop: independent review requested changes, reagent corrected the candidate, iragent approved the replacement, and explicit operator authorization led to local integration at `940ec947f76d3b8a2b3f5d6cbad0c3899a13ec26`. The workflow used five agent invocations and two independent assessments without manual prompt relaying.
+- Both integrations ended on clean `main` at the approved commit. Durable evidence is retained under `$HOME/.concoct/trials/curu-001-05` and `$HOME/.concoct/trials/curu-next-01`.
 
-CON-056 is the next ready acceptance task. Construction uses manually directed Codex sessions; the existing Concoct skill and self-hosting workflow are excluded.
+These trials establish the normal workflow and a naturally occurring correction cycle. They do not claim exhaustive live coverage of interruption, recovery, provider failures or limit exhaustion. No additional live trial is required to complete this task.
