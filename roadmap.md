@@ -603,6 +603,39 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 
 **Follow-up:** Once delivered, perform the CON-056 Curu acceptance trial against the completed workflow.
 
+## CON-066 — Render agent progress as prose and capture provider diagnostics externally
+
+- Kind: task
+- Status: planned
+- Priority: medium
+- Parent: CON-F005
+- Depends on: CON-065
+
+**Objective:** Make ordinary operator output readable by displaying agent progress as prose, presenting questions only when input is required, and keeping provider diagnostics outside the terminal stream.
+
+**Context:** The successful CURU-001 handoff exposed structured JSON commentary, misleading intermediate `decision_required` dispositions and raw Codex stderr interleaved with progress. The latter included model-cache errors and tool failures that the agents worked through successfully.
+
+**Acceptance criteria:**
+
+- Render ordinary agent commentary as prose with clear reagent/iragent labels and blank lines between messages.
+- Recognize the defined structured commentary/result envelope across supported message phases. Display its human summary without exposing JSON keys, intermediate dispositions, placeholder questions or null fields. Preserve ordinary prose and intentional code examples.
+- Use only completed agent results for workflow routing. Intermediate `decision_required` or `approved` values do not trigger operator prompts, approval announcements or handoffs. Present an operator question when the completed result explicitly requests input.
+- Render completed agent results and Concoct’s own coordination messages in clear operator language. Clearly identify their sources. Retain explicit JSON output when requested through `--json`.
+- Capture the dedicated provider process’s stderr in external diagnostic logs, retaining startup and execution messages. Do not pass raw provider stderr directly to normal stdout/stderr. Associate diagnostic locations with the relevant execution so they are easy to find.
+- Diagnose execution failure from process/provider execution outcomes, rather than the presence of error-looking stderr text. On failure, show a concise human-readable explanation and the diagnostic location. Successful execution is not presented as failed merely because Codex logged cache or recoverable tool errors.
+- Preserve streaming, execution limits, agent routing and explicit integration approval. Presentation handling must not add engineering verification or new workflow prerequisites.
+- Document where diagnostics are recorded and how the operator can inspect them. Normal summaries remain available under `--quiet`.
+
+**Verification:**
+
+- Use representative events from the successful CURU-001 transcript, including structured commentary with `decision_required` and “No response is needed.”
+- Cover fragmented messages, explicit commentary phases, absent phases, final results, ordinary prose and intentional JSON examples.
+- Verify that intermediate messages cannot advance the workflow or request operator input.
+- Simulate repeated model-cache diagnostics and recoverable tool errors followed by success, plus a genuine provider failure. Verify readable terminal output and retained diagnostics.
+- Run applicable formatting, tests, vet, build and whitespace checks. No live provider run is required solely to verify this presentation correction.
+
+**Scope boundary:** Do not repair, delete or migrate Codex’s model cache, upgrade the runner, classify arbitrary log prose, or expand recovery behavior. The cache incompatibility is a separate provider/environment concern; this task corrects how its diagnostics reach the operator.
+
 ## CON-056 — Prove the golden path on fresh real work
 
 - Kind: task
