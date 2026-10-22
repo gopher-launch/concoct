@@ -641,9 +641,14 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 			if err != nil {
 				return halt(dir, s, "invalid_result", fmt.Errorf("current review evidence: %w", err))
 			}
-			previous, err := os.Stat(reviewPath(dir, s.TaskID, s.Assessments))
-			if err == nil && os.SameFile(current, previous) {
-				return halt(dir, s, "invalid_result", fmt.Errorf("current review evidence reuses the preceding assessment file"))
+			for number := 1; number <= s.Assessments; number++ {
+				previous, err := os.Stat(reviewPath(dir, s.TaskID, number))
+				if err != nil {
+					return halt(dir, s, "invalid_result", fmt.Errorf("prior review evidence %02d: %w", number, err))
+				}
+				if os.SameFile(current, previous) {
+					return halt(dir, s, "invalid_result", fmt.Errorf("current review evidence reuses assessment file %02d", number))
+				}
 			}
 		}
 		s.ReviewEvidence = reviewEvidence

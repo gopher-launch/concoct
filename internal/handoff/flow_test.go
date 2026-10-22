@@ -28,6 +28,7 @@ type flowRunner struct {
 	integrationFailure     bool
 	staleReviewEvidence    bool
 	linkedReviewEvidence   bool
+	thirdReviewAlias       string
 }
 
 func (f *flowRunner) Models(context.Context) ([]codexapp.Model, error) { return model(), nil }
@@ -142,6 +143,11 @@ func (f *flowRunner) RunRoleTurn(_ context.Context, id, prompt string, s codexap
 		if s.Role != "iragent" {
 			panic("expected reassessment")
 		}
+		if f.thirdReviewAlias != "" {
+			writeEvidence(reviewEvidence(2))
+			result = flowResult("changes_requested", "Another correction needed", "APP-002", gitTest(f.repo, "rev-parse", "HEAD"), []string{"Revise feature again"}, nil)
+			break
+		}
 		if f.staleReviewEvidence {
 			body, _ := json.Marshal(map[string]any{"disposition": "approved", "summary": "Claimed reassessment", "task_id": "APP-002", "candidate": gitTest(f.repo, "rev-parse", "HEAD"), "findings": nil, "evidence": reviewEvidence(1), "question": nil})
 			result = string(body)
@@ -157,6 +163,19 @@ func (f *flowRunner) RunRoleTurn(_ context.Context, id, prompt string, s codexap
 		writeEvidence(reviewEvidence(2))
 		result = flowResult("approved", "Corrected candidate approved", "APP-002", gitTest(f.repo, "rev-parse", "HEAD"), nil, nil)
 	case 4:
+		if f.thirdReviewAlias != "" {
+			if s.Role != "reagent" {
+				panic("expected second correction")
+			}
+			if err := os.WriteFile(filepath.Join(f.repo, "feature.txt"), []byte("corrected again\n"), 0600); err != nil {
+				panic(err)
+			}
+			gitTest(f.repo, "add", "feature.txt")
+			gitTest(f.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "corrected again")
+			writeEvidence(taskEvidence)
+			result = flowResult("ready_for_review", "Second corrected candidate", "APP-002", gitTest(f.repo, "rev-parse", "HEAD"), nil, nil)
+			break
+		}
 		if s.Role != "reagent" {
 			panic("expected integration reagent")
 		}
@@ -172,6 +191,20 @@ func (f *flowRunner) RunRoleTurn(_ context.Context, id, prompt string, s codexap
 		gitTest(f.repo, "update-ref", "refs/heads/main", candidate, base)
 		gitTest(f.repo, "switch", "main")
 		result = flowResult("integrated", "Integrated locally", "APP-002", candidate, nil, nil)
+	case 5:
+		if f.thirdReviewAlias == "" || s.Role != "iragent" {
+			panic("unexpected third review")
+		}
+		var err error
+		if f.thirdReviewAlias == "symlink" {
+			err = os.Symlink(reviewEvidence(1), reviewEvidence(3))
+		} else {
+			err = os.Link(reviewEvidence(1), reviewEvidence(3))
+		}
+		if err != nil {
+			panic(err)
+		}
+		result = flowResult("approved", "Claimed third assessment", "APP-002", gitTest(f.repo, "rev-parse", "HEAD"), nil, nil)
 	default:
 		panic("unexpected extra turn")
 	}
@@ -289,6 +322,23 @@ func TestReassessmentRequiresDistinctCurrentReviewFile(t *testing.T) {
 			s, err := testFlow(t, Options{Repository: repo, Root: root}, f)
 			if err == nil || s.Phase != "invalid_result" || s.Assessments != 1 || s.ApprovedCommit != "" || f.turns != 4 {
 				t.Fatalf("stale reassessment accepted: %+v %v", s, err)
+			}
+		})
+	}
+}
+func TestThirdAssessmentCannotReuseFirstFile(t *testing.T) {
+	for _, alias := range []string{"symlink", "hardlink"} {
+		t.Run(alias, func(t *testing.T) {
+			repo := testRepo(t)
+			root := t.TempDir()
+			dir, err := storage(repo, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := &flowRunner{repo: repo, root: dir, thirdReviewAlias: alias}
+			s, err := testFlow(t, Options{Repository: repo, Root: root}, f)
+			if err == nil || s.Phase != "invalid_result" || s.Assessments != 2 || s.ApprovedCommit != "" || f.turns != 6 {
+				t.Fatalf("nonadjacent review reuse accepted: %+v %v", s, err)
 			}
 		})
 	}
