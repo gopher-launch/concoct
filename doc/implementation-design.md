@@ -16,7 +16,7 @@ A completed, schema-valid `ready_for_review` result identifies the selected task
 
 The iragent returns an approved or changes-requested result that explicitly matches the selected task and candidate commit, with summary, findings and evidence path. Concoct requires a readable external review file before displaying its location and preserves the narrative without grading it. On requested changes, reagent receives the assessment and findings, commits a distinct corrected candidate, and iragent reassesses it. Completed assessments use numbered external review files. Concoct does not decide whether findings are justified or resolved.
 
-An approved assessment displays the task, exact commit, role summaries and review location, then waits for `concoct run --approve COMMIT`. Authorization must name that independently approved commit. Concoct then prompts reagent to check the source and parent binding, perform a guarded local fast-forward of the exact commit, and report its result. Reagent performs the Git operation; Concoct does not implement a separate integration transaction. No step pushes or publishes.
+An approved assessment displays the task, exact commit, role summaries and review location, then waits for `concoct run --approve COMMIT` when an invocation remains. If the limit is exhausted, the approval is retained for inspection without offering an unusable authorization. Authorization must name that independently approved commit. Concoct then prompts reagent to check the source and parent binding, perform a guarded local fast-forward of the exact commit, and report its result. Reagent performs the Git operation; Concoct does not implement a separate integration transaction. No step pushes or publishes.
 
 ## Execution and state
 
@@ -32,4 +32,4 @@ A run defaults to twelve agent invocations and three completed independent asses
 
 The repository retains its module identity and license. The active source is authoritative. CON-042 remains a frozen historical reference and is not merged into the active tree. The old Concoct skill, self-hosting workflow, repository-local operational notes and generated templates are outside the rebuild. Construction uses ordinary manually directed Codex sessions and independent review.
 
-CON-056 tests the complete path on useful fresh work. The small real documentation trial that preceded CON-065 is retained as external operator history, not as product documentation or a controller proof chain.
+CON-056 tests the complete path on useful fresh work.

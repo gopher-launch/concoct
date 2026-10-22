@@ -335,6 +335,13 @@ func Run(ctx context.Context, o Options, open func(context.Context, string) (Run
 			return s, err
 		}
 	}
+	if s.Phase == "awaiting_approval" && s.Attempts >= s.MaxAttempts {
+		s.Phase = "limit_exhausted"
+		s.LastError = "approved candidate retained, but invocation limit leaves no integration turn"
+		if err := save(dir, s); err != nil {
+			return s, err
+		}
+	}
 	switch s.Phase {
 	case "integrated", "integration_failed", "execution_failed", "execution_uncertain", "invalid_result", "source_changed", "limit_exhausted":
 		if o.Approve != "" || o.Answer != "" {
@@ -620,14 +627,24 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 			return halt(dir, s, "invalid_result", fmt.Errorf("unexpected iragent disposition %q", result.Disposition))
 		}
 		reviewEvidence := reviewPath(dir, s.TaskID, s.Assessments+1)
-		if result.Evidence != "" {
-			reviewEvidence = result.Evidence
+		if result.Evidence != "" && result.Evidence != reviewEvidence {
+			return halt(dir, s, "invalid_result", fmt.Errorf("review evidence must be the current assessment file %s", reviewEvidence))
 		}
 		if err := verifyCandidate(s); err != nil {
 			return halt(dir, s, "source_changed", err)
 		}
 		if err := verifyEvidence(s.Repository, reviewEvidence); err != nil {
 			return halt(dir, s, "invalid_result", fmt.Errorf("review evidence: %w", err))
+		}
+		if s.Assessments > 0 {
+			current, err := os.Stat(reviewEvidence)
+			if err != nil {
+				return halt(dir, s, "invalid_result", fmt.Errorf("current review evidence: %w", err))
+			}
+			previous, err := os.Stat(reviewPath(dir, s.TaskID, s.Assessments))
+			if err == nil && os.SameFile(current, previous) {
+				return halt(dir, s, "invalid_result", fmt.Errorf("current review evidence reuses the preceding assessment file"))
+			}
 		}
 		s.ReviewEvidence = reviewEvidence
 		s.ReviewSummary = result.Summary
@@ -636,7 +653,12 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 		s.Verdict = result.Disposition
 		if result.Disposition == "approved" {
 			s.ApprovedCommit = s.Candidate
-			s.Phase = "awaiting_approval"
+			if s.Attempts >= s.MaxAttempts {
+				s.Phase = "limit_exhausted"
+				s.LastError = "approved candidate retained, but invocation limit leaves no integration turn"
+			} else {
+				s.Phase = "awaiting_approval"
+			}
 		} else {
 			s.Phase = "correcting"
 		}

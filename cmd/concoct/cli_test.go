@@ -42,4 +42,12 @@ func TestApprovalAndBlockerPresentation(t *testing.T) {
 	if !strings.Contains(out.String(), "Question: Choose mode?") || !strings.Contains(out.String(), "concoct run --answer TEXT") {
 		t.Fatalf("blocker output: %s", out.String())
 	}
+	out.Reset()
+	s.Phase = "limit_exhausted"
+	s.Question = nil
+	s.LastError = "approved candidate retained, but invocation limit leaves no integration turn"
+	display(&out, s, false)
+	if strings.Contains(out.String(), "concoct run --approve") || !strings.Contains(out.String(), "no integration turn") {
+		t.Fatalf("exhausted approval output: %s", out.String())
+	}
 }

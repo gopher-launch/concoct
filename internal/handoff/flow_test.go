@@ -26,6 +26,8 @@ type flowRunner struct {
 	blocker                bool
 	reviewBlocker          bool
 	integrationFailure     bool
+	staleReviewEvidence    bool
+	linkedReviewEvidence   bool
 }
 
 func (f *flowRunner) Models(context.Context) ([]codexapp.Model, error) { return model(), nil }
@@ -139,6 +141,18 @@ func (f *flowRunner) RunRoleTurn(_ context.Context, id, prompt string, s codexap
 	case 3:
 		if s.Role != "iragent" {
 			panic("expected reassessment")
+		}
+		if f.staleReviewEvidence {
+			body, _ := json.Marshal(map[string]any{"disposition": "approved", "summary": "Claimed reassessment", "task_id": "APP-002", "candidate": gitTest(f.repo, "rev-parse", "HEAD"), "findings": nil, "evidence": reviewEvidence(1), "question": nil})
+			result = string(body)
+			break
+		}
+		if f.linkedReviewEvidence {
+			if err := os.Symlink(reviewEvidence(1), reviewEvidence(2)); err != nil {
+				panic(err)
+			}
+			result = flowResult("approved", "Claimed linked reassessment", "APP-002", gitTest(f.repo, "rev-parse", "HEAD"), nil, nil)
+			break
 		}
 		writeEvidence(reviewEvidence(2))
 		result = flowResult("approved", "Corrected candidate approved", "APP-002", gitTest(f.repo, "rev-parse", "HEAD"), nil, nil)
@@ -254,6 +268,47 @@ func TestCompletedReviewBoundaryContinuesAfterLaunchFailure(t *testing.T) {
 	s, err = testFlow(t, Options{Repository: repo, Root: root}, f)
 	if err != nil || s.Phase != "awaiting_approval" || s.Assessments != 2 || s.Attempts != 4 || f.turns != 4 {
 		t.Fatalf("continued review cycle: %+v %v", s, err)
+	}
+}
+func TestReassessmentRequiresDistinctCurrentReviewFile(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		linked bool
+	}{
+		{"old reported path", false},
+		{"current path linked to old file", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := testRepo(t)
+			root := t.TempDir()
+			dir, err := storage(repo, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := &flowRunner{repo: repo, root: dir, staleReviewEvidence: !tc.linked, linkedReviewEvidence: tc.linked}
+			s, err := testFlow(t, Options{Repository: repo, Root: root}, f)
+			if err == nil || s.Phase != "invalid_result" || s.Assessments != 1 || s.ApprovedCommit != "" || f.turns != 4 {
+				t.Fatalf("stale reassessment accepted: %+v %v", s, err)
+			}
+		})
+	}
+}
+func TestApprovedReviewWithNoIntegrationInvocationStopsBeforeApproval(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	dir, err := storage(repo, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nominal := &fakeRunner{repo: repo, evidenceDir: dir, models: model(), output: []string{result("ready_for_review", "Ready", "APP-002", "CANDIDATE"), result("approved", "Approved", "APP-002", "CANDIDATE")}}
+	open := func(context.Context, string) (Runner, error) { return nominal, nil }
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root, MaxAttempts: 2}, open)
+	if err != nil || s.Phase != "limit_exhausted" || s.Verdict != "approved" || s.ApprovedCommit != s.Candidate || s.Attempts != 2 || !strings.Contains(s.LastError, "no integration turn") {
+		t.Fatalf("exhausted approval boundary: %+v %v", s, err)
+	}
+	s, err = Run(context.Background(), Options{Repository: repo, Root: root, Approve: s.ApprovedCommit}, open)
+	if err == nil || s.Phase != "limit_exhausted" || nominal.turns != 2 {
+		t.Fatalf("approval consumed exhausted budget: %+v %v", s, err)
 	}
 }
 func TestReviewerBlockerAnswerReturnsToReviewer(t *testing.T) {
