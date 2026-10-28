@@ -1,21 +1,21 @@
 ---
 version: 1
 project: concoct
-updated: 2026-10-21
+updated: 2026-10-28
 ---
 
 # Concoct implementation roadmap
 
 Implementation scope 0.5
 
-Deliver the accepted operating model in implementation design revision 0.5: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections in the same session, and the operator approves the exact candidate for local integration. Active work survives interruption; source remains the truth of implemented behavior.
+Deliver the agent-handoff operating model in implementation design revision 0.8: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections, and the operator approves the exact candidate for local integration. Active state is retained across runs; source remains the truth of implemented behavior.
 
-The source tree includes selection, engineering, candidate freezing, bounded independent review/correction, stop/reconciliation/resume, operator interventions, exact accepted local integration, mechanical completion and the operator CLI. CON-062 simplifies agent coordination and CON-063 corrects provider response schemas before the ready CON-056 real-project proof task. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. CON-043–CON-063 retain their identities here.
+The current source coordinates agent selection, engineering, independent review/correction, operator approval and agent-performed local integration. The Curu trial exposed a missing completion transition: after reporting integration, retained active state prevents the next task from starting. CON-067 addresses that gap in the current handoff without restoring the earlier controller. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. Existing roadmap IDs retain their identities here.
 
 ## Delivery rules
 
 - Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-056` is the next ready task after CON-062 delivery. Promote the next eligible task through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
+- `CON-067` is the sole ready task. Promote later eligible tasks through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
 - Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
 - Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
 - Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the runner to build itself. The CLI exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation.
@@ -31,6 +31,7 @@ The source tree includes selection, engineering, candidate freezing, bounded ind
 | M3: durable interventions                    | CON-051–CON-052                  | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition                                                 |
 | M4: accepted local delivery                  | CON-053–CON-054                  | Exact-candidate integration and mechanical completion/archive lifecycle                                                                          |
 | M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-063 | Correct callback/recovery handling, agent coordination, response schemas and operator presentation before completing the real-task demonstration |
+| M6: next-task continuity                     | CON-067                          | Completed integration is retained as history while a later run can select the next ready task from a clean descendant checkout                   |
 
 The order is deliberately sequential for the first delivery. The dependencies below identify concrete prerequisites rather than suggesting parallel agent work. Intermediate milestones are development checkpoints, not claims that a usable redesigned release has shipped.
 
@@ -96,7 +97,7 @@ Tasks CON-053–CON-054 implement guarded local integration and mechanical compl
 - Parent: CON-E001
 - Depends on: none
 
-CON-055 exposes the operator interface. CON-058 corrects dynamic-tool completion and recovery; CON-059 makes its output and first-use guidance usable. CON-060 corrects final-result extraction, CON-061 uses retained callback acknowledgments when provider history omits them, CON-062 simplifies agent coordination, and CON-063 corrects provider response schemas and request rejection reporting. CON-056 then completes fresh real-work acceptance with the retained first attempt accounted for.
+CON-055 exposes the operator interface. CON-058 corrects dynamic-tool completion and recovery; CON-059 makes its output and first-use guidance usable. CON-060 corrects final-result extraction, CON-061 uses retained callback acknowledgments when provider history omits them, CON-062 simplifies agent coordination, and CON-063 corrects provider response schemas and request rejection reporting. CON-056 completes real-work acceptance. CON-067 follows up on the completed Curu integration by releasing finished handoff state for the next task.
 
 ## CON-043 — Reset the repository to a clean rebuild baseline
 
@@ -663,3 +664,27 @@ Delivered callback reconciliation: live verified callback outcomes remain bound 
 - Both integrations ended on clean `main` at the approved commit. Durable evidence is retained under `$HOME/.concoct/trials/curu-001-05` and `$HOME/.concoct/trials/curu-next-01`.
 
 These trials establish the normal workflow and a naturally occurring correction cycle. They do not claim exhaustive live coverage of interruption, recovery, provider failures or limit exhaustion. No additional live trial is required to complete this task.
+
+## CON-067 — Retire completed handoff state and enable the next task
+
+- Kind: task
+- Status: ready
+- Priority: high
+- Parent: CON-F005
+- Depends on: CON-065, CON-056
+
+**Objective:** After a successfully reported local integration, retain the completed run as external history and allow a later plain `concoct run` to start the next ready task.
+
+**Context:** In the Curu trial, CURU-002 was approved and locally integrated at `8f345c0e62c98ed07fdfd30e1c7573b57294251f`. The operator then committed documentation at descendant `197488cfe3748fdf767a99468ad533c6d4fb31d1`. Although Curu's roadmap makes CURU-019 the sole ready task, Concoct returns the retained `integrated` CURU-002 state before new-task selection. The old CON-054 completion machinery is not part of the current agent-handoff implementation.
+
+**Acceptance criteria:**
+
+- Treat an accepted `integrated` result as a completed handoff. Retain its task, candidate, approval, review and evidence references outside the product repository, and release the active state without requiring another agent turn or manual state-file edits. Preserve the completed result for inspection after release.
+- Make the completion transition durable and safe to retry after interruption. A repeated `run` must not lose or duplicate completion history, dispatch the old task again, or consume an invocation merely to retire it.
+- A later plain `run` starts from a clean named parent checkout and lets reagent select eligible work. Commits descended from the integrated candidate, including later operator documentation commits, do not invalidate the completed record or require `HEAD` to equal the old candidate. New work uses the then-current parent commit as its base and gets fresh invocation and assessment limits.
+- Keep `integration_failed`, uncertain execution, invalid results, pending approval and blockers distinct from successful completion. None may release active state or silently start a new task. Report any completion-record maintenance failure without discarding the recoverable state.
+- Reconcile `run`, `status` and first-use guidance so operators can tell whether a task is active, completed, or ready for a new run. Do not push, publish or alter product source during completion.
+
+**Verification:** Use a disposable Git repository and external state root to exercise approved integration, completion retention, repeat/restart behavior, and a subsequent eligible task after a descendant commit. Cover failed/uncertain integration and a completion-record write failure. Confirm the next task starts with the descendant commit as its base and fresh limits, while the CURU-002 record remains inspectable. Run focused tests and the documented Go checks; no additional live provider trial is required solely for this transition.
+
+**Scope boundary:** Use the current small handoff state model. Do not restore the old CON-054 ownership/archive subsystem, add a product ledger, regrade agent engineering evidence, or broaden interrupted-turn recovery.
