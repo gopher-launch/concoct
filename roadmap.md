@@ -668,7 +668,7 @@ These trials establish the normal workflow and a naturally occurring correction 
 ## CON-067 — Retire completed handoff state and enable the next task
 
 - Kind: task
-- Status: ready
+- Status: delivered
 - Priority: high
 - Parent: CON-F005
 - Depends on: CON-065, CON-056
@@ -688,3 +688,5 @@ These trials establish the normal workflow and a naturally occurring correction 
 **Verification:** Use a disposable Git repository and external state root to exercise approved integration, completion retention, repeat/restart behavior, and a subsequent eligible task after a descendant commit. Cover failed/uncertain integration and a completion-record write failure. Confirm the next task starts with the descendant commit as its base and fresh limits, while the CURU-002 record remains inspectable. Run focused tests and the documented Go checks; no additional live provider trial is required solely for this transition.
 
 **Scope boundary:** Use the current small handoff state model. Do not restore the old CON-054 ownership/archive subsystem, add a product ledger, regrade agent engineering evidence, or broaden interrupted-turn recovery.
+
+Delivered completion transition: a successfully reported integration is written once to external completion history and active state is atomically released without another provider turn. Status exposes the latest completed record when idle. A later plain run uses the then-current clean named checkout, including descendant operator commits, as a fresh baseline with fresh limits. Completion maintenance retries without dispatch; failed, blocked, invalid and uncertain states remain bound to their existing work.

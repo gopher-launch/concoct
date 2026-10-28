@@ -26,6 +26,16 @@ func TestApprovalAndAnswerOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletedPresentationOffersNextRunAndHistory(t *testing.T) {
+	var out bytes.Buffer
+	display(&out, handoff.State{Phase: "completed", TaskID: "APP-002", Candidate: "abc123", CompletionRecord: "/tmp/completion.json", Attempts: 5, MaxAttempts: 12}, false)
+	for _, want := range []string{"Concoct: completed", "Task: APP-002", "Completion record: /tmp/completion.json", "No active work.", "concoct run"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in %s", want, out.String())
+		}
+	}
+}
 func TestApprovalAndBlockerPresentation(t *testing.T) {
 	var out bytes.Buffer
 	s := handoff.State{Phase: "awaiting_approval", TaskID: "APP-002", Candidate: "abc123", ApprovedCommit: "abc123", ReagentSummary: "implemented", ReviewSummary: "approved", ReviewEvidence: "/tmp/review-01.md", Attempts: 2, MaxAttempts: 12, Assessments: 1, MaxAssessments: 3}

@@ -181,6 +181,9 @@ func display(w io.Writer, s handoff.State, jsonMode bool) {
 	if s.ReviewEvidence != "" {
 		fmt.Fprintln(w, "Review evidence:", s.ReviewEvidence)
 	}
+	if s.CompletionRecord != "" {
+		fmt.Fprintln(w, "Completion record:", s.CompletionRecord)
+	}
 	if s.Phase != "invalid_result" && s.Phase != "source_changed" && s.Summary != "" && s.Summary != s.ReagentSummary && s.Summary != s.ReviewSummary {
 		source := "agent"
 		if s.LastRole != "" {
@@ -210,6 +213,9 @@ func display(w io.Writer, s handoff.State, jsonMode bool) {
 	}
 	if s.Phase == "blocked" {
 		fmt.Fprintln(w, "To answer: concoct run --answer TEXT")
+	}
+	if s.Phase == "completed" {
+		fmt.Fprintln(w, "No active work. Run concoct run to start the next ready task from the current clean checkout.")
 	}
 }
 func usage(w io.Writer) {

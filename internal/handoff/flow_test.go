@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gopher-launch/concoct/internal/codexapp"
 	"github.com/gopher-launch/concoct/internal/stop"
@@ -242,8 +243,136 @@ func TestRequestedChangesCorrectionReassessmentApprovalIntegration(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Phase != "integrated" || s.AuthorizedCommit != candidate || s.Attempts != 5 || f.turns != 5 || gitTest(repo, "rev-parse", "main") != candidate || gitTest(repo, "branch", "--show-current") != "main" {
+	if s.Phase != "completed" || s.AuthorizedCommit != candidate || s.Attempts != 5 || f.turns != 5 || s.CompletionRecord == "" || s.CompletedAt.IsZero() || gitTest(repo, "rev-parse", "main") != candidate || gitTest(repo, "branch", "--show-current") != "main" {
 		t.Fatalf("integration result: %+v", s)
+	}
+	status, err := Status(Options{Repository: repo, Root: root})
+	if err != nil || status.Phase != "completed" || status.Candidate != candidate || status.CompletionRecord != s.CompletionRecord {
+		t.Fatalf("completed status: %+v %v", status, err)
+	}
+}
+
+type nextTaskRunner struct {
+	repo, root string
+	turns      int
+}
+
+func (f *nextTaskRunner) Models(context.Context) ([]codexapp.Model, error) { return model(), nil }
+func (f *nextTaskRunner) StartThread(_ context.Context, _ string, s codexapp.RoleSettings, _ []codexapp.ToolSpec) (codexapp.Thread, error) {
+	return codexapp.Thread{ID: s.Role + "-next"}, nil
+}
+func (f *nextTaskRunner) ResumeThread(_ context.Context, id string, _ bool, _ codexapp.RoleSettings) (codexapp.Thread, error) {
+	return codexapp.Thread{ID: id}, nil
+}
+func (f *nextTaskRunner) Stop(context.Context, string, string) stop.Result {
+	return stop.Result{Status: "stopped_safely"}
+}
+func (f *nextTaskRunner) Close() error { return nil }
+func (f *nextTaskRunner) RunRoleTurn(_ context.Context, id, _ string, s codexapp.RoleSettings, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+	f.turns++
+	if s.Role == "reagent" {
+		gitTest(f.repo, "switch", "-qc", "task/APP-003")
+		if err := os.WriteFile(filepath.Join(f.repo, "next.txt"), []byte("next\n"), 0600); err != nil {
+			return codexapp.TurnOutcome{}, err
+		}
+		gitTest(f.repo, "add", "next.txt")
+		gitTest(f.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "next task")
+		writeEvidence(filepath.Join(f.root, "evidence", "APP-003", "task.md"))
+	} else {
+		writeEvidence(reviewPath(f.root, "APP-003", 1))
+	}
+	candidate := gitTest(f.repo, "rev-parse", "HEAD")
+	disposition, summary := "ready_for_review", "Next candidate"
+	if s.Role == "iragent" {
+		disposition, summary = "approved", "Next candidate approved"
+	}
+	result := flowResult(disposition, summary, "APP-003", candidate, nil, nil)
+	return codexapp.TurnOutcome{ThreadID: id, TurnID: fmt.Sprintf("next-%d", f.turns), Status: "completed", FinalText: result}, nil
+}
+
+func TestCompletedRunReleasesStateForNextTaskAtDescendant(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	dir, err := storage(repo, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := &flowRunner{repo: repo, root: dir}
+	s, err := testFlow(t, Options{Repository: repo, Root: root}, first)
+	if err != nil || s.Phase != "awaiting_approval" {
+		t.Fatalf("first approval: %+v %v", s, err)
+	}
+	s, err = testFlow(t, Options{Repository: repo, Root: root, Approve: s.Candidate}, first)
+	if err != nil || s.Phase != "completed" {
+		t.Fatalf("first completion: %+v %v", s, err)
+	}
+	completion := s.CompletionRecord
+	oldCandidate := s.Candidate
+	recorded, err := os.ReadFile(completion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted := s
+	interrupted.Phase = "integrated"
+	interrupted.CompletionRecord = ""
+	interrupted.CompletedAt = time.Time{}
+	if err := save(dir, interrupted); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) {
+		t.Fatal("completion retry must not open a provider")
+		return nil, nil
+	})
+	if err != nil || s.Phase != "completed" || s.CompletionRecord != completion || first.turns != 5 {
+		t.Fatalf("idempotent completion retry: %+v %v turns=%d", s, err, first.turns)
+	}
+	recordedAfterRetry, err := os.ReadFile(completion)
+	if err != nil || string(recordedAfterRetry) != string(recorded) {
+		t.Fatalf("completion retry changed history: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "operator.md"), []byte("operator docs\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(repo, "add", "operator.md")
+	gitTest(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "operator docs")
+	descendant := gitTest(repo, "rev-parse", "HEAD")
+
+	next := &nextTaskRunner{repo: repo, root: dir}
+	s, err = Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) { return next, nil })
+	if err != nil || s.Phase != "awaiting_approval" || s.TaskID != "APP-003" || s.Base != descendant || s.Attempts != 2 || s.Assessments != 1 || s.MaxAttempts != 12 || next.turns != 2 {
+		t.Fatalf("next task: %+v %v turns=%d", s, err, next.turns)
+	}
+	data, err := os.ReadFile(completion)
+	if err != nil || !strings.Contains(string(data), oldCandidate) || !strings.Contains(string(data), `"phase": "completed"`) {
+		t.Fatalf("prior completion was not retained: %s %v", data, err)
+	}
+}
+
+func TestCompletionRecordFailureRetainsRetryableIntegratedState(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	dir, err := storage(repo, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &flowRunner{repo: repo, root: dir}
+	s, err := testFlow(t, Options{Repository: repo, Root: root}, f)
+	if err != nil || s.Phase != "awaiting_approval" {
+		t.Fatalf("approval: %+v %v", s, err)
+	}
+	if err := os.WriteFile(completionsPath(dir), []byte("blocks completion directory\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err = testFlow(t, Options{Repository: repo, Root: root, Approve: s.Candidate}, f)
+	if err == nil || s.Phase != "integrated" || f.turns != 5 || !strings.Contains(s.LastError, "completion record maintenance failed") {
+		t.Fatalf("maintenance failure: %+v %v", s, err)
+	}
+	if err := os.Remove(completionsPath(dir)); err != nil {
+		t.Fatal(err)
+	}
+	s, err = testFlow(t, Options{Repository: repo, Root: root}, f)
+	if err != nil || s.Phase != "completed" || f.turns != 5 || s.CompletionRecord == "" {
+		t.Fatalf("maintenance retry: %+v %v turns=%d", s, err, f.turns)
 	}
 }
 func TestBlockerAnswerContinuesSameTask(t *testing.T) {
@@ -395,6 +524,10 @@ func TestIntegrationFailureIsAgentReported(t *testing.T) {
 	s, err = testFlow(t, Options{Repository: repo, Root: root, Approve: candidate}, f)
 	if err != nil || s.Phase != "integration_failed" || s.Summary != "Parent branch moved; no integration" || s.Attempts != 5 || gitTest(repo, "rev-parse", "main") == candidate {
 		t.Fatalf("integration failure: %+v %v", s, err)
+	}
+	status, err := Status(Options{Repository: repo, Root: root})
+	if err != nil || status.Phase != "integration_failed" || status.CompletionRecord != "" {
+		t.Fatalf("failed integration released active state: %+v %v", status, err)
 	}
 }
 func TestAssessmentAndInvocationLimitsDoNotReset(t *testing.T) {

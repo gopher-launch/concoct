@@ -55,6 +55,8 @@ type State struct {
 	LastRole         dispatch.Role                           `json:"last_role,omitempty"`
 	LastError        string                                  `json:"last_error,omitempty"`
 	Diagnostics      string                                  `json:"diagnostics,omitempty"`
+	CompletionRecord string                                  `json:"completion_record,omitempty"`
+	CompletedAt      time.Time                               `json:"completed_at,omitempty"`
 	Updated          time.Time                               `json:"updated"`
 }
 
@@ -203,7 +205,8 @@ func shaPath(value string) string { // path-only identity; not a content digest
 	}
 	return fmt.Sprintf("%016x", h)
 }
-func statePath(dir string) string { return filepath.Join(dir, "state.json") }
+func statePath(dir string) string       { return filepath.Join(dir, "state.json") }
+func completionsPath(dir string) string { return filepath.Join(dir, "completions") }
 func read(dir string) (State, error) {
 	data, err := os.ReadFile(statePath(dir))
 	if errors.Is(err, os.ErrNotExist) {
@@ -270,6 +273,9 @@ func Status(o Options) (State, error) {
 	if s.Repository != "" && s.Repository != repo {
 		return State{}, fmt.Errorf("state belongs to %s", s.Repository)
 	}
+	if s.Phase == "" {
+		return latestCompletion(dir, repo)
+	}
 	return s, nil
 }
 
@@ -303,6 +309,15 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	}
 	if o.Approve != "" && o.Answer != "" {
 		return s, fmt.Errorf("approval and blocker answer cannot be combined")
+	}
+	if s.Phase == "integrated" {
+		completed, finishErr := finishCompletion(dir, s)
+		if finishErr != nil {
+			s.LastError = "completion record maintenance failed: " + finishErr.Error()
+			_ = save(dir, s)
+			return s, fmt.Errorf("%s", s.LastError)
+		}
+		return completed, nil
 	}
 	if s.Phase == "no_suitable_work" {
 		s = State{}
@@ -346,7 +361,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		}
 	}
 	switch s.Phase {
-	case "integrated", "integration_failed", "execution_failed", "execution_uncertain", "invalid_result", "source_changed", "limit_exhausted":
+	case "integration_failed", "execution_failed", "execution_uncertain", "invalid_result", "source_changed", "limit_exhausted":
 		if o.Approve != "" || o.Answer != "" {
 			return s, fmt.Errorf("active run is stopped at %s", s.Phase)
 		}
@@ -472,10 +487,125 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		if o.OnResult != nil && s.LastResult != nil {
 			o.OnResult(string(role), *s.LastResult)
 		}
+		if s.Phase == "integrated" {
+			completed, finishErr := finishCompletion(dir, s)
+			if finishErr != nil {
+				s.LastError = "completion record maintenance failed: " + finishErr.Error()
+				_ = save(dir, s)
+				return s, fmt.Errorf("%s", s.LastError)
+			}
+			return completed, nil
+		}
 		if s.Phase != "reviewing" && s.Phase != "correcting" {
 			return s, nil
 		}
 	}
+}
+
+func completionPath(dir string, s State) string {
+	key := shaPath(s.Repository + "\x00" + s.TaskID + "\x00" + s.Candidate)
+	return filepath.Join(completionsPath(dir), "completion-"+key+".json")
+}
+
+func finishCompletion(dir string, s State) (State, error) {
+	if s.Phase != "integrated" || s.TaskID == "" || s.Candidate == "" || s.ApprovedCommit != s.Candidate || s.AuthorizedCommit != s.Candidate || s.LastResult == nil || s.LastResult.Disposition != "integrated" {
+		return s, fmt.Errorf("integrated state lacks an accepted completion binding")
+	}
+	path := completionPath(dir, s)
+	if data, err := os.ReadFile(path); err == nil {
+		var recorded State
+		if err := json.Unmarshal(data, &recorded); err != nil {
+			return s, fmt.Errorf("read existing completion: %w", err)
+		}
+		if recorded.Phase != "completed" || recorded.Repository != s.Repository || recorded.TaskID != s.TaskID || recorded.Candidate != s.Candidate || recorded.CompletionRecord != path {
+			return s, fmt.Errorf("existing completion record does not match integrated work")
+		}
+		s = recorded
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return s, err
+	} else {
+		s.Phase = "completed"
+		s.LastError = ""
+		s.CompletionRecord = path
+		s.CompletedAt = time.Now().UTC()
+		s.Updated = s.CompletedAt
+		if err := os.MkdirAll(completionsPath(dir), 0700); err != nil {
+			return s, err
+		}
+		data, err := json.MarshalIndent(s, "", "  ")
+		if err != nil {
+			return s, err
+		}
+		if err := writeAtomic(path, append(data, '\n')); err != nil {
+			return s, err
+		}
+	}
+	if err := save(dir, State{}); err != nil {
+		return s, fmt.Errorf("release active state: %w", err)
+	}
+	return s, nil
+}
+
+func latestCompletion(dir, repo string) (State, error) {
+	entries, err := os.ReadDir(completionsPath(dir))
+	if errors.Is(err, os.ErrNotExist) {
+		return State{}, nil
+	}
+	if err != nil {
+		return State{}, err
+	}
+	var latest State
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "completion-") || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(completionsPath(dir), entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return State{}, err
+		}
+		var completed State
+		if err := json.Unmarshal(data, &completed); err != nil {
+			return State{}, fmt.Errorf("read completion %s: %w", path, err)
+		}
+		if completed.Phase != "completed" || completed.Repository != repo || completed.CompletionRecord != path || completed.CompletedAt.IsZero() {
+			return State{}, fmt.Errorf("invalid completion record %s", path)
+		}
+		if latest.CompletedAt.Before(completed.CompletedAt) {
+			latest = completed
+		}
+	}
+	return latest, nil
+}
+
+func writeAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, ".write-")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	defer os.Remove(name)
+	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(name, path); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch.Role, step string, o Options) (State, error) {

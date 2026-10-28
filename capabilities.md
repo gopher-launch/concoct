@@ -39,6 +39,12 @@ This ledger describes behavior in the current candidate's intended post-integrat
 - Agent prose streams under reagent or iragent labels with blank lines between messages. Structured commentary across supported phases displays its human summary without showing control fields or treating intermediate dispositions as workflow decisions. A completed result is announced only after handoff accepts its routing and evidence bindings, including phase-less final results. Agent results and Concoct coordination identify their sources; explicit JSON output and quiet progress suppression remain available.
 - Each provider execution retains startup and execution stderr in an external diagnostic file whose path appears in status. Recoverable stderr messages do not turn a successful agent result into failure. Execution failure is reported from the provider outcome with concise terminal text and a retained diagnostic location.
 
+## CON-067 — Completed handoff retention and next-task continuity
+
+- An accepted `integrated` result is retained as an idempotent external completion record with its task, candidate, approval, review and evidence references. Active state is released without another agent turn; completion maintenance failures retain retryable integrated state.
+- With no active task, `status` displays the latest completed handoff. A later plain `run` starts fresh from the current clean named checkout, accepts commits descended from the integrated candidate as its new base, and receives fresh invocation and assessment limits.
+- Failed integration, blockers, invalid results and uncertain execution remain active or stopped and cannot silently release the task or start another one.
+
 ## CON-056 — Prove the agent handoff workflow on real work
 - Completed through operator-run Linux/Codex trials.
 - First live trial demonstrated task selection, implementation, independent approval and exact-commit local integration.
