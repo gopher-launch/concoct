@@ -1,692 +1,237 @@
 ---
 version: 1
 project: concoct
-updated: 2026-10-28
+updated: 2026-10-22
 ---
 
 # Concoct implementation roadmap
 
-Implementation scope 0.5
+This roadmap contains intended future work only. `capabilities.md` describes delivered behavior; Git history and external task/review evidence retain completed task specifications and delivery records. Task IDs are permanent and must not be reused.
 
-Deliver the agent-handoff operating model in implementation design revision 0.8: one reagent selects and completes one bounded task, iragent independently reviews and revisits corrections, and the operator approves the exact candidate for local integration. Active state is retained across runs; source remains the truth of implemented behavior.
-
-The current source coordinates agent selection, engineering, independent review/correction, operator approval and agent-performed local integration. The Curu trial exposed a missing completion transition: after reporting integration, retained active state prevents the next task from starting. CON-067 addresses that gap in the current handoff without restoring the earlier controller. Task IDs CON-001–CON-042 remain reserved in Git history; CON-042 is an undelivered frozen reference, not an active or delivered capability. Existing roadmap IDs retain their identities here.
+Concoct coordinates one task through reagent implementation, independent iragent review and correction, and operator-authorized local integration. Agents own engineering judgment and verification. Concoct routes their results, retains execution context and enforces configured limits. The nominal workflow has been demonstrated on real Curu work, including a requested-changes cycle and exact-commit local integration.
 
 ## Delivery rules
 
-- Execute and review **one task at a time**. A milestone groups outcomes; it does not authorize one agent to implement its whole task range. If a task proves too large or exposes a material product ambiguity, retain its checkpoint and bound/revise that task before expanding work.
-- `CON-067` is the sole ready task. Promote later eligible tasks through candidate roadmap reconciliation, reviewed with that delivery; no separate planning persona or routine operator gate is needed for satisfied dependencies.
-- Each implementation candidate includes relevant documentation, task-specific verification and concise roadmap/capability reconciliation. Independent review and operator acceptance precede integration. During bootstrap, use ordinary Codex sessions; do not require the unfinished Concoct runner to orchestrate its own construction.
-- Keep the repository/module identity and Git history while using the clean CON-043 rebuild skeleton. Preserve CON-042 as frozen reference material outside the active tree. Harvest small pieces only when a later bounded task needs them; do not merge/cherry-pick the old implementation wholesale.
-- Build Concoct through manually directed reagent/iragent sessions for this entire roadmap. Do not invoke or maintain the existing Concoct skill, and do not use the runner to build itself. The CLI exposes only implemented commands; there is no legacy runtime compatibility/cutover obligation.
-- Every task uses focused non-model tests. Run broader module/build checks when code changes require them. Do not spend provider turns to validate every internal step; the final live trial proves the integrated behavior.
+- Execute and review one task at a time. Select the highest-priority suitable ready task; a planned task is not eligible until its prerequisites are satisfied and it is promoted to ready.
+- Continue using manually directed reagent/iragent sessions to develop Concoct. Do not use the runner to build itself. CON-073 introduces a skill for the established operator workflow after the relevant usability changes settle.
+- Every candidate includes implementation, proportionate verification, self-review and relevant documentation reconciliation. Independent review and explicit operator acceptance precede local integration. Publication remains operator-controlled.
+- Reconcile documentation in the candidate for its intended post-integration state: summarize delivered behavior in `capabilities.md`, remove the completed task from this roadmap, remove its satisfied dependency references from remaining tasks, and promote newly eligible tasks when appropriate. Preserve the IDs and acceptance scope of all unfinished work.
+- Before removing the active task specification, retain it with the ordinary external task evidence so review can assess the original scope. Completed specifications remain available through Git history and external evidence; do not create a second completion ledger in the roadmap or capabilities.
+- `Depends on` names unfinished tasks still present in this roadmap. Remove a prerequisite reference only when delivery has satisfied it. Missing or misspelled references remain errors, never implicit evidence of completion. Retire epic/feature entries when they no longer organize unfinished work.
+- `capabilities.md` describes current behavior and practical limits, organized by capability. It does not accumulate completed-task acceptance criteria, obsolete mechanisms or a chronological delivery log. Source remains the authority for implemented behavior.
+- Keep trial output, investigations, diagnostics and review records outside the project. Use focused deterministic checks for these follow-ups; another billable live trial is not required solely for presentation or bookkeeping changes.
 
-## Delivery checkpoints
+## CON-074 — Keep the roadmap prospective and capabilities current
 
-| Checkpoint                                   | Tasks                            | Reviewable result                                                                                                                                |
-| -------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| M0: clean rebuild baseline                   | CON-043                          | Integrated minimal buildable CLI and current guidance, with no legacy engine or skill active                                                     |
-| M1: trusted execution foundation             | CON-057, CON-044–CON-046         | Small roadmap parser, external active store, app-server client and enforced dispatch policy, verified with fixtures/fakes                        |
-| M2: automatic candidate/review flow          | CON-047–CON-050                  | Continuous selection/engineering and independent review/correction through the new controller; candidate ready for operator acceptance           |
-| M3: durable interventions                    | CON-051–CON-052                  | Verified stop/resume, reconstruction from active evidence, operator answers and task disposition                                                 |
-| M4: accepted local delivery                  | CON-053–CON-054                  | Exact-candidate integration and mechanical completion/archive lifecycle                                                                          |
-| M5: operator CLI, corrections and real proof | CON-055–CON-056, CON-058–CON-063 | Correct callback/recovery handling, agent coordination, response schemas and operator presentation before completing the real-task demonstration |
-| M6: next-task continuity                     | CON-067                          | Completed integration is retained as history while a later run can select the next ready task from a clean descendant checkout                   |
-
-The order is deliberately sequential for the first delivery. The dependencies below identify concrete prerequisites rather than suggesting parallel agent work. Intermediate milestones are development checkpoints, not claims that a usable redesigned release has shipped.
-
-## Backlog organization
-
-The epic/feature IDs below organize work and are not selectable execution units. Only task entries can be claimed.
-
-## CON-E001 — Deliver the autonomous, governed engineering workflow
-
-- Kind: epic
-- Status: planned
+- Kind: task
+- Status: ready
 - Priority: high
 - Parent: none
 - Depends on: none
 
-Complete the nominal selection → engineering → independent review/correction → operator acceptance → local integration flow with durable active work and readable progress.
-
-## CON-F001 — Establish trusted execution and active-work foundations
-
-- Kind: feature
-- Status: planned
-- Priority: high
-- Parent: CON-E001
-- Depends on: none
-
-CON-043 establishes the clean baseline; CON-057 and CON-044–CON-046 establish backlog parsing, external durability, provider transport and dispatch governance.
-
-## CON-F002 — Deliver a reviewed candidate without operator relaying
-
-- Kind: feature
-- Status: planned
-- Priority: high
-- Parent: CON-E001
-- Depends on: none
-
-Tasks CON-047–CON-050 let reagent select and engineer continuously, then let iragent assess and reassess exact candidates.
-
-## CON-F003 — Preserve work through stops and genuine decisions
-
-- Kind: feature
-- Status: planned
-- Priority: high
-- Parent: CON-E001
-- Depends on: none
-
-Tasks CON-051–CON-052 provide stop/recovery and operator intervention without abandoning the current task or resetting its allowances.
-
-## CON-F004 — Integrate and finalize exactly accepted work
-
-- Kind: feature
-- Status: planned
-- Priority: high
-- Parent: CON-E001
-- Depends on: none
-
-Tasks CON-053–CON-054 implement guarded local integration and mechanical completion/history retention.
-
-## CON-F005 — Make the complete workflow nominal and prove it
-
-- Kind: feature
-- Status: planned
-- Priority: high
-- Parent: CON-E001
-- Depends on: none
-
-CON-055 exposes the operator interface. CON-058 corrects dynamic-tool completion and recovery; CON-059 makes its output and first-use guidance usable. CON-060 corrects final-result extraction, CON-061 uses retained callback acknowledgments when provider history omits them, CON-062 simplifies agent coordination, and CON-063 corrects provider response schemas and request rejection reporting. CON-056 completes real-work acceptance. CON-067 follows up on the completed Curu integration by releasing finished handoff state for the next task.
-
-## CON-043 — Reset the repository to a clean rebuild baseline
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F001
-- Depends on: none
-
-Delivered baseline: minimal Go CLI, current guidance, accepted design and rebuild backlog; legacy runtime, generated templates, local skill and release machinery retired.
-
-## CON-057 — Parse the bounded roadmap metadata contract
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F001
-- Depends on: CON-043
-
-Delivered parser: read-only validation of bounded roadmap metadata, references and dependency cycles, with task prose retained and eligible ready tasks reported. No selection or runner behavior was delivered.
-
-## CON-044 — Persist active work and expose a read-only snapshot
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F001
-- Depends on: CON-057
-
-Delivered store: an external active-work store binds one run to its repository and parent, keeps task/review/receipt evidence with atomic writes and recoverable pending transitions, enforces one execution owner, and serves read-only status snapshots. Host methods separate checkpoint, decision and review writes.
-
-## CON-045 — Implement the verified app-server transport
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F001
-- Depends on: CON-044
-
-Delivered transport: Linux Codex app-server 0.147.0 stdio handshake and version check, model/quota reads, explicit thread/turn settings, streaming lifecycle events, continuing-turn host callbacks, and interruption/background-terminal controls. Fake-server tests cover interleaved progress, malformed callbacks, settings mismatch, provider disconnect and zero-turn loss. This package does not implement controller policy or prove process cessation.
-
-## CON-046 — Govern every agent dispatch and retain consumption
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F001
-- Depends on: CON-045
-
-Delivered policy: provider-catalog role resolution with explicit Concoct invocation/project/user precedence, supported model/effort validation, and retained full-access settings. The active-work owner exposes a durable pre-dispatch reservation and exact authorization wait method. Default grants cover selection, engineering, review and correction; configured gates bind task, role, activity and candidate. The state retains dispatch, assessment and recovery consumption across resume, supports upward limit extensions, and keeps provider quota windows and token receipts separate. Quota warnings, next-dispatch holds and unknown-telemetry fallback are available; watchdogs default off. Controller routing and threshold-triggered interruption remain later work.
-
-## CON-047 — Select, create the task branch and engineer in one turn
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F002
-- Depends on: CON-046
-
-**Objective:** let reagent choose one suitable task and continue engineering without an operator proxy or planning handoff.
+**Objective:** Make future-only roadmap maintenance the normal delivery practice, without accumulating completed tasks or obsolete implementation descriptions.
 
 **Acceptance criteria:**
 
-- Check external active work first. Otherwise require a clean named current branch, capture it as parent/baseline and prepare an external task checkout. Dirty/unbound new work returns a prerequisite error before agent dispatch.
-- Supply automatic reagent/shared instructions and current roadmap/source/documentation. Reagent chooses the highest-priority suitable ready task, creates its task branch from baseline, calls `claim_task`, then continues ordinary engineering in that same turn.
-- Claim validates one task, readiness/references/dependencies, unchanged parent baseline and clean pre-implementation task contents. A second different claim is rejected; retries cannot create another binding even with a new callback ID.
-- `save_checkpoint` updates current plan/progress/evidence without unauthorized scope changes. No-work or a material selection question is explicit; no fabricated work, archive lookup or sibling-task expansion.
-- Launch without another task's thread/context; source changes before an acknowledged valid claim cannot be accepted as a candidate.
+- Align active contributor guidance, agent prompts, documentation and relevant fixtures with the delivery rules above. Replace blanket instructions to preserve every roadmap entry or mark completed entries delivered with instructions to preserve unfinished IDs and remove completed entries after capability reconciliation.
+- Summarize delivered behavior in `capabilities.md`; retain the completed task specification in existing external evidence and Git history rather than copying its acceptance criteria into capabilities.
+- Reconcile remaining dependencies in the same candidate: remove satisfied prerequisites, retain unfinished prerequisites, and update readiness when appropriate. Remove completed epic/feature scaffolding and stale milestone instructions.
+- Keep the existing bounded roadmap metadata contract usable. A task with no remaining prerequisites uses `Depends on: none`; unresolved references and cycles still fail validation. A capabilities prose parser or separate completed-ID registry is unnecessary.
+- Ensure independent review receives the active task's original acceptance scope even when its entry has been removed from the candidate roadmap. Reuse the ordinary task evidence supplied to agents.
 
-**Verification:** controller/fake-agent plus disposable Git tests proving claim → branch binding → engineering/checkpoint within one turn, prerequisite rejection without dispatch, two competing claims and normal no-work. No live turn required.
+**Verification:** Use a small roadmap fixture with two dependent tasks to demonstrate delivery, capability reconciliation, completed-entry removal and readiness promotion without dangling references. Cover an unresolved reference and preservation of unfinished IDs. Check active instructions for contradictory maintenance rules; run applicable repository checks.
 
-Delivered internal controller: fresh reagent selection uses current instructions and roadmap context, a clean parent baseline and external task checkout. Host callbacks bind one eligible task after branch creation and before source changes, then persist engineering checkpoints in the same turn. Durable dispatch reservation precedes provider start. Normal no-work retires the unclaimed checkout and active pointer; decision requests retain active work. CLI workflow and correction routing remain later work.
-
-## CON-048 — Freeze a verified and reconciled candidate
+## CON-068 — Preserve execution context in suggested continuation commands
 
 - Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F002
-- Depends on: CON-047
-
-**Objective:** turn reagent readiness into an exact candidate that includes implementation, verification and roadmap/capability reconciliation.
-
-**Acceptance criteria:**
-
-- Reagent performs plan/implementation/validation/self-review continuously. Task criteria and configured mandatory project checks have candidate-bound evidence, with exact command/source paths from applicable instructions, contributor/testing docs, build/task scripts or CI. Record relevant additional checks and any genuinely unavailable check with its explicit acceptance decision.
-- Ready result requires a completed provider turn, valid disposition/checkpoint and idle tool work. Display progress immediately; result validation only controls state transitions.
-- Reconciliation is in candidate source and preserves task IDs; no parent roadmap/capability update occurs before accepted integration.
-- Capture baseline/candidate revision and tree, diff digest and changed paths. Respect explicit generated-output exclusions; untracked deliverable source cannot disappear. Validate ordinary reagent commits or mechanically finalize identical contents without another agent turn.
-- Invalid/missing results or unresolved mandatory callbacks retain work and bounded recovery; they never imply readiness or approval.
-
-**Verification:** Git/candidate and role-result fixtures for changed/untracked files, identical-content commit finalization, incomplete verification, callback uncertainty and reconciliation in the reviewed diff.
-
-Delivered internal freeze path: a completed reagent turn with resolved callbacks and idle background tools can present a structured final checkpoint. The host checks acceptance and mandatory-check evidence, post-integration roadmap/capability reconciliation and the complete source path set. It accepts ordinary reagent commits or makes a mechanical commit of the same staged contents, then records baseline/candidate revisions and trees, diff digest, changed paths and checkpoint digest. Unresolved or invalid results retain active work without creating a candidate. Initial independent review is delivered by CON-049; correction routing remains later work.
-
-## CON-049 — Independently assess an exact candidate
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F002
-- Depends on: CON-048
-
-**Objective:** invoke a separate iragent session automatically against the frozen candidate and active task evidence.
-
-**Acceptance criteria:**
-
-- Automatic iragent/shared instructions identify task acceptance, exact candidate, validation evidence and reviewer responsibility; the operator does not paste personas.
-- Use a distinct role thread and a checkout pinned to the candidate, with explicit resolved high effort/full access. Reviewer source-read-only behavior is an instruction; detect changed candidate contents before accepting a verdict.
-- Preserve a pending assessment across interruption and finalize one `review-NN.md` for each completed approved/changes-requested verdict. Bind it to candidate and agreed scope revision.
-- Approved, changes-requested and genuine blocker results remain distinct; provider completion or older approval is insufficient. Initial dispatch follows CON-046's automatic policy.
-
-**Verification:** fake role/provider tests for thread separation, candidate/scope binding, source drift, interrupted assessment reuse and valid verdict routing. Reviewer/high real execution is covered in CON-056, not another standalone probe.
-
-Delivered internal initial review: after candidate freeze, the controller can automatically reserve the candidate-bound iragent dispatch and start a separate explicitly configured reviewer thread in a detached checkout. The active record binds the pending assessment to candidate and agreed scope, retaining its number and checkpoint through interruption. The host checks candidate source integrity and completed, idle reviewer execution before finalizing review-01.md as approved or changes requested; a genuine blocker remains pending. Configured dispatch authorization still applies. Correction routing is delivered in CON-050 and interrupted-turn reconciliation in CON-051; broader live reviewer execution remains later work.
-
-## CON-050 — Close the bounded review/correction loop
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F002
-- Depends on: CON-049
-
-**Objective:** route review findings to reagent and resume the existing iragent against each revised candidate until approval or a genuine hold.
-
-**Acceptance criteria:**
-
-- Findings and relevant decisions reach the existing reagent without operator relaying; correction, validation and self-review produce a new frozen candidate.
-- Update the reviewer checkout only while idle; resume the same iragent thread with exact revised identity and correction evidence. Session identity is separate from candidate identity.
-- No new reviewer by default, no routine first-review/correction gate and no automatic model/effort escalation for disagreement.
-- Completed assessments, candidate cycles and dispatch/recovery bounds are consumed consistently. Exhaustion retains the current task/candidate/findings and supplies an exact continuation/extension action.
-
-**Verification:** an integrated fake-agent cycle with a real disposable Git candidate change, followed by same-reviewer approval; tests for stale approval, interrupted assessment counting, source changes during review and exhausted parent allowance.
-
-Delivered internal correction flow: completed findings return to the existing reagent thread, and a new validated checkpoint freezes a distinct candidate. Once the prior reviewer is idle, its detached checkout advances to that candidate and the same iragent thread reassesses it with the prior findings. Each completed verdict consumes one numbered assessment; recorded dispatch limits can retain the task and findings for an explicit extension. Stop/restart reconciliation is delivered in CON-051.
-
-## CON-051 — Stop, reconcile and resume actual work safely
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F003
-- Depends on: CON-050
-
-**Objective:** implement the demonstrated interrupt/cleanup/resume path and durable recovery without replaying uncertain work.
-
-**Acceptance criteria:**
-
-- Foreground Ctrl-C and configured stop triggers request interruption, list/terminate/clean the owned thread's background terminals and verify cessation before continuation or checkout replacement. Opaque provider handles are not treated as host PIDs.
-- Identify owned process activity separately from unrelated sessions; uncertainty or failed cleanup returns abnormal stop with evidence retained. A host-signaling fallback remains disabled for automatic use until its exact-ownership/cessation test passes.
-- Restart/resume the appropriate recorded thread with explicit settings and retained consumption. No new task selection while existing work awaits reconciliation.
-- Persist intent/receipts around launch, turn, callback and candidate operations; reconcile observed completion once. A missing acknowledgment/rollout never proves uncertain work did not happen.
-- Known undispatched zero-turn threads may be recreated; truly lost sessions reconstruct from current task/reviews/source, without transcripts or archives. Recovery obeys the parent limits.
-
-**Verification:** fake crash-point tests plus a focused installed-runner/child fixture check through the implemented client, reusing the final probe mechanism rather than repeating exploration. Cap its extra model turns at two unless a concrete new failure justifies an explicit extension. Prove stopped heartbeat/processes, retained evidence, explicit resume settings and no command replay. Report fallback coverage honestly.
-
-Delivered internal stop/recovery: canceled or configured-triggered turns record stop intent, request provider interruption, clean owned background terminals and require exact owned-process cessation before safe continuation. Pending attempts retain thread/turn identity and outcomes; restart observes the exact turn, applies verified completion once, or uses a bounded recovery dispatch after a verified interrupted stop. Missing turn acknowledgments remain held for reconciliation. Lost sessions reconstruct from current active evidence with recorded role settings. Automatic host signalling remains disabled.
-
-## CON-052 — Route genuine answers and preserve deferred work
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F003
-- Depends on: CON-051
-
-**Objective:** let operators answer real blockers and defer/abandon work without relaying agent messages or losing task state.
-
-**Acceptance criteria:**
-
-- Pending questions record requester, blocked objective, attempts/evidence, missing input/action, useful options/tradeoffs, safe remaining work and next step. Known unanswered blockers do not poll agents or permit new selection.
-- Choices, free text and answer files are durable before dispatch; resume requester by default. Source-changing reviewer decisions route through reagent and renewed review, with scope authority explicit.
-- An answer does not grant unrelated dispatch authorization or prove an external action succeeded. Agents verify material conditions and ask only focused remaining questions.
-- Defer/abandon requires idle execution, preserves evidence and releases active ownership without integration. Explicit deferred resume requires no competing active task and retains its settings/consumption.
-
-**Verification:** both-role blocker routing, durable answer before failed launch, stale/wrong question rejection, remaining authorization wait, deferred reactivation and terminal abandon tests.
-
-Delivered internal intervention handling: structured reagent/reviewer questions bind the requesting attempt and retain context in active evidence. Choice, text and file contents persist before requester continuation; source-changing reviewer questions require a receipted candidate-bound assessment before acceptance, then answers within the agreed scope become findings for reagent correction and renewed review. Confirmed failed pre-turn reagent launches retain the answer for a bounded recovery retry after idle verification. Questions that request scope revision remain held for separate explicit authority. Answers do not authorize pending dispatches or prove external actions. Idle-only defer and abandon release active ownership while retaining records; deferred tasks require explicit reactivation, and abandoned tasks remain unavailable to automatic selection.
-
-## CON-053 — Integrate only the exact operator-accepted candidate
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F004
-- Depends on: CON-052
-
-**Objective:** bind acceptance to a reviewed candidate and unchanged parent, then integrate locally with recoverable Git mechanics.
-
-**Acceptance criteria:**
-
-- Acceptance ID binds task/scope revision, candidate identity, approving assessment and expected parent baseline. Task ID alone cannot approve substitute work.
-- Verify matching candidate/review, idle execution, unchanged expected parent and clean parent checkout. Reject drift; do not silently rebase, merge, reset or push.
-- Fast-forward the parent to the exact reviewed commit with expected-old-ref protection and checkout/index reconciliation. Persist integration intent before mutation.
-- On interruption distinguish not-integrated, successfully-integrated and uncertain/conflicting outcomes from actual Git state. Do not replay successful integration or discard external changes.
-
-**Verification:** disposable repository tests for stale acceptance, candidate/scope/target drift, concurrent ref changes and interrupted ref/checkout transitions. Prove exact resulting commit/tree and no publication.
-
-Delivered internal integration: a durable acceptance ID binds the task, scope digest, exact candidate commit/tree, approving assessment and expected parent branch/commit. Local integration checks clean frozen source and parent, bound role idleness and settled attempts before persisting intent. The parent checkout safely prepares the accepted tree, a guarded expected-old-ref update fast-forwards the target, and checkout reattachment verifies the exact clean result. Retry classifies Git state and reconciles interrupted steps without replaying success, rewriting source or publishing. Completion/archive remains separate.
-
-## CON-054 — Finalize completion and retain operator history mechanically
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F004
-- Depends on: CON-053
-
-**Objective:** close integrated work, archive compact evidence outside the product and retire active ownership without another agent turn.
-
-**Acceptance criteria:**
-
-- Verify successful integration, finalize task/reviews/completion facts and retire active binding. Keep candidate reconciliation already integrated; do not regenerate a product ledger.
-- Default retention is indefinite. Operator-requested/configured pruning is deterministic, excludes active/needed supplied records and requires no provider invocation.
-- Cleanup/archive errors report maintenance pending after successful integration and resume maintenance only. Retain recoverable records/workspaces until cleanup is safe.
-- Archive narratives never enter automatic selection/resume context. There is no agent archive browser or routine archive-permission question; full access is not described as physical exclusion.
-
-**Verification:** archive/cleanup interruption and retry fixtures, maintenance failure after integration, pruning exclusions, no provider calls and fresh-task context without prior narratives.
-
-Delivered internal completion: after exact integrated target verification, a durable completion marker binds the run and accepted source. Bound task/final review evidence and compact facts are archived outside the product; clean worktrees are removed before active ownership is retired. Archive or cleanup conflicts retain evidence and report maintenance pending, with retries limited to maintenance. Archives remain indefinitely unless an explicit cutoff prunes completed records while protecting active and supplied task/run IDs. Automatic selection and resume context excludes archived narratives.
-
-## CON-055 — Complete the new operator CLI
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-054
-
-**Objective:** expose the complete new controller through the accepted operator commands. The legacy runtime is retired by CON-043; no migration or compatibility cutover is required.
-
-**Acceptance criteria:**
-
-- `run`/`status`, question answers, dispatch authorization, exact-candidate approval, extensions, defer/abandon and deferred resume invoke the new controller with documented stable IDs/exit dispositions. Unsupported/obsolete options fail clearly; no old choreography is available.
-- Human output streams agent commentary/responses before completion and distinguishes reported progress from verified Concoct status. Show effective settings, quota observation age, consumed bounds, candidate and exact next commands.
-- Quiet/JSON modes preserve actionable dispositions; status works during execution without an exclusive lock or model call. No-work is normal, not a failure loop.
-- Update nominal README/command guidance and relevant project-entry examples. Do not automatically install state/prompts/notes into target repositories; removed legacy commands/resources do not reappear in this supported path.
-
-**Verification:** CLI/controller integration tests for nominal flow, holds/answers/gates, quiet/JSON, status while running, invalid/stale IDs and unsupported-option rejection. Run full Go tests/vet/build and `git diff --check` for the complete interface.
-
-Delivered operator CLI: `run` and read-only `status` expose the active controller. Exact question, dispatch, acceptance and task IDs route answers, authorization, local integration, limit extensions and defer/abandon/reactivation. Structured blockers and exhausted bounds display the pending action; acceptance displays bound review/checkpoint evidence and exact source/documentation diff commands. A fresh run resolves role settings from the provider catalog and invocation choices; active work retains its settings. Human agent messages stream before the separately verified final disposition, while quiet and JSON-lines modes preserve actionable results. Completion maintenance remains retryable without agent dispatch. Unsupported commands and stale IDs fail explicitly; no legacy choreography or publication path is exposed.
-
-## CON-058 — Correct dynamic-tool completion and retained recovery state
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-055
-
-**Objective:** recognize verified Codex dynamic-tool completion without a spurious callback hold, and retain enough truthful recovery evidence to resume the same task safely before independent review.
-
-**Acceptance criteria:**
-
-- Check the supported Codex 0.147.0 dynamic-tool request, response and completed-item contract against its schema/source and available current-run evidence. A matching successful `dynamicToolCall` item completion is provider acknowledgment; an unrelated `serverRequest/resolved` event is not required for this path. Record any trace limitation rather than claiming an exact observed event sequence without evidence.
-- Bind role, thread, turn, request/call and item identities, tool name and durable host-operation receipt. Distinguish receipt commit, response transport, provider completion and operation failure. A failed, missing, mismatched or genuinely uncertain callback cannot make reagent's reported `ready_for_review` a verified candidate or dispatch iragent.
-- Make relevant callback events and restart reconciliation idempotent across duplicates and reordered delivery. A response classification error cannot create another claim, replace agreed scope, alter a finalized review or spend another engineering dispatch. Preserve the distinct approval/input resolution contract.
-- Derive `run` and `status` recovery disposition from the same retained state. Persist the actual failure reason, affected operation/stage and available evidence reference with the last agent result; show a useful next step instead of only a generic pending request and attempt ID.
-- Keep previous active records readable, including the bound CURU-001 settings and consumption. A corrected resume reconciles the exact completed provider turn, callback/host receipts, checkpoint, workspace and source before candidate freeze or initial iragent review. If proof is insufficient, retain the hold and name the missing evidence. Do not infer candidate validity from agent JSON alone; existing scope, verification, clean-source and candidate identity checks still apply.
-- Do not modify or retry Curu, reset allowances, abandon active work, integrate or dispatch live model turns during this implementation. Deliver reviewed Concoct source and specific operator instructions for a later, separately authorized resume. Reconcile delivered behavior in product documentation and `capabilities.md` with the candidate.
-
-**Verification:** deterministic provider transcripts using dynamic-tool item completion without `serverRequest/resolved`, plus success, failure, absence, mismatched identities, numeric/string request IDs, relevant event ordering and duplicates. Exercise completed-turn/restart reconciliation, no duplicate host mutation or dispatch, identical `run`/`status` recovery classification with retained reason, prior active-state fixtures and valid approval/input resolution. Run applicable Go checks and independent review; no live model turn is needed.
-
-**Source starting points:** `internal/codexapp/turn.go`, `transport.go`, `transport_test.go`; `internal/selection/selection.go`, `resume.go`; `cmd/concoct/live.go`; active-work callback receipts.
-
-Delivered callback and recovery handling: a successful completed dynamic-tool item bound to the request call, role turn and host receipt acknowledges a callback without requiring `serverRequest/resolved`. Failed, absent or mismatched items retain a recovery hold. The controller records callback stages and the last result's recovery reason, and exact completed-turn reconciliation checks provider items, durable receipts, source and candidate prerequisites before review. Earlier active records remain readable; missing proof keeps the hold.
-
-## CON-059 — Make operator output readable and document first use
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-058
-
-**Objective:** make live progress, recovery and status understandable to an operator while preserving streaming and the verified controller boundary.
-
-**Acceptance criteria:**
-
-- Lead `README.md` with a concise first-use journey: compatible Linux/Codex and build prerequisites, clean initialized project inputs, initial role settings, `run`/`status`, exact candidate and acceptance IDs, inspection, explicit approval and completion. Explain holds, exit codes, external state/workspaces, first-run profile choices and maintenance continuation using supported commands.
-- Use kebab-case for Concoct-owned public status, disposition and event names. Normalize Concoct-owned public CLI JSON field names consistently, document the output contract change and keep existing durable records and legacy role results readable. Leave provider-owned methods and fields in their required schema.
-- Track agent message item and role/turn boundaries. Stream ordinary chunks immediately within one message, retain its internal newlines and put a blank line between distinct messages. Handle adjacent or empty items and role switches without buffering the turn or waiting for verified completion.
-- Use actual item lifecycle/phase to separate structured final role results from human commentary. Parse control JSON and display a readable agent-reported summary separately from Concoct's verified disposition; do not dump raw control JSON in normal output. Malformed control results retain actionable diagnostics. Keep JSON mode machine-readable and quiet mode actionable.
-- Show recovery with the agent's reported result, incomplete controller verification, specific retained reason, whether iragent review began and what the suggested command will do. Treat diagnostic IDs as supporting details; do not invent an absent operation name or promise review before checks succeed. Show a readable pre-claim selection state and distinguish missing token receipts from measured zero.
-- Render human-facing timestamps in the operator's local timezone by default, honoring `TZ`, with a visible zone/offset and a documented UTC or alternate-zone choice. Keep durable UTC instants and prior records unambiguous. Apply this consistently to displayed CLI timestamp views.
-- Preserve CON-058's exact-candidate, recovery and `run`/`status` safeguards. Reconcile README, roadmap and capabilities with delivered behavior in the candidate; keep trial and review records outside the product repository.
-
-**Verification:** output fixtures with distinct message items, fragmented commentary and split final JSON, role changes, empty items and malformed control data; human/JSON/quiet, recovery and pre-claim selection views; previous active-state fixtures; local/UTC timestamp and DST-boundary cases. Exercise CLI behavior, run applicable Go checks and independent review. No live model turn is required.
-
-**Source starting points:** `README.md`; `cmd/concoct/cli.go`, `live.go`, `cli_test.go`; `internal/codexapp` item event metadata.
-
-Delivered operator presentation: first-use guidance covers supported inputs, role choices, inspection, exact acceptance and maintenance. Public Concoct JSON names and dispositions use kebab-case while durable and provider records retain their contracts. Message items stream promptly with distinct boundaries; structured final agent results are shown separately from controller verification. Recovery, selection and token-receipt views identify missing evidence, and human timestamps show local zone and offset with `TZ` selection.
-
-## CON-060 — Correct final-result extraction across live and resumed turns
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-059
-
-**Objective:** Correct extraction of agent final results from the supported Codex app-server protocol so that live execution and recovery recognize completed results consistently, while preserving exact identity, callback acknowledgment and candidate verification requirements.
-
-**Context:** Both current result readers recognize an agent-message phase of `final` or an absent phase. The supported Codex 0.147.0 protocol defines `final_answer`. This source mismatch can discard a valid final result and leave a completed turn on a recovery hold. Inspection of the retained CURU-001 turn must establish whether that mismatch explains the observed failure.
-
-**Acceptance criteria:**
-
-- Inspect the retained CURU-001 attempt and its exact provider turn using metadata-only reads. Record the observed identity, completion status, message phases, final-result availability and relevant callback evidence in the external task evidence. Distinguish confirmed observations from inference. This investigation must not start a model turn or alter the retained run.
-- Live turn handling and historical turn reads use consistent final-result extraction that recognizes the supported protocol’s `final_answer` phase. Provider wire values remain unchanged.
-- Explicit final-answer messages take precedence over compatibility handling for absent or null phases. Commentary cannot become the final result or overwrite one. Any retained compatibility behavior is deterministic, bounded and covered by tests; it must not conceal a malformed explicit final result.
-- Preserve exact thread and turn identity checks, terminal-status checks, structured role-result validation, callback acknowledgment and receipt verification, and source/candidate validation. Finding final-result text alone does not establish a verified candidate or review.
-- Recovery diagnostics distinguish identity mismatch, nonterminal status, missing final-result text, malformed structured results and callback-evidence failures. Ordinary output explains the failed condition in human-readable terms.
-- Recovery preserves the active task, branch, role settings, accumulated consumption and remaining allowances. It neither repeats acknowledged claims or completed engineering work nor fabricates a result from checkpoint prose or an operator transcript.
-- The existing Curu workspace and durable evidence remain intact. Implementation and verification do not automatically resume its agent workflow, launch independent review or integrate CURU-001. The operator resumes that trial after the Concoct correction has been reviewed and integrated.
-
-**Verification:**
-
-- Add realistic supported-version protocol fixtures covering live and historical reads, commentary before and after an explicit final answer, absent/null phases, and missing or malformed results.
-- Cover reagent and iragent results, identity mismatches, nonterminal turns and unresolved callback evidence. Demonstrate that the corrected extraction permits continuation only when all existing verification requirements pass.
-- Exercise retained-attempt reconciliation to verify that successful recovery advances without duplicate dispatch or allowance reset, while insufficient evidence retains a specific recovery hold.
-- Run the applicable formatting, tests, vet, build and whitespace checks. Record verification limitations explicitly. No billable provider probes are required.
-
-**Scope boundary:** No provider-version upgrade, new recovery command, state reset, verification bypass or broader workflow redesign. Keep operational investigation and review records outside project delivery documentation.
-
-Delivered final-result handling: live and historical Codex turns recognize `final_answer`, with explicit results taking priority over bounded phase-less structured-result compatibility. Recovery reports distinct identity, status, missing-text, malformed-result and callback-evidence failures while retaining all candidate and review gates.
-
-## CON-061 — Use retained callback acknowledgments when provider history is incomplete
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-060
-
-**Objective:** Remove the demonstrated dependency on historical provider reads retaining dynamic-tool items, so Concoct can continue its engineering, independent review and correction workflow using callback success it has already verified and durably recorded.
-
-**Context:** Investigation of CURU-001 confirmed successful host checkpoint commits, but historical Codex reads omitted the corresponding dynamic-tool items. Recovery currently requires those historical items even though live callback evidence can be retained by Concoct. The original attempt predates that retained evidence and need not be recoverable.
-
-**Acceptance criteria:**
-
-- Audit and reuse the existing callback records and host receipts. Ensure that successful live callback acknowledgments needed for continuation are durably recorded with their exact dispatch, role, thread, turn, call and tool bindings. Make only the changes needed for this demonstrated case.
-- When historical provider reads omit callback items, recovery accepts sufficient, consistent acknowledgment evidence already recorded by Concoct. Historical omission does not invalidate verified durable success.
-- Apply the same rule to the existing host operations used by engineering and independent review, including claim, checkpoint and assessment. Preserve their current scope and receipt checks.
-- Missing or conflicting acknowledgment evidence produces a concise human-readable hold explaining what cannot be verified. Receipt existence or an agent’s final response alone must not fabricate acknowledgment.
-- Preserve existing candidate validation, independent review, correction bounds and exact operator-authorized integration. Continuation must not duplicate completed callbacks or reset consumption and allowances.
-- Do not require recovery of the original CURU-001 attempt. Record its disposition recommendation externally; do not alter or restart the live trial during implementation.
-
-**Verification:**
-
-- Add focused regression coverage for successful callbacks recorded live, process reopen, historical reads omitting dynamic-tool items, and continuation using the retained evidence.
-- Include representative missing-evidence and conflicting-binding checks demonstrating that insufficient proof still holds.
-- Exercise the relevant engineering and review paths through existing test infrastructure.
-- Run applicable formatting, tests, vet, build and whitespace checks. Use the observed historical omission in fixtures; no billable provider probe is required.
-
-**Scope boundary:** This is a correction to the existing workflow, not a general recovery redesign. No private Codex log parser, legacy evidence migration, new reset command, storage-layout redesign or exhaustive failure matrix is required.
-
-**Follow-up:** CON-056 uses a fresh trial to exercise implementation → independent review → correction → acceptance → integration.
-
-Delivered callback reconciliation: live verified callback outcomes remain bound to their dispatch and host receipts. Exact completed-turn recovery accepts those retained acknowledgments when historical provider items are absent, and accepts matching successful historical items with host receipts when live completion records are incomplete but nonconflicting. Missing or conflicting proof retains a specific hold. Claim, checkpoint and assessment share this rule.
-
-## CON-062 — Simplify agent coordination and operator interaction
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-061
-
-**Objective:** Make Concoct a simple coordinator that automates the demonstrated manual reagent/iragent workflow. Agents own engineering judgment. Concoct invokes them, routes structured results, streams output, handles necessary operator interaction and enforces execution bounds.
-
-**Intended workflow:** Reagent selects and implements a task, including testing and self-review. Concoct passes the candidate to an independent iragent. Requested changes return to the reagent, followed by reassessment, until approval or an execution limit. The approved candidate reaches the operator for acceptance and authorized local integration. Publication remains operator-controlled.
-
-**Acceptance criteria:**
-
-- **Agent-owned judgment:** Remove normal-workflow checks that independently assess task suitability, implementation completeness, acceptance evidence, test sufficiency or resolution of review findings. Those judgments belong to reagent and iragent. Concoct does not repeat their engineering checks or inspect narrative content to infer success.
-- **Deterministic handoffs:** Define and consistently use schema-defined results containing only the fields needed for coordination, such as task identity, disposition, candidate identity, review findings and explicit requests for operator input. Narrative summaries and findings are passed through without semantic interpretation. Concoct may mechanically validate schemas, identifiers and the association between a review and its candidate.
-- **Simple task identification:** Selecting a task does not require reproducing objective or acceptance prose. Concoct identifies the roadmap entry by task ID and supplies its existing content as agent context. Remove the verbatim scope comparison and associated acknowledgment requirements that obstruct this handoff.
-- **Automatic coordination:** A candidate result starts independent review without another operator authorization. Requested changes automatically return to the reagent with the findings, and the revised candidate returns for reassessment within configured bounds. Successful handoffs do not depend on historical provider callback-item reconstruction.
-- **Rare operator interaction:** Prompt when an agent explicitly requests necessary input, or when the approved candidate requires the agreed final integration approval. Ordinary handoffs, progress updates and differences in prose do not require operator intervention.
-- **Clear execution failures:** Report process failures, provider-reported turn failures and invalid structured responses directly. Stop the affected workflow promptly when continuation is impossible. State what failed, where the work remains and what the operator can do next. A failure does not require implementing a recovery subsystem before a fresh run is possible.
-- **Bounded execution:** Enforce configured agent execution counts and time limits mechanically. Stop further launches when counts are exhausted. Terminate the active execution and its child processes when its time limit is exceeded. Report the exceeded limit clearly.
-- **Operator-facing output:** Clearly identify Concoct’s own messages separately from reagent and iragent streams. Explain current activity, outcome and next action in ordinary language. Replace unexplained “hold,” “host receipt,” callback and reconciliation terminology in normal stdout/stderr. Keep protocol details in diagnostic evidence. Preserve human-readable summaries, blank lines between messages, hyphenated public statuses and local timestamps.
-- **Integration:** Retain the mechanical association between the approved candidate and operator authorization, and perform authorized local integration. Concoct does not independently reassess the approved implementation or publish it.
-- **Consistent documentation:** Update active design, contributor guidance, prompts and tests to reflect this responsibility boundary. Remove superseded requirements that would reintroduce independent engineering assessment into the coordinator.
-
-**Verification:**
-
-- Demonstrate a scripted end-to-end workflow covering implementation, independent review, requested changes, reassessment, approval and operator-authorized integration without manual shuttling between agents.
-- Demonstrate that paraphrased summaries and schema-valid results proceed without objective/acceptance text matching or narrative inspection.
-- Verify representative execution failure, invalid response, execution-count exhaustion and timeout termination.
-- Check operator output for clear source labels, understandable reasons and actionable next steps.
-- Run applicable formatting, tests, vet, build and whitespace checks. No billable provider probe is required for implementation verification.
-
-**Scope boundary:** Simplify the existing implementation. No new orchestration framework, broader recovery machinery or salvage requirement for previous Curu trials.
-
-**Follow-up:** After independent review and operator-authorized integration, perform a fresh CON-056 trial on CURU-001, using successful automatic agent handoffs as the primary acceptance target.
-
-## CON-063 — Correct provider response schemas and report rejected requests clearly
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-062
-
-**Objective:** Supply provider-compatible structured result schemas so agent execution can start, and clearly report requests rejected before agent work begins.
-
-**Context:** The latest live trial was rejected because Concoct’s result schema declares `task_id` without including it in `required`. Other fields, including nested question properties, have the same incompatibility. Existing JSON-syntax validation does not establish compatibility with the provider’s structured-output contract.
-
-**Acceptance criteria:**
-
-- Correct the complete result schema actually sent to Codex. Every object lists all declared properties in `required` and sets `additionalProperties: false`. Represent values that are optional for particular dispositions using provider-supported nullable types.
-- Apply the correction consistently to reagent and iragent results, including nested questions and options. Preserve the small coordination contract established by CON-062.
-- Ensure result parsing handles schema-produced nulls consistently. Valid results for engineering, review, requested changes, approval, no suitable work and operator questions remain usable for their defined handoffs.
-- Add focused compatibility tests against the actual outbound schema and request payload. Verify the provider’s relevant schema rules recursively and validate representative result fixtures. Checking JSON syntax or a separate test-only schema is insufficient.
-- Recognize the demonstrated invalid-schema request rejection as a definite execution startup failure. Do not describe it as an uncertain outcome requiring investigation, and do not recommend an unchanged retry.
-- Normal operator output identifies Concoct as the source, explains that the agent could not start because Concoct supplied an invalid response schema, and states that a code correction is required. Retain the full provider error in external diagnostic evidence without dumping raw JSON or repeating truncated errors in ordinary stdout/stderr.
-- A definitely failed unclaimed selection can be retired by exact run ID after checking its clean checkout, retaining the diagnostic and releasing ownership for a fresh run after correction. Do not retire claimed work or an uncertain turn through this path.
-
-**Verification:**
-
-- Demonstrate that the regression test rejects the previously shipped schema and accepts the corrected outbound schema.
-- Exercise representative schema-valid results from both roles, including null optional values and a populated operator question.
-- Simulate the observed provider rejection and verify the startup-failure classification and human-readable output.
-- Verify that stale IDs and changed workspaces prevent retirement, while retiring the exact failed selection preserves diagnostics and permits a fresh run.
-- Run applicable formatting, tests, vet, build and whitespace checks. Record verification and independent review externally.
-
-**Scope boundary:** No new recovery subsystem, general schema framework, provider upgrade or additional assessment of agent work. No billable provider probe or live Curu restart is required during implementation.
-
-**Follow-up:** After independent review and operator-authorized integration, rebuild Concoct and prepare a fresh CON-056 live trial.
-
-## CON-064 — Replace the verification controller with a simple agent handoff
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-063
-
-**Objective:** Reuse the working Codex interface to deliver one real selection → implementation → independent review sequence. Concoct invokes agents, streams prose, routes deterministic results and enforces execution limits. Agents own all engineering and verification work.
-
-**Operating contract:** A task claim means the reagent has selected work and created its branch and external evidence. It establishes no exclusive ownership or binding to a session. The iragent receives a specific candidate commit to review.
-
-**Acceptance criteria:**
-
-- Replace conflicting requirements in the active design, AGENTS.md and contributor guidance with this operating contract. Remove requirements for host-acknowledged claims, mandatory checkpoint callbacks, controller-established candidate readiness and recovery proof before ordinary handoffs.
-- Adapt the demonstrated manual reagent and iragent prompts into reusable templates. Preserve their engineering responsibilities, documentation rules and instructions to stop for genuine blockers.
-- Plain `concoct run` invokes reagent to assess the roadmap, select a suitable task, create its task branch in the current checkout, maintain external evidence, implement, test, self-review and commit a candidate. Selection and implementation occur in the same initial turn.
-- Use one checkout sequentially for implementation and independent review. Concoct does not create a separate review checkout, stage files, create candidate commits or classify deliverables/generated outputs.
-- A completed, schema-valid reagent result reporting readiness automatically invokes a separate iragent session with the task, evidence location and specific candidate commit. Concoct does not independently assess eligibility, acceptance coverage, check sufficiency or candidate contents.
-- Remove `claim_task`, `save_checkpoint` and `save_assessment` callbacks from this workflow. Agents maintain task and review Markdown using ordinary tools. Concoct does not parse those documents to authorize handoffs.
-- Use a small provider-compatible structured result for routing. Carry task identity, candidate commit, disposition, summary, findings/evidence location and an explicit blocker question where needed. Treat narrative content as opaque.
-- Stream operator-visible progress as prose with role labels and blank lines between messages. If the provider emits a defined structured envelope during commentary, render its human summary. Keep raw control JSON out of normal output. Concoct messages describe activity and outcomes without claiming independent engineering verification.
-- Retain only the ordinary bookkeeping needed for coordination: repository/task context, role sessions/settings, current step, reported candidate, latest result and execution counts. An execution lock prevents simultaneous coordinator runs; it does not establish task ownership.
-- Enforce configured invocation and time limits, including termination of owned child processes when stopping execution. Report execution failures, invalid results and explicit agent blockers clearly. Do not automatically reconstruct historical callback evidence or replay interrupted work.
-- End this first slice after the independent assessment, displaying its verdict and evidence location. Correction routing and integration are delivered by CON-065.
-- Remove superseded controller code and tests as their responsibilities leave the executable path. Do not retain the old controller as a selectable fallback.
-
-**Verification:**
-
-- Exercise the actual outbound schemas, prompts and routing through focused adapter tests.
-- Verify prose output, representative execution failure, malformed result, invocation exhaustion and timeout termination.
-- Run applicable formatting, tests, vet, build and whitespace checks.
-- Before CON-065 starts, obtain operator confirmation of a real, deliberately small documentation trial: reagent selects and implements from a roadmap, then Concoct automatically invokes iragent and presents its assessment. No manual prompt transfer or checkpoint repair is permitted. Record the observed outcome externally.
-
-**Scope boundary:** Preserve the working provider integration. No repository reset, general orchestration framework, old-run migration or recovery expansion. Historical failed trials need not be salvaged.
-
-## CON-065 — Complete correction routing and operator-approved agent integration
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-064
-
-**Objective:** Complete the demonstrated manual workflow by automatically routing review findings and revised candidates, then passing explicit integration authorization to reagent.
-
-**Operating contract:** Sessions provide convenient continuity. Each independent assessment identifies the candidate commit reviewed, and operator integration approval identifies that exact approved commit. Task branches and external evidence remain available to any agent or operator continuing the work.
-
-**Acceptance criteria:**
-
-- On an iragent result requesting changes, continue reagent with the assessment location and correction instructions. When reagent reports a revised candidate, automatically request another independent assessment of that specific commit.
-- Reuse the existing reagent and iragent sessions by default. Session availability is not task ownership: a replacement session can continue from repository source and external task/review records. Do not require an ownership transfer, callback history reconstruction or reapproval of the task.
-- Pass findings and summaries through without deciding whether they are justified or resolved. Those judgments remain with reagent and iragent.
-- Continue the correction/reassessment loop within invocation, assessment and time limits. Count replacement sessions and integration executions toward the applicable invocation limit. Exhaustion stops further launches without resetting consumption.
-- A legitimate blocker explicitly reported by either agent stops the loop and presents its question in ordinary language. An operator answer is passed to the appropriate agent. Concoct does not infer blockers from prose or require a multi-field justification ceremony.
-- On independent approval, present the task, exact reviewed commit, agent summaries and review location, then request operator integration approval. Do not integrate automatically.
-- Associate that authorization with the exact independently approved commit. A different commit requires its own review and authorization. This is a deterministic coordination check; it introduces no source, scope or evidence-digest verification.
-- After explicit approval, prompt reagent to integrate that exact commit locally using the demonstrated manual integration instructions. Reagent performs Git checks and integration and stops if unable to proceed. Concoct does not implement a separate Git integration transaction or publish changes.
-- Report the integration agent’s result clearly and stop after this task. The operator controls publication and initiation of subsequent work.
-- Permit ordinary continuation from completed handoff boundaries, such as pending operator input or approval, using recorded context and counts. Interrupted or ambiguous agent execution may remain stopped for an explicit restart decision; automatic recovery is not required.
-- Update active documentation and remove remaining superseded controller dependencies. Preserve external evidence as ordinary context and operator history rather than a proof chain.
-
-**Verification:**
-
-- Demonstrate a scripted requested-changes → correction → reassessment → approval sequence using the actual routing contract.
-- Verify that operator approval identifies the reviewed commit and that the integration prompt names that same commit.
-- Verify session replacement using existing source/evidence context, blocker-answer routing and limits without consumption reset.
-- Run applicable formatting, tests, vet, build and whitespace checks.
-- Complete a small real operator-run trial through independent approval and explicitly authorized reagent integration. Record which handoffs occurred automatically and any manual intervention.
-
-**Scope boundary:** No controller assessment of engineering work, task ownership system, candidate-freezing subsystem, publication automation or general recovery framework.
-
-**Follow-up:** Once delivered, perform the CON-056 Curu acceptance trial against the completed workflow.
-
-## CON-066 — Render agent progress as prose and capture provider diagnostics externally
-
-- Kind: task
-- Status: delivered
+- Status: ready
 - Priority: medium
-- Parent: CON-F005
-- Depends on: CON-065
+- Parent: none
+- Depends on: none
 
-**Objective:** Make ordinary operator output readable by displaying agent progress as prose, presenting questions only when input is required, and keeping provider diagnostics outside the terminal stream.
+**Objective:** Make a copied continuation command use the same executable, repository and evidence root as the invocation that produced it.
 
-**Context:** The successful CURU-001 handoff exposed structured JSON commentary, misleading intermediate `decision_required` dispositions and raw Codex stderr interleaved with progress. The latter included model-cache errors and tool failures that the agents worked through successfully.
+**Context:** A trial invoked `/tmp/concoct` with an explicit `--root`, but the suggested `concoct run --approve COMMIT` selected a different installed binary and evidence directory.
 
 **Acceptance criteria:**
 
-- Render ordinary agent commentary as prose with clear reagent/iragent labels and blank lines between messages.
-- Recognize the defined structured commentary/result envelope across supported message phases. Display its human summary without exposing JSON keys, intermediate dispositions, placeholder questions or null fields. Preserve ordinary prose and intentional code examples.
-- Use only completed agent results for workflow routing. Intermediate `decision_required` or `approved` values do not trigger operator prompts, approval announcements or handoffs. Present an operator question when the completed result explicitly requests input.
-- Render completed agent results and Concoct’s own coordination messages in clear operator language. Clearly identify their sources. Retain explicit JSON output when requested through `--json`.
-- Capture the dedicated provider process’s stderr in external diagnostic logs, retaining startup and execution messages. Do not pass raw provider stderr directly to normal stdout/stderr. Associate diagnostic locations with the relevant execution so they are easy to find.
-- Diagnose execution failure from process/provider execution outcomes, rather than the presence of error-looking stderr text. On failure, show a concise human-readable explanation and the diagnostic location. Successful execution is not presented as failed merely because Codex logged cache or recoverable tool errors.
-- Preserve streaming, execution limits, agent routing and explicit integration approval. Presentation handling must not add engineering verification or new workflow prerequisites.
-- Document where diagnostics are recorded and how the operator can inspect them. Normal summaries remain available under `--quiet`.
+- Generate continuation commands using the executable used for the current invocation. Preserve an explicit executable path such as `/tmp/concoct`; do not replace it with an unqualified `concoct`.
+- Preserve relevant explicit context, including `--root` and `--repo`, and any invocation-only settings required for the proposed continuation. Reuse durably retained settings where that is already the continuation contract; avoid silently reverting invocation-only choices to defaults.
+- Quote executable paths and argument values correctly for the documented shell. Handle spaces and shell metacharacters as literal argument content.
+- Apply the same command construction to run summaries, `status` suggestions and other continuation hints. A separate `status` invocation uses its current executable and selected repository/root context.
+- Preserve the specific next action and its exact identifier or approved commit. Do not carry an obsolete action flag into the suggested command.
+- Update operator examples and help where needed.
+
+**Verification:** Capture generated commands for an absolute executable path, explicit root/repository, paths with spaces/metacharacters, and a continuation from `status`. Verify parsed argument values with a harmless executable fixture rather than starting a provider. Check applicable tests, build and whitespace validation.
+
+## CON-069 — Timestamp terminal messages and standardize run summaries
+
+- Kind: task
+- Status: ready
+- Priority: medium
+- Parent: none
+- Depends on: none
+
+**Objective:** Complete terminal presentation with message timestamps, consistent task/status summaries and elapsed invocation time.
+
+**Context:** Readable prose, reagent/iragent result labels, source attribution, blank lines and external provider diagnostics are already delivered. The recent successful output still lacks streamed message timestamps.
+
+**Acceptance criteria:**
+
+- Prefix each operator-facing terminal message with date and time in local time by default, identifying its timezone/offset. Honor the existing timezone selection mechanism, including `TZ`. Apply this to agent progress, completed results and Concoct coordination messages.
+- Timestamp a streamed message when it begins; preserve immediate chunk delivery and internal formatting without inserting a prefix into each fragment. Keep blank lines between distinct messages and retain clear source labels.
+- Present task summaries with `Task: ID` followed immediately by `Status: VALUE`. Replace the summary label `Concoct: integrated` with `Status: integrated`. Use the same ordering and labels in run summaries and `status` output.
+- Report elapsed wall time for each `concoct run ...` invocation, covering all agent turns and coordination within that command. A later continuation starts its own invocation timer; do not label cumulative task time or a per-turn timeout as this duration.
+- Measure elapsed duration with a monotonic clock and report it on normal completion and handled stop/error paths, including a stop awaiting operator input or approval. Use a readable duration format.
+- Preserve readable prose, hyphenated public statuses, quiet-mode summaries and external provider diagnostics. Keep explicit JSON output machine-readable; timestamp prefixes must not corrupt its records. Expose invocation duration as a numeric value with a documented unit in the relevant JSON summary.
+
+**Verification:** Use injected clocks and output fixtures for fragmented messages, source switches, result messages, local/UTC display, an offset transition, summary ordering and elapsed time across multiple turns. Cover completion, approval wait, handled error and interruption, plus quiet/JSON output. No live provider run is required.
+
+## CON-070 — Retain completed assessment counts when continuing earlier records
+
+- Kind: task
+- Status: ready
+- Priority: medium
+- Parent: none
+- Depends on: none
+
+**Objective:** Correct the observed undercount when continuing a coordinator record created before the current assessment bookkeeping.
+
+**Context:** CURU-001 reported `Independent assessments: 0/3` despite completed independent approval after crossing the CON-064 to CON-065 upgrade. A fresh CURU-014 run correctly reported `2/3`.
+
+**Acceptance criteria:**
+
+- Establish how the affected coordinator record represents its completed approval and why the count is omitted. Use retained structured coordinator/result metadata; record the diagnosis externally.
+- Preserve a recorded completed independent assessment when loading or continuing an affected record. Count completed approved and changes-requested assessments once each; an incomplete assessment does not count as completed.
+- Use the corrected count consistently in summaries, status, persisted continuation state and assessment-limit enforcement. Reopening the record must neither reset nor increment completed consumption.
+- Keep current-record counting correct, including the fresh two-assessment correction cycle. Preserve the configured limit and all other consumed execution allowances.
+- Keep any compatibility handling bounded to the affected coordinator record shape. Conflicting or insufficient structured metadata must not be converted into invented review history or guessed consumption; explain the limitation clearly.
+
+**Verification:** Add a representative pre-count approval record showing `1/3`, a fresh requested-changes/approval record showing `2/3`, and repeated-load/continuation checks with no duplicate counting. Verify limit enforcement and incomplete/conflicting metadata. Use fixtures; do not restart or modify the original live trial.
+
+## CON-071 — Include the source revision in development versions
+
+- Kind: task
+- Status: ready
+- Priority: medium
+- Parent: none
+- Depends on: none
+
+**Objective:** Make development binaries distinguishable by source revision through `concoct version`.
+
+**Acceptance criteria:**
+
+- Development builds report the base development version plus a Git revision identifier, for example `0.5.0-dev+819a7b1`.
+- Support the ordinary local build workflow, including `go build -o /tmp/concoct`, without requiring the operator to remember custom linker flags. Prefer available Go build/VCS metadata over a runtime Git lookup.
+- Use a documented, consistent short revision length sufficient for the project. If revision metadata is unavailable, report that honestly with a documented fallback rather than inventing a hash.
+- Preserve release-version reporting and document how the development revision is obtained.
+
+**Verification:** Test version formatting with development, release and missing-metadata fixtures. Build from a disposable Git checkout using the ordinary command and confirm the displayed revision corresponds to that checkout. Run applicable repository checks.
+
+## CON-072 — Organize external artifacts by readable project and task identity
+
+- Kind: task
+- Status: ready
+- Priority: medium
+- Parent: none
+- Depends on: none
+
+**Objective:** Make external Concoct working directories understandable by browsing them, with the task as the unit of work.
+
+**Acceptance criteria:**
+
+- Define and document a compact external hierarchy under the selected Concoct root. Group each task's runs, invocations, task/review evidence, receipts where used, diagnostics and any associated workspaces beneath its readable task identity. Repository-wide indexes and locks may remain at the level their scope requires.
+- Use meaningful names plus unique random identifiers for durable project/task/run containers where uniqueness is required. Use datetime names with nanosecond precision for invocation directories, with an explicit timezone convention and deterministic collision handling; timestamp precision alone does not guarantee uniqueness.
+- Distinguish repositories with the same basename, identical task IDs in different repositories, repeated executions of one task, and simultaneous name allocation. Normalize names safely without allowing different labels or unsafe path characters to create accidental identity collisions or escape the configured root.
+- Keep stable recorded identities separate from readable labels. Store enough metadata to identify the source repository, task and run without relying on the directory label as authoritative identity.
+- Handle the initial selection invocation before a task has been chosen, then associate its artifacts with the selected task. Preserve diagnostics for a no-work or failed selection without inventing a task ID.
+- Existing active coordinator records and retained evidence remain discoverable and usable. Choose the smallest compatibility approach needed for current records; existing history need not be bulk-renamed. Update generated paths, status locations and documentation consistently.
+- Keep task artifacts outside the target project and retain the existing execution-lock behavior and custom `--root` support.
+
+**Verification:** Use filesystem fixtures for same-name repositories, duplicate task IDs across projects, repeated runs, equal timestamp allocation, unsafe labels, pre-selection artifacts and continuation of an existing record. Verify that displayed locations resolve to the intended artifacts. No provider run is required.
+
+## CON-073 — Provide a skill for the established Concoct operator workflow
+
+- Kind: task
+- Status: planned
+- Priority: low
+- Parent: none
+- Depends on: CON-068, CON-069, CON-072
+
+**Objective:** Package the viable Concoct workflow as a reusable skill after its command-context, output and artifact-location changes settle.
+
+**Acceptance criteria:**
+
+- Document the implemented first-use and continuation workflow: prerequisites, one-task execution, automatic review/correction, explicit blocker answers, exact-commit integration approval, status and evidence inspection, and configured execution bounds.
+- Teach the actual coordinator/agent responsibility split and distinguish automatic handoffs from operator decisions. Keep publication operator-controlled.
+- Derive commands, paths and continuation guidance from current supported CLI behavior and documentation. Preserve explicit executable/root/repository context and use the settled external hierarchy.
+- Follow the supported skill packaging and discovery conventions for the intended Codex environment. Verify the skill with ordinary deterministic instruction/example checks; a skill must not become a prerequisite for using the CLI.
+- Update maintenance guidance so the skill stays aligned with implemented behavior as the workflow changes.
+
+**Verification:** Check packaging/discovery and every command example against the implemented CLI and current documentation. Walk the instructions against the demonstrated nominal and correction workflows. Do not add speculative recovery commands or revive the retired skill's obsolete controller requirements.
+
+## CON-075 — Authorize explicit limit increases for active work
+
+- Kind: task
+- Status: ready
+- Priority: critical
+- Parent: none
+- Depends on: none
+
+**Objective:** Allow the operator to extend an active run’s execution allowance explicitly, preserving completed work and consumed counts.
+
+**Context:** CURU-015 correctly stopped after three independent assessments, with seven of twelve agent invocations consumed. Continuation was blocked because startup configuration flags cannot change an active run. The operator needs a supported authorization path that requires no manual state editing.
+
+**Acceptance criteria:**
+
+- Add explicit active-run authorization flags:
+  - `--approve-review-limit-increase TOTAL`
+  - `--approve-invocation-limit-increase TOTAL`
+- Each value specifies the new total ceiling. For example, increasing the review limit from three to five after three completed assessments leaves two assessments available.
+- Keep ordinary startup limit flags and role-setting restrictions unchanged. Use the existing invocation accounting for implementation, correction, review, replacement-session and integration executions.
+- Require an existing active run and a valid total strictly greater than its recorded limit. Reject invalid requests clearly before changing state or launching an agent. Both increase flags may be supplied together; validate the complete request before persisting either change.
+- Persist approved increases under the existing execution lock before further dispatch. Preserve task, branch, candidate, findings, evidence, role settings, session context and all consumed counts. Record the previous and authorized ceilings in ordinary external execution metadata.
+- Reevaluate exhausted limits and continue the pending workflow step when allowances permit. Increasing one ceiling does not bypass another exhausted limit or any other existing prerequisite. Completed work and assessments are not repeated.
+- Preserve independent review and explicit operator authorization of the exact approved integration commit.
+- Limit-exhausted output identifies each exhausted allowance, its consumed/total counts and a concrete continuation command using the explicit authorization flags. Preserve executable, repository and evidence-root context. Explain that the supplied value is a new total ceiling.
+- Update CLI help and operator documentation with the stop → authorize increase → continue workflow.
 
 **Verification:**
 
-- Use representative events from the successful CURU-001 transcript, including structured commentary with `decision_required` and “No response is needed.”
-- Cover fragmented messages, explicit commentary phases, absent phases, final results, ordinary prose and intentional JSON examples.
-- Verify that intermediate messages cannot advance the workflow or request operator input.
-- Simulate repeated model-cache diagnostics and recoverable tool errors followed by success, plus a genuine provider failure. Verify readable terminal output and retained diagnostics.
-- Run applicable formatting, tests, vet, build and whitespace checks. No live provider run is required solely to verify this presentation correction.
+- Reproduce the observed state with a fixture: three completed assessments, seven of twelve invocations consumed, and changes requested on the current candidate.
+- Authorize a review ceiling of five; verify persisted counts remain `3/5` and `7/12` before dispatch, and continuation routes the retained findings to reagent.
+- Verify invocation-limit increases, combined increases, another limit remaining exhausted, invalid/non-increasing totals, missing active work and rejected startup-setting changes.
+- Reopen the updated record and confirm the increased ceilings and consumed counts survive without duplicate execution. Verify stopping at the new ceilings.
+- Exercise generated continuation commands and run applicable formatting, tests, vet, build and whitespace checks. Fixtures are sufficient; implementation must not modify or resume the live CURU-015 record.
 
-**Scope boundary:** Do not repair, delete or migrate Codex’s model cache, upgrade the runner, classify arbitrary log prose, or expand recovery behavior. The cache incompatibility is a separate provider/environment concern; this task corrects how its diagnostics reach the operator.
-
-## CON-056 — Prove the agent handoff workflow on real work
+## CON-076 — Suggest an operator-preferred task during selection
 
 - Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-064, CON-065, CON-066
+- Status: ready
+- Priority: medium
+- Parent: none
+- Depends on: none
 
-**Objective:** demonstrate that Concoct replaces manual prompt shuttling between reagent and iragent for useful work in an external project, through independent approval and operator-authorized local integration.
+**Objective:** Let the operator suggest a task for reagent selection while preserving agent judgment and the normal workflow.
 
 **Acceptance criteria:**
 
-- Starting from a clean parent branch and an actionable roadmap, reagent selects one eligible task, creates its task branch and external evidence, implements the task, performs appropriate checks and self-review, and produces a specific candidate commit.
-- Concoct automatically invokes iragent to assess that exact candidate. When changes are requested, it passes the findings to reagent and requests another independent assessment of the replacement candidate.
-- Agents own engineering judgment, validation, review findings and task evidence. Concoct coordinates their execution and handoffs without interpreting acceptance prose or duplicating their engineering assessments.
-- Agent progress streams as readable prose. Execution remains within configured invocation, assessment and time limits.
-- Following independent approval, Concoct waits for explicit operator authorization identifying the exact approved commit. It then prompts reagent to integrate that commit locally and report the outcome. No push or publication is implied.
-- The operator confirms that the parent branch contains the approved commit and the checkout is clean. Task and review evidence remain outside the project.
-- Record practical limitations and observed usage without treating account quota changes as exact task consumption. Preserve earlier failed trials as historical evidence; recovering them is not a completion requirement.
+- Add `concoct run --prefer-task TASK-ID` for fresh task selection. The preference applies only to that invocation and is passed explicitly to reagent as a suggestion.
+- Instruct reagent to inspect the current roadmap and applicable repository guidance before deciding. The preference does not override dependencies, readiness, scope or other selection requirements. Eligibility assessment remains reagent’s responsibility.
+- If reagent accepts the preference, it selects the proposed task and continues implementation in the same turn through the ordinary workflow. No additional operator confirmation is required.
+- If reagent rejects the preference, it reports a concrete reason, such as an unsatisfied dependency, unavailable task or incompatible task status. It ends selection without implementing work or silently selecting another task.
+- Represent rejection as a distinct normal structured outcome with a readable explanation. Concoct routes that outcome without interpreting the explanation or independently reassessing eligibility.
+- On legitimate rejection, return a successful command outcome, retire the unclaimed active selection and leave Concoct ready for another fresh `concoct run`. Retain ordinary external execution evidence and usage; do not record the rejection as a failure or automatically retry.
+- Reject use of `--prefer-task` when continuing active work, explaining that the existing task must be continued or resolved first.
+- Genuine provider failures, malformed results and interrupted execution retain their existing handling; they do not become legitimate preference rejections.
+- Update CLI help and operator documentation with accepted and declined preference examples.
 
-**Verification:** completed through operator-run Linux/Codex trials in Curu:
+**Verification:**
 
-- CURU-001 demonstrated task selection, implementation, independent approval and exact-commit local integration at `b4c0f1ae445444ae8c11acb91dea956bfbe44e8f`.
-- CURU-014 demonstrated the complete correction loop: independent review requested changes, reagent corrected the candidate, iragent approved the replacement, and explicit operator authorization led to local integration at `940ec947f76d3b8a2b3f5d6cbad0c3899a13ec26`. The workflow used five agent invocations and two independent assessments without manual prompt relaying.
-- Both integrations ended on clean `main` at the approved commit. Durable evidence is retained under `$HOME/.concoct/trials/curu-001-05` and `$HOME/.concoct/trials/curu-next-01`.
+- Inspect the actual selection prompt to confirm it identifies the preference as advisory, requires roadmap inspection and defines acceptance and rejection behavior.
+- Use scripted agent results to verify acceptance continues normal implementation/review routing for the proposed task.
+- Verify a declined preference displays its reason, starts no implementation or review, returns successfully and leaves no active selection blocking a subsequent plain `concoct run`.
+- Cover rejection while active work exists, malformed results and provider failure. Verify that rejection evidence and usage remain available.
+- Run applicable formatting, tests, vet, build and whitespace checks. No live provider trial is required solely for this change.
 
-These trials establish the normal workflow and a naturally occurring correction cycle. They do not claim exhaustive live coverage of interruption, recovery, provider failures or limit exhaustion. No additional live trial is required to complete this task.
-
-## CON-067 — Retire completed handoff state and enable the next task
-
-- Kind: task
-- Status: delivered
-- Priority: high
-- Parent: CON-F005
-- Depends on: CON-065, CON-056
-
-**Objective:** After a successfully reported local integration, retain the completed run as external history and allow a later plain `concoct run` to start the next ready task.
-
-**Context:** In the Curu trial, CURU-002 was approved and locally integrated at `8f345c0e62c98ed07fdfd30e1c7573b57294251f`. The operator then committed documentation at descendant `197488cfe3748fdf767a99468ad533c6d4fb31d1`. Although Curu's roadmap makes CURU-019 the sole ready task, Concoct returns the retained `integrated` CURU-002 state before new-task selection. The old CON-054 completion machinery is not part of the current agent-handoff implementation.
-
-**Acceptance criteria:**
-
-- Treat an accepted `integrated` result as a completed handoff. Retain its task, candidate, approval, review and evidence references outside the product repository, and release the active state without requiring another agent turn or manual state-file edits. Preserve the completed result for inspection after release.
-- Make the completion transition durable and safe to retry after interruption. A repeated `run` must not lose or duplicate completion history, dispatch the old task again, or consume an invocation merely to retire it.
-- A later plain `run` starts from a clean named parent checkout and lets reagent select eligible work. Commits descended from the integrated candidate, including later operator documentation commits, do not invalidate the completed record or require `HEAD` to equal the old candidate. New work uses the then-current parent commit as its base and gets fresh invocation and assessment limits.
-- Keep `integration_failed`, uncertain execution, invalid results, pending approval and blockers distinct from successful completion. None may release active state or silently start a new task. Report any completion-record maintenance failure without discarding the recoverable state.
-- Reconcile `run`, `status` and first-use guidance so operators can tell whether a task is active, completed, or ready for a new run. Do not push, publish or alter product source during completion.
-
-**Verification:** Use a disposable Git repository and external state root to exercise approved integration, completion retention, repeat/restart behavior, and a subsequent eligible task after a descendant commit. Cover failed/uncertain integration and a completion-record write failure. Confirm the next task starts with the descendant commit as its base and fresh limits, while the CURU-002 record remains inspectable. Run focused tests and the documented Go checks; no additional live provider trial is required solely for this transition.
-
-**Scope boundary:** Use the current small handoff state model. Do not restore the old CON-054 ownership/archive subsystem, add a product ledger, regrade agent engineering evidence, or broaden interrupted-turn recovery.
-
-Delivered completion transition: a successfully reported integration is written once to external completion history and active state is atomically released without another provider turn. Status exposes the latest completed record when idle. A later plain run uses the then-current clean named checkout, including descendant operator commits, as a fresh baseline with fresh limits. Completion maintenance retries without dispatch; failed, blocked, invalid and uncertain states remain bound to their existing work.
+**Scope boundary:** Keep task suitability and rejection reasoning in reagent instructions. Concoct handles the CLI argument, prompt context and deterministic result routing; it does not introduce a host-side eligibility engine.
