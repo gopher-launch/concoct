@@ -8,7 +8,15 @@ Build with Go 1.27.2 or newer on Linux, with Codex CLI 0.147.0 available as `cod
 
 If iragent requests changes, Concoct sends its assessment and findings to reagent, then requests another independent assessment of the corrected commit. An approval displays the task, exact reviewed commit, role summaries and external review location. When an invocation remains, inspect the candidate and evidence before explicitly authorizing local integration with `concoct run --approve COMMIT`. Concoct passes that exact authorization to reagent, which checks Git state, integrates locally and reports its result. A successful integration is retained in an external completion record and active state is released. `concoct status` shows the latest completed handoff; a later plain `concoct run` can start the next ready task from the current clean named checkout, including a descendant commit added by the operator after integration. Concoct does not decide whether the engineering or review narrative is correct.
 
-The default role model is the provider recommendation; reagent uses medium effort and iragent high effort. Fresh runs can set `--reagent-model`, `--iragent-model`, `--reagent-effort`, `--iragent-effort`, `--dispatch-limit`, `--review-limit`, `--turn-timeout` and `--stall-timeout`. Limits use Go durations such as `20m`. A new run defaults to twelve agent invocations and three completed independent assessments. Consumption continues across correction, replacement sessions and integration. No integration starts without exact operator approval.
+The default role model is the provider recommendation; reagent uses medium effort and iragent high effort. Fresh runs can set `--reagent-model`, `--iragent-model`, `--reagent-effort`, `--iragent-effort`, `--dispatch-limit`, `--review-limit`, `--turn-timeout` and `--stall-timeout`. Timeouts use Go durations such as `20m`. A new run defaults to twelve agent invocations and three completed independent assessments. Consumption continues across correction, replacement sessions and integration. No integration starts without exact operator approval.
+
+If Concoct stops at an execution limit, its summary shows every exhausted consumed/total allowance and prints a context-preserving continuation command. The suggested values are new total ceilings, not additional units. For example, after three completed assessments, authorizing a review total of five preserves `3/5` and leaves two assessments available:
+
+```sh
+/tmp/concoct run --repo /path/to/checkout --root /path/to/external-root --approve-review-limit-increase 5
+```
+
+Use `--approve-invocation-limit-increase TOTAL` for the invocation ceiling; both increase flags may be supplied together. Each total must be strictly greater than its recorded ceiling. Concoct validates the entire request before recording either change, preserves completed work and consumed counts, and continues the retained step only if no other allowance or workflow prerequisite still blocks it. These authorization flags do not change active role settings or replace exact-commit integration approval.
 
 ```sh
 go test ./...

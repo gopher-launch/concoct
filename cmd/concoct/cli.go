@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 			fmt.Fprintln(stderr, "concoct:", err)
 			return 2
 		}
-		display(stdout, state, jsonMode)
+		displayWithContext(stdout, state, jsonMode, commandContext{executable: os.Args[0], options: o})
 		return 0
 	}
 	stream := newMessageStream(stdout, jsonMode, quiet)
@@ -49,7 +50,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 	if err != nil {
 		fmt.Fprintln(stderr, "concoct:", err)
 	}
-	display(stdout, state, jsonMode)
+	displayWithContext(stdout, state, jsonMode, commandContext{executable: os.Args[0], options: o})
 	if err != nil {
 		return 2
 	}
@@ -126,6 +127,16 @@ func parse(args []string) (handoff.Options, string, bool, bool, error) {
 			if err != nil || o.MaxAssessments <= 0 {
 				return o, "", false, false, fmt.Errorf("invalid review limit")
 			}
+		case "approve-review-limit-increase":
+			o.ApproveReviewLimitIncrease, err = strconv.Atoi(value)
+			if err != nil || o.ApproveReviewLimitIncrease <= 0 {
+				return o, "", false, false, fmt.Errorf("invalid approved review limit increase")
+			}
+		case "approve-invocation-limit-increase":
+			o.ApproveInvocationLimitIncrease, err = strconv.Atoi(value)
+			if err != nil || o.ApproveInvocationLimitIncrease <= 0 {
+				return o, "", false, false, fmt.Errorf("invalid approved invocation limit increase")
+			}
 		case "stall-timeout":
 			d, err := time.ParseDuration(value)
 			if err != nil || d <= 0 {
@@ -142,12 +153,21 @@ func parse(args []string) (handoff.Options, string, bool, bool, error) {
 			return o, "", false, false, fmt.Errorf("unknown option --%s", key)
 		}
 	}
-	if command == "status" && (o.Codex != "" || o.Approve != "" || o.Answer != "" || o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
+	if command == "status" && (o.Codex != "" || o.Approve != "" || o.Answer != "" || o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.ApproveReviewLimitIncrease > 0 || o.ApproveInvocationLimitIncrease > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
 		return o, "", false, false, fmt.Errorf("execution options require run")
 	}
 	return o, command, jsonMode, quiet, nil
 }
 func display(w io.Writer, s handoff.State, jsonMode bool) {
+	displayWithContext(w, s, jsonMode, commandContext{executable: "concoct"})
+}
+
+type commandContext struct {
+	executable string
+	options    handoff.Options
+}
+
+func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command commandContext) {
 	if jsonMode {
 		_ = json.NewEncoder(w).Encode(s)
 		return
@@ -214,10 +234,47 @@ func display(w io.Writer, s handoff.State, jsonMode bool) {
 	if s.Phase == "blocked" {
 		fmt.Fprintln(w, "To answer: concoct run --answer TEXT")
 	}
+	if s.Phase == "limit_exhausted" {
+		args := []string{"run", "--repo", s.Repository}
+		hasIncrease := false
+		if command.options.Root != "" {
+			args = append(args, "--root", command.options.Root)
+		}
+		if s.Attempts >= s.MaxAttempts {
+			args = append(args, "--approve-invocation-limit-increase", strconv.Itoa(s.MaxAttempts+1))
+			hasIncrease = true
+		}
+		if s.Assessments >= s.MaxAssessments && (s.LimitPhase == "reviewing" || s.LimitPhase == "correcting" || s.Verdict == "changes_requested") {
+			args = append(args, "--approve-review-limit-increase", strconv.Itoa(s.MaxAssessments+1))
+			hasIncrease = true
+		}
+		if hasIncrease {
+			fmt.Fprintln(w, "To authorize higher total ceilings and continue:", shellCommand(command.executable, args...))
+			fmt.Fprintln(w, "The supplied values are new total ceilings; completed work and consumed counts are retained.")
+		}
+	}
 	if s.Phase == "completed" {
 		fmt.Fprintln(w, "No active work. Run concoct run to start the next ready task from the current clean checkout.")
 	}
 }
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version")
+	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version")
+}
+
+func shellCommand(executable string, args ...string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, shellQuote(executable))
+	for _, arg := range args {
+		parts = append(parts, shellQuote(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellQuote(value string) string {
+	if value != "" && strings.IndexFunc(value, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && !strings.ContainsRune("_@%+=:,./-", r)
+	}) == -1 {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

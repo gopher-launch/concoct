@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-10-22
+updated: 2026-10-29
 ---
 
 # Concoct implementation roadmap
@@ -169,40 +169,6 @@ Concoct coordinates one task through reagent implementation, independent iragent
 - Update maintenance guidance so the skill stays aligned with implemented behavior as the workflow changes.
 
 **Verification:** Check packaging/discovery and every command example against the implemented CLI and current documentation. Walk the instructions against the demonstrated nominal and correction workflows. Do not add speculative recovery commands or revive the retired skill's obsolete controller requirements.
-
-## CON-075 — Authorize explicit limit increases for active work
-
-- Kind: task
-- Status: ready
-- Priority: critical
-- Parent: none
-- Depends on: none
-
-**Objective:** Allow the operator to extend an active run’s execution allowance explicitly, preserving completed work and consumed counts.
-
-**Context:** CURU-015 correctly stopped after three independent assessments, with seven of twelve agent invocations consumed. Continuation was blocked because startup configuration flags cannot change an active run. The operator needs a supported authorization path that requires no manual state editing.
-
-**Acceptance criteria:**
-
-- Add explicit active-run authorization flags:
-  - `--approve-review-limit-increase TOTAL`
-  - `--approve-invocation-limit-increase TOTAL`
-- Each value specifies the new total ceiling. For example, increasing the review limit from three to five after three completed assessments leaves two assessments available.
-- Keep ordinary startup limit flags and role-setting restrictions unchanged. Use the existing invocation accounting for implementation, correction, review, replacement-session and integration executions.
-- Require an existing active run and a valid total strictly greater than its recorded limit. Reject invalid requests clearly before changing state or launching an agent. Both increase flags may be supplied together; validate the complete request before persisting either change.
-- Persist approved increases under the existing execution lock before further dispatch. Preserve task, branch, candidate, findings, evidence, role settings, session context and all consumed counts. Record the previous and authorized ceilings in ordinary external execution metadata.
-- Reevaluate exhausted limits and continue the pending workflow step when allowances permit. Increasing one ceiling does not bypass another exhausted limit or any other existing prerequisite. Completed work and assessments are not repeated.
-- Preserve independent review and explicit operator authorization of the exact approved integration commit.
-- Limit-exhausted output identifies each exhausted allowance, its consumed/total counts and a concrete continuation command using the explicit authorization flags. Preserve executable, repository and evidence-root context. Explain that the supplied value is a new total ceiling.
-- Update CLI help and operator documentation with the stop → authorize increase → continue workflow.
-
-**Verification:**
-
-- Reproduce the observed state with a fixture: three completed assessments, seven of twelve invocations consumed, and changes requested on the current candidate.
-- Authorize a review ceiling of five; verify persisted counts remain `3/5` and `7/12` before dispatch, and continuation routes the retained findings to reagent.
-- Verify invocation-limit increases, combined increases, another limit remaining exhausted, invalid/non-increasing totals, missing active work and rejected startup-setting changes.
-- Reopen the updated record and confirm the increased ceilings and consumed counts survive without duplicate execution. Verify stopping at the new ceilings.
-- Exercise generated continuation commands and run applicable formatting, tests, vet, build and whitespace checks. Fixtures are sufficient; implementation must not modify or resume the live CURU-015 record.
 
 ## CON-076 — Suggest an operator-preferred task during selection
 

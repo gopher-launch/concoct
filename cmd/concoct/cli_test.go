@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -23,6 +26,15 @@ func TestApprovalAndAnswerOptions(t *testing.T) {
 	for _, args := range [][]string{{"run", "--review-limit", "2x"}, {"status", "--approve", "abc"}, {"status", "--answer", "yes"}} {
 		if _, _, _, _, err := parse(args); err == nil {
 			t.Fatalf("accepted invalid args %v", args)
+		}
+	}
+	o, _, _, _, err := parse([]string{"run", "--approve-review-limit-increase", "5", "--approve-invocation-limit-increase", "14"})
+	if err != nil || o.ApproveReviewLimitIncrease != 5 || o.ApproveInvocationLimitIncrease != 14 {
+		t.Fatalf("parse limit increases: %+v %v", o, err)
+	}
+	for _, args := range [][]string{{"run", "--approve-review-limit-increase", "0"}, {"run", "--approve-invocation-limit-increase", "bad"}, {"status", "--approve-review-limit-increase", "5"}} {
+		if _, _, _, _, err := parse(args); err == nil {
+			t.Fatalf("accepted invalid increase args %v", args)
 		}
 	}
 }
@@ -76,5 +88,41 @@ func TestDiagnosticsAndQuietSummaryPresentation(t *testing.T) {
 	display(&out, s, false)
 	if strings.Contains(out.String(), "Working") || !strings.Contains(out.String(), "reagent result: Nothing ready") {
 		t.Fatalf("quiet hid result or showed progress: %s", out.String())
+	}
+}
+
+func TestLimitExhaustedPresentationBuildsContextualAuthorizationCommand(t *testing.T) {
+	var out bytes.Buffer
+	s := handoff.State{
+		Phase: "limit_exhausted", LimitPhase: "correcting", Repository: "/tmp/repo with space", Verdict: "changes_requested",
+		Attempts: 12, MaxAttempts: 12, Assessments: 3, MaxAssessments: 3,
+	}
+	displayWithContext(&out, s, false, commandContext{executable: "/tmp/bin dir/concoct's", options: handoff.Options{Root: "/tmp/root;literal"}})
+	for _, want := range []string{"--repo '/tmp/repo with space'", "--root '/tmp/root;literal'", "--approve-invocation-limit-increase 13", "--approve-review-limit-increase 4", "new total ceilings"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in %s", want, out.String())
+		}
+	}
+}
+
+func TestShellCommandPreservesLiteralArguments(t *testing.T) {
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "harmless command's")
+	output := filepath.Join(dir, "arguments.txt")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARGS_OUT\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	values := []string{"run", "--repo", "/tmp/repo with space", "--root", "/tmp/root;$(false)", "--approve-review-limit-increase", "5"}
+	cmd := exec.Command("sh", "-c", shellCommand(executable, values...))
+	cmd.Env = append(os.Environ(), "ARGS_OUT="+output)
+	if data, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("execute generated command: %v: %s", err, data)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"); strings.Join(got, "\x00") != strings.Join(values, "\x00") {
+		t.Fatalf("arguments changed: got %#v want %#v", got, values)
 	}
 }

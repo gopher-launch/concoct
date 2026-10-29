@@ -32,7 +32,8 @@ This document describes current delivered behavior, organized by capability. It 
 
 - Atomic external state retains repository/task context, role settings, current phase, latest result, invocation count and an in-flight turn marker saved before dispatch. An execution lock prevents concurrent runs.
 - Completed handoff boundaries can continue in a later `run`. An unrecorded or uncertain in-flight outcome stops later runs for inspection rather than automatically replaying work.
-- Invocation and assessment limits stop further launches without resetting consumption. Optional elapsed and inactivity limits apply to each turn; timeout stopping invokes provider cleanup and owned-process cessation checks.
+- Invocation and assessment limits stop further launches without resetting consumption. Limit-exhausted output identifies each exhausted allowance and suggests an explicitly authorized higher total ceiling. An operator can increase either or both ceilings for active work; Concoct atomically records the old and new totals, retains all consumption and workflow context, and resumes the pending step only when every applicable allowance permits it. Startup limit and role-setting flags remain immutable during active work.
+- Optional elapsed and inactivity limits apply to each turn; timeout stopping invokes provider cleanup and owned-process cessation checks.
 
 ## Terminal output and diagnostics
 

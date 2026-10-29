@@ -37,6 +37,8 @@ type State struct {
 	Findings         []string                                `json:"findings,omitempty"`
 	Assessments      int                                     `json:"assessments"`
 	MaxAssessments   int                                     `json:"max_assessments"`
+	LimitPhase       string                                  `json:"limit_phase,omitempty"`
+	LimitIncreases   []LimitIncrease                         `json:"limit_increases,omitempty"`
 	ApprovedCommit   string                                  `json:"approved_commit,omitempty"`
 	AuthorizedCommit string                                  `json:"authorized_commit,omitempty"`
 	Question         *codexapp.RoleQuestion                  `json:"question,omitempty"`
@@ -60,6 +62,15 @@ type State struct {
 	Updated          time.Time                               `json:"updated"`
 }
 
+// LimitIncrease records an operator-authorized change to a total execution
+// ceiling. Consumption remains in State.Attempts and State.Assessments.
+type LimitIncrease struct {
+	Allowance       string    `json:"allowance"`
+	PreviousTotal   int       `json:"previous_total"`
+	AuthorizedTotal int       `json:"authorized_total"`
+	AuthorizedAt    time.Time `json:"authorized_at"`
+}
+
 // InFlight is saved with the invocation count before dispatch. A later run
 // cannot assume an unrecorded provider outcome means the turn never ran.
 type InFlight struct {
@@ -68,13 +79,14 @@ type InFlight struct {
 }
 
 type Options struct {
-	Repository, Root, Codex                                  string
-	Approve, Answer                                          string
-	ReagentModel, IragentModel, ReagentEffort, IragentEffort string
-	MaxAttempts, MaxAssessments                              int
-	TurnTimeout, StallTimeout                                time.Duration
-	OnEvent                                                  func(string, codexapp.Event)
-	OnResult                                                 func(string, codexapp.RoleResult)
+	Repository, Root, Codex                                    string
+	Approve, Answer                                            string
+	ReagentModel, IragentModel, ReagentEffort, IragentEffort   string
+	MaxAttempts, MaxAssessments                                int
+	ApproveInvocationLimitIncrease, ApproveReviewLimitIncrease int
+	TurnTimeout, StallTimeout                                  time.Duration
+	OnEvent                                                    func(string, codexapp.Event)
+	OnResult                                                   func(string, codexapp.RoleResult)
 }
 
 type Runner interface {
@@ -307,8 +319,15 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	if s.Repository != "" && s.Repository != repo {
 		return s, fmt.Errorf("state belongs to %s", s.Repository)
 	}
+	hasLimitIncrease := o.ApproveInvocationLimitIncrease > 0 || o.ApproveReviewLimitIncrease > 0
 	if o.Approve != "" && o.Answer != "" {
 		return s, fmt.Errorf("approval and blocker answer cannot be combined")
+	}
+	if hasLimitIncrease && (o.Approve != "" || o.Answer != "") {
+		return s, fmt.Errorf("limit increases cannot be combined with approval or blocker answer")
+	}
+	if hasLimitIncrease && (s.Phase == "" || s.Phase == "no_suitable_work" || s.Phase == "completed" || s.Phase == "integrated") {
+		return s, fmt.Errorf("no active work has execution limits to increase")
 	}
 	if s.Phase == "integrated" {
 		completed, finishErr := finishCompletion(dir, s)
@@ -336,6 +355,11 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	if s.MaxAssessments == 0 {
 		s.MaxAssessments = 3
 	}
+	if hasLimitIncrease {
+		if err := validateLimitIncreases(s, o); err != nil {
+			return s, err
+		}
+	}
 	// CON-064 records can continue from an exact completed review boundary.
 	if s.Phase == "reviewed" {
 		if s.Verdict == "approved" {
@@ -354,8 +378,27 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		}
 	}
 	if s.Phase == "awaiting_approval" && s.Attempts >= s.MaxAttempts {
-		s.Phase = "limit_exhausted"
-		s.LastError = "approved candidate retained, but invocation limit leaves no integration turn"
+		setLimitExhausted(&s, "awaiting_approval")
+		if err := save(dir, s); err != nil {
+			return s, err
+		}
+	}
+	if hasLimitIncrease {
+		pending := ""
+		if s.Phase == "limit_exhausted" {
+			pending, err = pendingLimitPhase(s)
+			if err != nil {
+				return s, err
+			}
+		}
+		authorizeLimitIncreases(&s, o)
+		if s.Phase == "limit_exhausted" {
+			s.Phase, s.LimitPhase, s.LastError = pending, "", ""
+			if limitsExhausted(s, pending) {
+				setLimitExhausted(&s, pending)
+			}
+		}
+		// Authorization is durable before any provider is opened or turn dispatched.
 		if err := save(dir, s); err != nil {
 			return s, err
 		}
@@ -368,7 +411,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		return s, nil
 	}
 	if s.Phase == "" {
-		if o.Approve != "" || o.Answer != "" {
+		if o.Approve != "" || o.Answer != "" || hasLimitIncrease {
 			return s, fmt.Errorf("no active work to approve or answer")
 		}
 		branch, err := git(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
@@ -426,9 +469,8 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	if s.Phase != "engineering" && s.Phase != "reviewing" && s.Phase != "correcting" && s.Phase != "integrating" {
 		return s, fmt.Errorf("unsupported active phase %q", s.Phase)
 	}
-	if s.Attempts >= s.MaxAttempts || (s.Assessments >= s.MaxAssessments && (s.Phase == "reviewing" || s.Phase == "correcting")) {
-		s.Phase = "limit_exhausted"
-		s.LastError = "invocation or assessment limit exhausted"
+	if limitsExhausted(s, s.Phase) {
+		setLimitExhausted(&s, s.Phase)
 		_ = save(dir, s)
 		return s, nil
 	}
@@ -469,9 +511,8 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		}
 	}
 	for {
-		if s.Attempts >= s.MaxAttempts || (s.Assessments >= s.MaxAssessments && (s.Phase == "reviewing" || s.Phase == "correcting")) {
-			s.Phase = "limit_exhausted"
-			s.LastError = "invocation or assessment limit exhausted"
+		if limitsExhausted(s, s.Phase) {
+			setLimitExhausted(&s, s.Phase)
 			_ = save(dir, s)
 			return s, nil
 		}
@@ -500,6 +541,76 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 			return s, nil
 		}
 	}
+}
+
+func validateLimitIncreases(s State, o Options) error {
+	if o.ApproveReviewLimitIncrease > 0 && o.ApproveReviewLimitIncrease <= s.MaxAssessments {
+		return fmt.Errorf("review limit increase must be greater than recorded total %d", s.MaxAssessments)
+	}
+	if o.ApproveInvocationLimitIncrease > 0 && o.ApproveInvocationLimitIncrease <= s.MaxAttempts {
+		return fmt.Errorf("invocation limit increase must be greater than recorded total %d", s.MaxAttempts)
+	}
+	return nil
+}
+
+func authorizeLimitIncreases(s *State, o Options) {
+	now := time.Now().UTC()
+	if o.ApproveReviewLimitIncrease > 0 {
+		s.LimitIncreases = append(s.LimitIncreases, LimitIncrease{Allowance: "review", PreviousTotal: s.MaxAssessments, AuthorizedTotal: o.ApproveReviewLimitIncrease, AuthorizedAt: now})
+		s.MaxAssessments = o.ApproveReviewLimitIncrease
+	}
+	if o.ApproveInvocationLimitIncrease > 0 {
+		s.LimitIncreases = append(s.LimitIncreases, LimitIncrease{Allowance: "invocation", PreviousTotal: s.MaxAttempts, AuthorizedTotal: o.ApproveInvocationLimitIncrease, AuthorizedAt: now})
+		s.MaxAttempts = o.ApproveInvocationLimitIncrease
+	}
+}
+
+func limitsExhausted(s State, pending string) bool {
+	return s.Attempts >= s.MaxAttempts || ((pending == "reviewing" || pending == "correcting") && s.Assessments >= s.MaxAssessments)
+}
+
+func setLimitExhausted(s *State, pending string) {
+	s.Phase = "limit_exhausted"
+	s.LimitPhase = pending
+	issues := make([]string, 0, 2)
+	if s.Attempts >= s.MaxAttempts {
+		issues = append(issues, fmt.Sprintf("invocation limit exhausted (%d/%d consumed)", s.Attempts, s.MaxAttempts))
+	}
+	if (pending == "reviewing" || pending == "correcting") && s.Assessments >= s.MaxAssessments {
+		issues = append(issues, fmt.Sprintf("review limit exhausted (%d/%d completed independent assessments)", s.Assessments, s.MaxAssessments))
+	}
+	if pending == "awaiting_approval" && len(issues) == 1 {
+		s.LastError = "approved candidate retained, but " + issues[0] + " leaves no integration turn"
+		return
+	}
+	s.LastError = strings.Join(issues, "; ")
+}
+
+// pendingLimitPhase supports records written before LimitPhase was retained.
+// It relies only on structured workflow bindings and refuses ambiguous shapes.
+func pendingLimitPhase(s State) (string, error) {
+	if s.LimitPhase != "" {
+		if s.LimitPhase != "engineering" && s.LimitPhase != "reviewing" && s.LimitPhase != "correcting" && s.LimitPhase != "integrating" && s.LimitPhase != "awaiting_approval" {
+			return "", fmt.Errorf("limit-exhausted state has unsupported pending phase %q", s.LimitPhase)
+		}
+		return s.LimitPhase, nil
+	}
+	if s.AuthorizedCommit != "" && s.AuthorizedCommit == s.ApprovedCommit {
+		return "integrating", nil
+	}
+	if s.Verdict == "approved" && s.ApprovedCommit != "" && s.ApprovedCommit == s.Candidate {
+		return "awaiting_approval", nil
+	}
+	if s.Verdict == "changes_requested" && s.Candidate != "" {
+		return "correcting", nil
+	}
+	if s.Candidate != "" && s.TaskID != "" {
+		return "reviewing", nil
+	}
+	if s.TaskID == "" && s.Candidate == "" {
+		return "engineering", nil
+	}
+	return "", fmt.Errorf("limit-exhausted state does not identify a pending workflow step")
 }
 
 func completionPath(dir string, s State) string {
@@ -610,8 +721,7 @@ func writeAtomic(path string, data []byte) error {
 
 func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch.Role, step string, o Options) (State, error) {
 	if s.Attempts >= s.MaxAttempts {
-		s.Phase = "limit_exhausted"
-		s.LastError = "invocation limit exhausted"
+		setLimitExhausted(&s, step)
 		_ = save(dir, s)
 		return s, nil
 	}
@@ -814,8 +924,7 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 		if result.Disposition == "approved" {
 			s.ApprovedCommit = s.Candidate
 			if s.Attempts >= s.MaxAttempts {
-				s.Phase = "limit_exhausted"
-				s.LastError = "approved candidate retained, but invocation limit leaves no integration turn"
+				setLimitExhausted(&s, "awaiting_approval")
 			} else {
 				s.Phase = "awaiting_approval"
 			}
