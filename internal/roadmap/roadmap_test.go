@@ -89,6 +89,56 @@ func TestCurrentRepositoryRoadmap(t *testing.T) {
 	}
 }
 
+func TestProspectiveRoadmapAfterDelivery(t *testing.T) {
+	before := `## APP-001 — First behavior
+- Kind: task
+- Status: ready
+- Priority: high
+- Depends on: none
+
+## APP-002 — Dependent behavior
+- Kind: task
+- Status: planned
+- Priority: medium
+- Depends on: APP-001
+`
+	initial, err := Parse([]byte(before), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(initial.EligibleTasks()); !reflect.DeepEqual(got, []string{"APP-001"}) {
+		t.Fatalf("initial eligible tasks = %v", got)
+	}
+
+	after := `## APP-002 — Dependent behavior
+- Kind: task
+- Status: ready
+- Priority: medium
+- Depends on: none
+`
+	capabilities := `# Delivered capabilities
+
+## First behavior
+
+- The first behavior is available.
+`
+	current, err := Parse([]byte(after), []byte(capabilities))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(current.EligibleTasks()); !reflect.DeepEqual(got, []string{"APP-002"}) {
+		t.Fatalf("eligible tasks after delivery = %v", got)
+	}
+	if entries := current.Entries(); len(entries) != 1 || entries[0].ID != "APP-002" || entries[0].DependsOn != nil {
+		t.Fatalf("unfinished task or cleared dependency changed: %#v", entries)
+	}
+
+	staleDependency := strings.Replace(after, "Depends on: none", "Depends on: APP-001", 1)
+	if _, err := Parse([]byte(staleDependency), []byte(capabilities)); err == nil || !strings.Contains(err.Error(), "unknown dependency APP-001") {
+		t.Fatalf("removed dependency accepted without a completed-ID ledger: %v", err)
+	}
+}
+
 func TestMalformedMetadataAndReferences(t *testing.T) {
 	const base = `## APP-001 — A task
 - Kind: task

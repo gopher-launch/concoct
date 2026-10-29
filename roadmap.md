@@ -21,26 +21,6 @@ Concoct coordinates one task through reagent implementation, independent iragent
 - `capabilities.md` describes current behavior and practical limits, organized by capability. It does not accumulate completed-task acceptance criteria, obsolete mechanisms or a chronological delivery log. Source remains the authority for implemented behavior.
 - Keep trial output, investigations, diagnostics and review records outside the project. Use focused deterministic checks for these follow-ups; another billable live trial is not required solely for presentation or bookkeeping changes.
 
-## CON-074 — Keep the roadmap prospective and capabilities current
-
-- Kind: task
-- Status: ready
-- Priority: high
-- Parent: none
-- Depends on: none
-
-**Objective:** Make future-only roadmap maintenance the normal delivery practice, without accumulating completed tasks or obsolete implementation descriptions.
-
-**Acceptance criteria:**
-
-- Align active contributor guidance, agent prompts, documentation and relevant fixtures with the delivery rules above. Replace blanket instructions to preserve every roadmap entry or mark completed entries delivered with instructions to preserve unfinished IDs and remove completed entries after capability reconciliation.
-- Summarize delivered behavior in `capabilities.md`; retain the completed task specification in existing external evidence and Git history rather than copying its acceptance criteria into capabilities.
-- Reconcile remaining dependencies in the same candidate: remove satisfied prerequisites, retain unfinished prerequisites, and update readiness when appropriate. Remove completed epic/feature scaffolding and stale milestone instructions.
-- Keep the existing bounded roadmap metadata contract usable. A task with no remaining prerequisites uses `Depends on: none`; unresolved references and cycles still fail validation. A capabilities prose parser or separate completed-ID registry is unnecessary.
-- Ensure independent review receives the active task's original acceptance scope even when its entry has been removed from the candidate roadmap. Reuse the ordinary task evidence supplied to agents.
-
-**Verification:** Use a small roadmap fixture with two dependent tasks to demonstrate delivery, capability reconciliation, completed-entry removal and readiness promotion without dangling references. Cover an unresolved reference and preservation of unfinished IDs. Check active instructions for contradictory maintenance rules; run applicable repository checks.
-
 ## CON-068 — Preserve execution context in suggested continuation commands
 
 - Kind: task

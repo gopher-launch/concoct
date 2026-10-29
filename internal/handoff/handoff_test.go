@@ -133,6 +133,9 @@ func TestSelectionToIndependentReview(t *testing.T) {
 	if !strings.Contains(fake.prompts[0], "roadmap.md") || !strings.Contains(fake.prompts[1], s.Candidate) || !strings.Contains(fake.prompts[1], s.Evidence) {
 		t.Fatalf("wrong prompts: %#v", fake.prompts)
 	}
+	if !strings.Contains(fake.prompts[0], "original scope and acceptance criteria") || !strings.Contains(fake.prompts[1], "original task scope and acceptance criteria retained") {
+		t.Fatalf("original task scope not retained for independent review: %#v", fake.prompts)
+	}
 	if s.Branch != "task/APP-002" || s.Candidate != gitTest(repo, "rev-parse", "HEAD") {
 		t.Fatalf("wrong candidate binding: %+v", s)
 	}
