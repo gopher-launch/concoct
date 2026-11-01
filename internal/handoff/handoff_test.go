@@ -67,13 +67,23 @@ func (f *fakeRunner) RunRoleTurn(ctx context.Context, id, prompt string, s codex
 			f.output[i] = strings.ReplaceAll(f.output[i], "CANDIDATE", head)
 		}
 		if f.evidenceDir != "" && !f.skipTaskEvidence {
-			writeEvidence(filepath.Join(f.evidenceDir, "evidence", "APP-002", "task.md"))
+			writeEvidence(taskEvidencePath(f.evidenceDir, selectedRoadmapInPrompt(prompt), "APP-002"))
 		}
 	} else if f.evidenceDir != "" && !f.skipReviewEvidence {
-		writeEvidence(filepath.Join(f.evidenceDir, "evidence", "APP-002", "review-01.md"))
+		writeEvidence(reviewPath(f.evidenceDir, selectedRoadmapInPrompt(prompt), "APP-002", 1))
 	}
 	result := f.output[f.turns-1]
 	return codexapp.TurnOutcome{ThreadID: id, TurnID: s.Role + "-turn", Status: "completed", FinalText: result}, nil
+}
+
+func selectedRoadmapInPrompt(prompt string) string {
+	const prefix = "Selected roadmap: "
+	for _, line := range strings.Split(prompt, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	panic("prompt omitted selected roadmap")
 }
 func (f *fakeRunner) Stop(context.Context, string, string) stop.Result {
 	f.stopCalls++
@@ -115,6 +125,11 @@ func model() []codexapp.Model {
 }
 func result(disposition, summary, task, candidate string) string {
 	data, _ := json.Marshal(map[string]any{"disposition": disposition, "summary": summary, "task_id": task, "candidate": candidate, "findings": nil, "evidence": nil, "question": nil})
+	return string(data)
+}
+
+func resultWithEvidence(disposition, summary, task, candidate, evidence string) string {
+	data, _ := json.Marshal(map[string]any{"disposition": disposition, "summary": summary, "task_id": task, "candidate": candidate, "findings": nil, "evidence": evidence, "question": nil})
 	return string(data)
 }
 func TestSelectionToIndependentReview(t *testing.T) {
@@ -381,6 +396,25 @@ func TestMissingAgentEvidenceStopsHandoff(t *testing.T) {
 				t.Fatalf("evidence handoff: %+v %v turns=%d", s, err, fake.turns)
 			}
 		})
+	}
+}
+
+func TestTaskEvidenceMustMatchSelectedRoadmapNamespace(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	dir, err := storage(repo, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := filepath.Join(dir, "evidence", "APP-002", "task.md")
+	fake := &fakeRunner{
+		repo: repo, evidenceDir: dir, models: model(),
+		output: []string{resultWithEvidence("ready_for_review", "Ready", "APP-002", "CANDIDATE", wrong)},
+	}
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
+	want := taskEvidencePath(dir, filepath.Join(repo, "roadmap.md"), "APP-002")
+	if err == nil || !strings.Contains(err.Error(), "task evidence must be the selected roadmap task file "+want) || s.Phase != "invalid_result" || fake.turns != 1 || s.Evidence != "" {
+		t.Fatalf("wrong roadmap evidence accepted: %+v %v", s, err)
 	}
 }
 

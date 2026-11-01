@@ -41,7 +41,7 @@ func (r *rejectedReviewRunner) StartThread(_ context.Context, cwd string, s code
 func (r *rejectedReviewRunner) ResumeThread(_ context.Context, id string, _ bool, _ codexapp.RoleSettings) (codexapp.Thread, error) {
 	return codexapp.Thread{ID: id}, nil
 }
-func (r *rejectedReviewRunner) RunRoleTurn(_ context.Context, id, _ string, settings codexapp.RoleSettings, emit func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+func (r *rejectedReviewRunner) RunRoleTurn(_ context.Context, id, prompt string, settings codexapp.RoleSettings, emit func(codexapp.Event)) (codexapp.TurnOutcome, error) {
 	r.turns++
 	turnID := fmt.Sprintf("turn-%d", r.turns)
 	emit(codexapp.Event{Kind: "turn/started", ThreadID: id, TurnID: turnID})
@@ -58,6 +58,16 @@ func (r *rejectedReviewRunner) RunRoleTurn(_ context.Context, id, _ string, sett
 		gitFlow(r.repo, "add", "feature.txt")
 		gitFlow(r.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "candidate")
 		candidate = gitFlow(r.repo, "rev-parse", "HEAD")
+		const startMarker, endMarker = "under ", "/<task-id>/task.md"
+		start := strings.Index(prompt, startMarker)
+		end := strings.Index(prompt, endMarker)
+		if start < 0 || end < start {
+			return codexapp.TurnOutcome{}, fmt.Errorf("reagent prompt omitted evidence namespace")
+		}
+		r.evidence = filepath.Join(prompt[start+len(startMarker):end], "APP-002", "task.md")
+		if err := os.MkdirAll(filepath.Dir(r.evidence), 0700); err != nil {
+			return codexapp.TurnOutcome{}, err
+		}
 		if err := os.WriteFile(r.evidence, []byte("# Task evidence\n"), 0600); err != nil {
 			return codexapp.TurnOutcome{}, err
 		}

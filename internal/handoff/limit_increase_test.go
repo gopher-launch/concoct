@@ -56,13 +56,14 @@ func limitState(t *testing.T, root string, attempts, maxAttempts, assessments, m
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence := filepath.Join(dir, "evidence", "APP-002", "task.md")
-	review := reviewPath(dir, "APP-002", assessments)
+	selectedRoadmap := filepath.Join(repo, "roadmap.md")
+	evidence := taskEvidencePath(dir, selectedRoadmap, "APP-002")
+	review := reviewPath(dir, selectedRoadmap, "APP-002", assessments)
 	writeEvidence(evidence)
 	writeEvidence(review)
 	s := State{
 		Repository: repo, Parent: "main", Base: base, Branch: "task/APP-002", TaskID: "APP-002", Candidate: candidate,
-		Phase: "limit_exhausted", LimitPhase: "correcting", Evidence: evidence, ReviewEvidence: review,
+		Phase: "limit_exhausted", LimitPhase: "correcting", Roadmap: selectedRoadmap, Evidence: evidence, ReviewEvidence: review,
 		Verdict: "changes_requested", ReviewSummary: "Fix the boundary", Findings: []string{"retain prior counts"},
 		Attempts: attempts, MaxAttempts: maxAttempts, Assessments: assessments, MaxAssessments: maxAssessments,
 		Profiles: map[dispatch.Role]codexapp.RoleSettings{

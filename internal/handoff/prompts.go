@@ -7,8 +7,16 @@ import (
 	"strings"
 )
 
-func reviewPath(root, task string, number int) string {
-	return filepath.Join(root, "evidence", task, fmt.Sprintf("review-%02d.md", number))
+func evidenceDirectory(root, selectedRoadmap, task string) string {
+	return filepath.Join(root, "evidence", "roadmap-"+shaPath(selectedRoadmap), task)
+}
+
+func taskEvidencePath(root, selectedRoadmap, task string) string {
+	return filepath.Join(evidenceDirectory(root, selectedRoadmap, task), "task.md")
+}
+
+func reviewPath(root, selectedRoadmap, task string, number int) string {
+	return filepath.Join(evidenceDirectory(root, selectedRoadmap, task), fmt.Sprintf("review-%02d.md", number))
 }
 
 func promptForStep(s State, root, step string) (string, error) {
@@ -47,14 +55,14 @@ func ReagentPrompt(s State, root, roadmapContext string) string {
 
 %s
 
-Keep a concise active task checkpoint outside the product repository under %s/evidence/<task-id>/task.md. Before editing, retain the selected task's original scope and acceptance criteria there so review can assess them after the roadmap entry is removed. Record the selected roadmap, repository, branch, base commit, decisions, checks, candidate commit and next action. Use ordinary tools. Implement, validate and self-review (at most three passes per candidate). Reconcile the selected roadmap and the applicable capability document identified above for the intended post-integration state: summarize delivered behavior in that capability document when one applies, remove the completed task from the selected roadmap, remove its satisfied dependency references, and promote newly eligible tasks when appropriate. Do not edit another roadmap in its place. Preserve unfinished task IDs and scope. Commit the finished candidate and leave its branch clean. Do not use historical task archives or the old Concoct workflow. Do not merge, push, publish or start another task. Stream concise prose as you work.
+Keep a concise active task checkpoint outside the product repository under %s/<task-id>/task.md. This namespace is bound to the selected roadmap; use it exactly so an identical task ID from another roadmap retains separate evidence. Before editing, retain the selected task's original scope and acceptance criteria there so review can assess them after the roadmap entry is removed. Record the selected roadmap, repository, branch, base commit, decisions, checks, candidate commit and next action. Use ordinary tools. Implement, validate and self-review (at most three passes per candidate). Reconcile the selected roadmap and the applicable capability document identified above for the intended post-integration state: summarize delivered behavior in that capability document when one applies, remove the completed task from the selected roadmap, remove its satisfied dependency references, and promote newly eligible tasks when appropriate. Do not edit another roadmap in its place. Preserve unfinished task IDs and scope. Commit the finished candidate and leave its branch clean. Do not use historical task archives or the old Concoct workflow. Do not merge, push, publish or start another task. Stream concise prose as you work.
 
 Return one structured result. For readiness use disposition ready_for_review, the selected task_id, exact candidate commit and a brief summary. For no suitable task use no_suitable_work with a concrete summary. For a genuine blocker use decision_required with an explicit question. Set evidence to the task.md path. Null unused fields. The result is routing data; maintain engineering detail in task.md.
-`, s.Repository, s.Parent, s.Base, roadmapContext, root)
+`, s.Repository, s.Parent, s.Base, roadmapContext, filepath.Join(root, "evidence", "roadmap-"+shaPath(s.Roadmap)))
 }
 
 func IragentPrompt(s State, root, roadmapContext string) string {
-	reviewEvidence := reviewPath(root, s.TaskID, s.Assessments+1)
+	reviewEvidence := reviewPath(root, s.Roadmap, s.TaskID, s.Assessments+1)
 	return fmt.Sprintf(`Act as independent iragent for task %s in selected roadmap %s. Review exact candidate commit %s on branch %s in %s against the original task scope and acceptance criteria retained in the reagent checkpoint at %s, plus relevant design, applicable repository and directory-specific instructions, current source and tests. The selected candidate roadmap may have removed the completed task. This is the same checkout used by reagent. Do not edit source, documentation, branch or candidate while reviewing. Independently run appropriate read-only checks and inspect the diff from base %s. State actionable findings with evidence; treat summaries as claims to verify.
 
 %s

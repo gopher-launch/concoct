@@ -70,8 +70,9 @@ func (f *flowRunner) RunRoleTurn(_ context.Context, id, prompt string, s codexap
 	step := f.turns
 	f.turns++
 	onEvent(codexapp.Event{Kind: "turn/started", ThreadID: id, TurnID: fmt.Sprintf("turn-%d", step+1)})
-	taskEvidence := filepath.Join(f.root, "evidence", "APP-002", "task.md")
-	reviewEvidence := func(n int) string { return reviewPath(f.root, "APP-002", n) }
+	selectedRoadmap := selectedRoadmapInPrompt(prompt)
+	taskEvidence := taskEvidencePath(f.root, selectedRoadmap, "APP-002")
+	reviewEvidence := func(n int) string { return reviewPath(f.root, selectedRoadmap, "APP-002", n) }
 	var result string
 	switch step {
 	case 0:
@@ -229,7 +230,7 @@ func TestRequestedChangesCorrectionReassessmentApprovalIntegration(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Phase != "awaiting_approval" || s.Assessments != 2 || s.Attempts != 4 || s.ApprovedCommit != s.Candidate || s.ReagentSummary != "Corrected candidate" || s.ReviewSummary != "Corrected candidate approved" || s.ReviewEvidence != reviewPath(dir, "APP-002", 2) {
+	if s.Phase != "awaiting_approval" || s.Assessments != 2 || s.Attempts != 4 || s.ApprovedCommit != s.Candidate || s.ReagentSummary != "Corrected candidate" || s.ReviewSummary != "Corrected candidate approved" || s.ReviewEvidence != reviewPath(dir, s.Roadmap, "APP-002", 2) {
 		t.Fatalf("approval boundary: %+v", s)
 	}
 	if f.starts != 2 || f.resumes != 2 {
@@ -268,7 +269,7 @@ func (f *nextTaskRunner) Stop(context.Context, string, string) stop.Result {
 	return stop.Result{Status: "stopped_safely"}
 }
 func (f *nextTaskRunner) Close() error { return nil }
-func (f *nextTaskRunner) RunRoleTurn(_ context.Context, id, _ string, s codexapp.RoleSettings, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+func (f *nextTaskRunner) RunRoleTurn(_ context.Context, id, prompt string, s codexapp.RoleSettings, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
 	f.turns++
 	if s.Role == "reagent" {
 		gitTest(f.repo, "switch", "-qc", "task/APP-003")
@@ -277,9 +278,9 @@ func (f *nextTaskRunner) RunRoleTurn(_ context.Context, id, _ string, s codexapp
 		}
 		gitTest(f.repo, "add", "next.txt")
 		gitTest(f.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "next task")
-		writeEvidence(filepath.Join(f.root, "evidence", "APP-003", "task.md"))
+		writeEvidence(taskEvidencePath(f.root, selectedRoadmapInPrompt(prompt), "APP-003"))
 	} else {
-		writeEvidence(reviewPath(f.root, "APP-003", 1))
+		writeEvidence(reviewPath(f.root, selectedRoadmapInPrompt(prompt), "APP-003", 1))
 	}
 	candidate := gitTest(f.repo, "rev-parse", "HEAD")
 	disposition, summary := "ready_for_review", "Next candidate"
@@ -345,6 +346,129 @@ func TestCompletedRunReleasesStateForNextTaskAtDescendant(t *testing.T) {
 	data, err := os.ReadFile(completion)
 	if err != nil || !strings.Contains(string(data), oldCandidate) || !strings.Contains(string(data), `"phase": "completed"`) {
 		t.Fatalf("prior completion was not retained: %s %v", data, err)
+	}
+}
+
+type duplicateTaskRunner struct {
+	repo, root, branch, file, marker string
+	turns                            int
+}
+
+func (r *duplicateTaskRunner) Models(context.Context) ([]codexapp.Model, error) { return model(), nil }
+func (r *duplicateTaskRunner) StartThread(_ context.Context, _ string, s codexapp.RoleSettings, _ []codexapp.ToolSpec) (codexapp.Thread, error) {
+	return codexapp.Thread{ID: s.Role + "-" + r.marker}, nil
+}
+func (r *duplicateTaskRunner) ResumeThread(_ context.Context, id string, _ bool, _ codexapp.RoleSettings) (codexapp.Thread, error) {
+	return codexapp.Thread{ID: id}, nil
+}
+func (r *duplicateTaskRunner) Stop(context.Context, string, string) stop.Result {
+	return stop.Result{Status: "stopped_safely"}
+}
+func (r *duplicateTaskRunner) Close() error { return nil }
+func (r *duplicateTaskRunner) RunRoleTurn(_ context.Context, id, prompt string, s codexapp.RoleSettings, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
+	r.turns++
+	selectedRoadmap := selectedRoadmapInPrompt(prompt)
+	disposition, summary := "ready_for_review", r.marker+" candidate"
+	if r.turns == 1 {
+		gitTest(r.repo, "switch", "-qc", r.branch)
+		if err := os.WriteFile(filepath.Join(r.repo, r.file), []byte(r.marker+"\n"), 0600); err != nil {
+			return codexapp.TurnOutcome{}, err
+		}
+		gitTest(r.repo, "add", r.file)
+		gitTest(r.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", r.marker+" candidate")
+		path := taskEvidencePath(r.root, selectedRoadmap, "APP-002")
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return codexapp.TurnOutcome{}, err
+		}
+		if err := os.WriteFile(path, []byte(r.marker+" task evidence\n"), 0600); err != nil {
+			return codexapp.TurnOutcome{}, err
+		}
+	} else if r.turns == 2 {
+		disposition, summary = "approved", r.marker+" approved"
+		path := reviewPath(r.root, selectedRoadmap, "APP-002", 1)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return codexapp.TurnOutcome{}, err
+		}
+		if err := os.WriteFile(path, []byte(r.marker+" review evidence\n"), 0600); err != nil {
+			return codexapp.TurnOutcome{}, err
+		}
+	} else {
+		disposition, summary = "integrated", r.marker+" integrated"
+		candidate := gitTest(r.repo, "rev-parse", "HEAD")
+		base := gitTest(r.repo, "rev-parse", "main")
+		gitTest(r.repo, "update-ref", "refs/heads/main", candidate, base)
+		gitTest(r.repo, "switch", "main")
+	}
+	candidate := gitTest(r.repo, "rev-parse", r.branch)
+	result := flowResult(disposition, summary, "APP-002", candidate, nil, nil)
+	return codexapp.TurnOutcome{ThreadID: id, TurnID: fmt.Sprintf("%s-%d", r.marker, r.turns), Status: "completed", FinalText: result}, nil
+}
+
+func TestSequentialRoadmapsKeepDuplicateTaskEvidenceDistinct(t *testing.T) {
+	repo := testRepo(t)
+	rootRoadmap := filepath.Join(repo, "roadmap.md")
+	roadmapBody := "## APP-002 — Same task identity\n\n- Kind: task\n- Status: ready\n- Priority: high\n- Parent: none\n- Depends on: none\n"
+	if err := os.WriteFile(rootRoadmap, []byte(roadmapBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+	deployDir := filepath.Join(repo, "deploy")
+	if err := os.MkdirAll(deployDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	deployRoadmap := filepath.Join(deployDir, "roadmap.md")
+	if err := os.WriteFile(deployRoadmap, []byte(roadmapBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(repo, "add", ".")
+	gitTest(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "two roadmaps")
+	storageRoot := t.TempDir()
+	dir, err := storage(repo, storageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := &duplicateTaskRunner{repo: repo, root: dir, branch: "task/root-app-002", file: "root-feature.txt", marker: "root"}
+	s, err := Run(context.Background(), Options{Repository: repo, Root: storageRoot, Roadmap: rootRoadmap}, func(context.Context, string, io.Writer) (Runner, error) { return first, nil })
+	if err != nil || s.Phase != "awaiting_approval" {
+		t.Fatalf("first roadmap approval: %+v %v", s, err)
+	}
+	s, err = Run(context.Background(), Options{Repository: repo, Root: storageRoot, Approve: s.Candidate}, func(context.Context, string, io.Writer) (Runner, error) { return first, nil })
+	if err != nil || s.Phase != "completed" {
+		t.Fatalf("first roadmap completion: %+v %v", s, err)
+	}
+	firstTask, firstReview := s.Evidence, s.ReviewEvidence
+	firstTaskData, err := os.ReadFile(firstTask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstReviewData, err := os.ReadFile(firstReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second := &duplicateTaskRunner{repo: repo, root: dir, branch: "task/deploy-app-002", file: "deploy-feature.txt", marker: "deploy"}
+	s, err = Run(context.Background(), Options{Repository: repo, Root: storageRoot, Roadmap: deployRoadmap}, func(context.Context, string, io.Writer) (Runner, error) { return second, nil })
+	if err != nil || s.Phase != "awaiting_approval" {
+		t.Fatalf("second roadmap approval: %+v %v", s, err)
+	}
+	s, err = Run(context.Background(), Options{Repository: repo, Root: storageRoot, Approve: s.Candidate}, func(context.Context, string, io.Writer) (Runner, error) { return second, nil })
+	if err != nil || s.Phase != "completed" {
+		t.Fatalf("second roadmap completion: %+v %v", s, err)
+	}
+	if firstTask == s.Evidence || firstReview == s.ReviewEvidence || filepath.Dir(firstTask) == filepath.Dir(s.Evidence) {
+		t.Fatalf("duplicate task IDs shared evidence: first=%s/%s second=%s/%s", firstTask, firstReview, s.Evidence, s.ReviewEvidence)
+	}
+	if current, readErr := os.ReadFile(firstTask); readErr != nil || string(current) != string(firstTaskData) {
+		t.Fatalf("second task replaced first task evidence: %q %v", current, readErr)
+	}
+	if current, readErr := os.ReadFile(firstReview); readErr != nil || string(current) != string(firstReviewData) {
+		t.Fatalf("second task replaced first review evidence: %q %v", current, readErr)
+	}
+	if data, readErr := os.ReadFile(s.Evidence); readErr != nil || !strings.Contains(string(data), "deploy task evidence") {
+		t.Fatalf("second task evidence missing: %q %v", data, readErr)
+	}
+	if data, readErr := os.ReadFile(s.ReviewEvidence); readErr != nil || !strings.Contains(string(data), "deploy review evidence") {
+		t.Fatalf("second review evidence missing: %q %v", data, readErr)
 	}
 }
 

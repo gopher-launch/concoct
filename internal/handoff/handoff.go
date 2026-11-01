@@ -996,9 +996,9 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 			if err := verifyCandidate(s); err != nil {
 				return halt(dir, s, "source_changed", err)
 			}
-			evidence := filepath.Join(dir, "evidence", s.TaskID, "task.md")
-			if result.Evidence != "" {
-				evidence = result.Evidence
+			evidence := taskEvidencePath(dir, s.Roadmap, s.TaskID)
+			if result.Evidence != "" && result.Evidence != evidence {
+				return halt(dir, s, "invalid_result", fmt.Errorf("task evidence must be the selected roadmap task file %s", evidence))
 			}
 			if err := verifyEvidence(s.Repository, evidence); err != nil {
 				return halt(dir, s, "invalid_result", fmt.Errorf("task evidence: %w", err))
@@ -1017,7 +1017,7 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 		if result.Disposition != "approved" && result.Disposition != "changes_requested" {
 			return halt(dir, s, "invalid_result", fmt.Errorf("unexpected iragent disposition %q", result.Disposition))
 		}
-		reviewEvidence := reviewPath(dir, s.TaskID, s.Assessments+1)
+		reviewEvidence := reviewPath(dir, s.Roadmap, s.TaskID, s.Assessments+1)
 		if result.Evidence != "" && result.Evidence != reviewEvidence {
 			return halt(dir, s, "invalid_result", fmt.Errorf("review evidence must be the current assessment file %s", reviewEvidence))
 		}
@@ -1033,7 +1033,7 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 				return halt(dir, s, "invalid_result", fmt.Errorf("current review evidence: %w", err))
 			}
 			for number := 1; number <= s.Assessments; number++ {
-				previous, err := os.Stat(reviewPath(dir, s.TaskID, number))
+				previous, err := os.Stat(reviewPath(dir, s.Roadmap, s.TaskID, number))
 				if err != nil {
 					return halt(dir, s, "invalid_result", fmt.Errorf("prior review evidence %02d: %w", number, err))
 				}
