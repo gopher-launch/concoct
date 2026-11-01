@@ -18,6 +18,7 @@ This document describes current delivered behavior, organized by capability. It 
 ## Task selection and implementation
 
 - A fresh plain `concoct run` requires a clean named parent checkout. In one initial turn, reagent selects a ready roadmap task, creates its task branch in that checkout, maintains external task evidence, engineers and verifies it, and reports a committed candidate.
+- Fresh work may select an authoritative roadmap with `run --roadmap PATH`; relative paths resolve from the repository. Concoct validates and records the resolved roadmap before dispatch, supplies its current contents and applicable capability-document path throughout the workflow, reports the selection in summaries and status, and prevents an active run from switching roadmaps. A sibling `capabilities.md` takes precedence over the repository-root document.
 - Concoct uses no host claim/checkpoint/assessment callbacks. It does not stage, commit, classify or assess the candidate's engineering contents. It checks the reported commit against the clean task-branch HEAD and recorded base before launching a separate iragent session in the same checkout.
 - Iragent receives the exact candidate and a readable external task evidence file, assesses independently and records external review evidence. A completed verdict must identify the task and candidate and have a readable external review file. Concoct checks file presence without grading narrative.
 
@@ -31,8 +32,9 @@ This document describes current delivered behavior, organized by capability. It 
 
 ## External state, continuation and execution limits
 
-- Atomic external state retains repository/task context, role settings, current phase, latest result, invocation count and an in-flight turn marker saved before dispatch. An execution lock prevents concurrent runs.
+- Atomic external state retains repository/roadmap/task context, role settings, current phase, latest result, invocation count and an in-flight turn marker saved before dispatch. An execution lock prevents concurrent runs.
 - Completed handoff boundaries can continue in a later `run`. An unrecorded or uncertain in-flight outcome stops later runs for inspection rather than automatically replaying work.
+- Generated approval, blocker-answer and execution-limit continuation commands retain the active roadmap together with executable, repository and explicitly selected external-root context.
 - Invocation and assessment limits stop further launches without resetting consumption. Limit-exhausted output identifies each exhausted allowance and suggests an explicitly authorized higher total ceiling. An operator can increase either or both ceilings for active work; Concoct atomically records the old and new totals, retains all consumption and workflow context, and resumes the pending step only when every applicable allowance permits it. Startup limit and role-setting flags remain immutable during active work.
 - Optional elapsed and inactivity limits apply to each turn; timeout stopping invokes provider cleanup and owned-process cessation checks.
 

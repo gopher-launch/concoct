@@ -139,6 +139,133 @@ func TestSelectionToIndependentReview(t *testing.T) {
 	if s.Branch != "task/APP-002" || s.Candidate != gitTest(repo, "rev-parse", "HEAD") {
 		t.Fatalf("wrong candidate binding: %+v", s)
 	}
+	if s.Roadmap != filepath.Join(repo, "roadmap.md") {
+		t.Fatalf("default roadmap was not recorded: %+v", s)
+	}
+}
+
+func TestSelectedRoadmapPersistsAcrossWorkflow(t *testing.T) {
+	repo := testRepo(t)
+	rootContents := "## APP-002 — Root task with same ID\n\n- Kind: task\n- Status: ready\n- Priority: high\n- Parent: none\n- Depends on: none\n\n**Objective:** root-marker\n"
+	if err := os.WriteFile(filepath.Join(repo, "roadmap.md"), []byte(rootContents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	selectedDir := filepath.Join(repo, "deploy plans")
+	if err := os.MkdirAll(selectedDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	selected := filepath.Join(selectedDir, "release roadmap.md")
+	contents := "## APP-002 — Deployment task\n\n- Kind: task\n- Status: ready\n- Priority: high\n- Parent: none\n- Depends on: none\n\n**Objective:** deploy-marker\n"
+	if err := os.WriteFile(selected, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	capabilities := filepath.Join(selectedDir, "capabilities.md")
+	if err := os.WriteFile(capabilities, []byte("# Deployment capabilities\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(repo, "add", ".")
+	gitTest(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "deployment roadmap")
+
+	root := t.TempDir()
+	dir, err := storage(repo, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &flowRunner{repo: repo, root: dir}
+	relative := filepath.Join("deploy plans", "release roadmap.md")
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root, Roadmap: relative}, func(context.Context, string, io.Writer) (Runner, error) { return runner, nil })
+	if err != nil || s.Phase != "awaiting_approval" || s.Roadmap != selected || s.Capabilities != capabilities {
+		t.Fatalf("selected roadmap state: %+v %v", s, err)
+	}
+	if len(runner.prompts) != 4 {
+		t.Fatalf("workflow prompt count: %d", len(runner.prompts))
+	}
+	for i, prompt := range runner.prompts {
+		for _, want := range []string{selected, capabilities, "deploy-marker"} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("prompt %d lacks %q: %s", i, want, prompt)
+			}
+		}
+		if strings.Contains(prompt, "root-marker") {
+			t.Fatalf("prompt %d mixed the root roadmap into selected context: %s", i, prompt)
+		}
+	}
+	reopened, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) {
+		t.Fatal("approval wait opened provider")
+		return nil, nil
+	})
+	if err != nil || reopened.Phase != "awaiting_approval" || reopened.Roadmap != selected || reopened.Candidate != s.Candidate {
+		t.Fatalf("continuation without roadmap lost recorded context: %+v %v", reopened, err)
+	}
+
+	turns := runner.turns
+	if _, err := Run(context.Background(), Options{Repository: repo, Root: root, Roadmap: "roadmap.md"}, func(context.Context, string, io.Writer) (Runner, error) {
+		t.Fatal("roadmap mismatch opened provider")
+		return nil, nil
+	}); err == nil || !strings.Contains(err.Error(), "cannot switch") || runner.turns != turns {
+		t.Fatalf("roadmap switch was not rejected before dispatch: %v turns=%d", err, runner.turns)
+	}
+
+	s, err = Run(context.Background(), Options{Repository: repo, Root: root, Roadmap: selected, Approve: s.Candidate}, func(context.Context, string, io.Writer) (Runner, error) { return runner, nil })
+	if err != nil || s.Phase != "completed" || s.Roadmap != selected || len(runner.prompts) != 5 || !strings.Contains(runner.prompts[4], "deploy-marker") {
+		t.Fatalf("integration lost roadmap context: %+v %v prompts=%d", s, err, len(runner.prompts))
+	}
+	status, err := Status(Options{Repository: repo, Root: root})
+	if err != nil || status.Roadmap != selected {
+		t.Fatalf("status lost roadmap: %+v %v", status, err)
+	}
+}
+
+func TestInvalidSelectedRoadmapDoesNotCreateActiveWork(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		make func(*testing.T, string) string
+		want string
+	}{
+		{"missing", func(_ *testing.T, repo string) string { return filepath.Join(repo, "missing.md") }, "resolve roadmap"},
+		{"directory", func(t *testing.T, repo string) string {
+			path := filepath.Join(repo, "roadmap-dir")
+			if err := os.Mkdir(path, 0700); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}, "not a regular file"},
+		{"unreadable", func(t *testing.T, repo string) string {
+			path := filepath.Join(repo, "unreadable.md")
+			if err := os.WriteFile(path, []byte("# Roadmap\n"), 0000); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}, "not readable"},
+		{"invalid metadata", func(t *testing.T, repo string) string {
+			path := filepath.Join(repo, "invalid.md")
+			if err := os.WriteFile(path, []byte("## APP-002 — Broken\n\n- Kind: task\n- Status: unknown\n- Priority: high\n- Parent: none\n- Depends on: none\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}, "invalid roadmap"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := testRepo(t)
+			root := t.TempDir()
+			selected := tc.make(t, repo)
+			opened := false
+			s, err := Run(context.Background(), Options{Repository: repo, Root: root, Roadmap: selected}, func(context.Context, string, io.Writer) (Runner, error) {
+				opened = true
+				return nil, nil
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || opened || s.Phase != "" {
+				t.Fatalf("invalid roadmap result: %+v err=%v opened=%v", s, err, opened)
+			}
+			dir, storageErr := storage(repo, root)
+			if storageErr != nil {
+				t.Fatal(storageErr)
+			}
+			if _, statErr := os.Stat(statePath(dir)); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("invalid roadmap created active state: %v", statErr)
+			}
+		})
+	}
 }
 func TestInvocationLimitStopsBeforeReview(t *testing.T) {
 	repo := testRepo(t)

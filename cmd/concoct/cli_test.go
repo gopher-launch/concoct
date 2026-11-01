@@ -32,6 +32,16 @@ func TestApprovalAndAnswerOptions(t *testing.T) {
 	if err != nil || o.ApproveReviewLimitIncrease != 5 || o.ApproveInvocationLimitIncrease != 14 {
 		t.Fatalf("parse limit increases: %+v %v", o, err)
 	}
+	o, _, _, _, err = parse([]string{"run", "--roadmap", "deploy/roadmap.md"})
+	if err != nil || o.Roadmap != "deploy/roadmap.md" {
+		t.Fatalf("parse roadmap: %+v %v", o, err)
+	}
+	if _, _, _, _, err := parse([]string{"status", "--roadmap", "roadmap.md"}); err == nil {
+		t.Fatal("status accepted run-only roadmap selection")
+	}
+	if _, _, _, _, err := parse([]string{"run", "--roadmap", ""}); err == nil {
+		t.Fatal("accepted empty roadmap path")
+	}
 	for _, args := range [][]string{{"run", "--approve-review-limit-increase", "0"}, {"run", "--approve-invocation-limit-increase", "bad"}, {"status", "--approve-review-limit-increase", "5"}} {
 		if _, _, _, _, err := parse(args); err == nil {
 			t.Fatalf("accepted invalid increase args %v", args)
@@ -50,9 +60,9 @@ func TestCompletedPresentationOffersNextRunAndHistory(t *testing.T) {
 }
 func TestApprovalAndBlockerPresentation(t *testing.T) {
 	var out bytes.Buffer
-	s := handoff.State{Phase: "awaiting_approval", TaskID: "APP-002", Candidate: "abc123", ApprovedCommit: "abc123", ReagentSummary: "implemented", ReviewSummary: "approved", ReviewEvidence: "/tmp/review-01.md", Attempts: 2, MaxAttempts: 12, Assessments: 1, MaxAssessments: 3}
+	s := handoff.State{Phase: "awaiting_approval", Roadmap: "/tmp/roadmaps/deploy plan.md", TaskID: "APP-002", Candidate: "abc123", ApprovedCommit: "abc123", ReagentSummary: "implemented", ReviewSummary: "approved", ReviewEvidence: "/tmp/review-01.md", Attempts: 2, MaxAttempts: 12, Assessments: 1, MaxAssessments: 3}
 	display(&out, s, false)
-	for _, want := range []string{"Task: APP-002", "Candidate: abc123", "Reagent summary: implemented", "Iragent summary: approved", "Review evidence: /tmp/review-01.md", "concoct run --approve abc123"} {
+	for _, want := range []string{"Roadmap: /tmp/roadmaps/deploy plan.md", "Task: APP-002", "Candidate: abc123", "Reagent summary: implemented", "Iragent summary: approved", "Review evidence: /tmp/review-01.md", "--roadmap '/tmp/roadmaps/deploy plan.md' --approve abc123"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %s", want, out.String())
 		}
@@ -61,7 +71,7 @@ func TestApprovalAndBlockerPresentation(t *testing.T) {
 	s.Phase = "blocked"
 	s.Question = &codexapp.RoleQuestion{Text: "Choose mode?"}
 	display(&out, s, false)
-	if !strings.Contains(out.String(), "Question: Choose mode?") || !strings.Contains(out.String(), "concoct run --answer TEXT") {
+	if !strings.Contains(out.String(), "Question: Choose mode?") || !strings.Contains(out.String(), "--roadmap '/tmp/roadmaps/deploy plan.md' --answer TEXT") {
 		t.Fatalf("blocker output: %s", out.String())
 	}
 	out.Reset()
@@ -94,11 +104,11 @@ func TestDiagnosticsAndQuietSummaryPresentation(t *testing.T) {
 func TestLimitExhaustedPresentationBuildsContextualAuthorizationCommand(t *testing.T) {
 	var out bytes.Buffer
 	s := handoff.State{
-		Phase: "limit_exhausted", LimitPhase: "correcting", Repository: "/tmp/repo with space", Verdict: "changes_requested",
+		Phase: "limit_exhausted", LimitPhase: "correcting", Repository: "/tmp/repo with space", Roadmap: "/tmp/repo with space/deploy plans/roadmap.md", Verdict: "changes_requested",
 		Attempts: 12, MaxAttempts: 12, Assessments: 3, MaxAssessments: 3,
 	}
 	displayWithContext(&out, s, false, commandContext{executable: "/tmp/bin dir/concoct's", options: handoff.Options{Root: "/tmp/root;literal"}})
-	for _, want := range []string{"--repo '/tmp/repo with space'", "--root '/tmp/root;literal'", "--approve-invocation-limit-increase 13", "--approve-review-limit-increase 4", "new total ceilings"} {
+	for _, want := range []string{"--repo '/tmp/repo with space'", "--root '/tmp/root;literal'", "--roadmap '/tmp/repo with space/deploy plans/roadmap.md'", "--approve-invocation-limit-increase 13", "--approve-review-limit-increase 4", "new total ceilings"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %s", want, out.String())
 		}

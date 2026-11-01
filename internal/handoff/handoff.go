@@ -15,6 +15,7 @@ import (
 
 	"github.com/gopher-launch/concoct/internal/codexapp"
 	"github.com/gopher-launch/concoct/internal/dispatch"
+	roadmapdoc "github.com/gopher-launch/concoct/internal/roadmap"
 	"github.com/gopher-launch/concoct/internal/stop"
 )
 
@@ -22,6 +23,8 @@ import (
 // task.md and numbered review files, which agents maintain with ordinary tools.
 type State struct {
 	Repository       string                                  `json:"repository"`
+	Roadmap          string                                  `json:"roadmap,omitempty"`
+	Capabilities     string                                  `json:"capabilities,omitempty"`
 	Parent           string                                  `json:"parent"`
 	Base             string                                  `json:"base"`
 	Branch           string                                  `json:"branch,omitempty"`
@@ -79,7 +82,7 @@ type InFlight struct {
 }
 
 type Options struct {
-	Repository, Root, Codex                                    string
+	Repository, Root, Codex, Roadmap                           string
 	Approve, Answer                                            string
 	ReagentModel, IragentModel, ReagentEffort, IragentEffort   string
 	MaxAttempts, MaxAssessments                                int
@@ -184,6 +187,100 @@ func canonical(repo string) (string, error) {
 		return "", err
 	}
 	return filepath.EvalSymlinks(abs)
+}
+
+func resolvePath(repo, path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repo, path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+func readDocument(path, label string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s %q: %w", label, path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s %q is not a regular file", label, path)
+	}
+	if info.Mode().Perm()&0444 == 0 {
+		return nil, fmt.Errorf("%s %q is not readable", label, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s %q: %w", label, path, err)
+	}
+	return data, nil
+}
+
+func chooseCapabilities(repo, selectedRoadmap string) (string, error) {
+	candidates := []string{filepath.Join(filepath.Dir(selectedRoadmap), "capabilities.md")}
+	root := filepath.Join(repo, "capabilities.md")
+	if candidates[0] != root {
+		candidates = append(candidates, root)
+	}
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil {
+			if !info.Mode().IsRegular() {
+				return "", fmt.Errorf("capabilities %q is not a regular file", candidate)
+			}
+			resolved, err := filepath.EvalSymlinks(candidate)
+			if err != nil {
+				return "", err
+			}
+			return resolved, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("capabilities %q: %w", candidate, err)
+		}
+	}
+	return "", nil
+}
+
+func validateRoadmap(path, capabilities string) error {
+	roadmapMarkdown, err := readDocument(path, "roadmap")
+	if err != nil {
+		return err
+	}
+	var capabilitiesMarkdown []byte
+	if capabilities != "" {
+		capabilitiesMarkdown, err = readDocument(capabilities, "capabilities")
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := roadmapdoc.Parse(roadmapMarkdown, capabilitiesMarkdown); err != nil {
+		return fmt.Errorf("invalid roadmap %q: %w", path, err)
+	}
+	return nil
+}
+
+func selectRoadmap(repo, requested string) (string, string, error) {
+	if requested == "" {
+		requested = "roadmap.md"
+	}
+	path, err := resolvePath(repo, requested)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve roadmap %q: %w", requested, err)
+	}
+	capabilities, err := chooseCapabilities(repo, path)
+	if err != nil {
+		return "", "", err
+	}
+	if err := validateRoadmap(path, capabilities); err != nil {
+		return "", "", err
+	}
+	return path, capabilities, nil
 }
 func storage(repo, root string) (string, error) {
 	common, err := git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -341,6 +438,33 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	if s.Phase == "no_suitable_work" {
 		s = State{}
 	}
+	if s.Phase == "" {
+		selected, capabilities, err := selectRoadmap(repo, o.Roadmap)
+		if err != nil {
+			return s, err
+		}
+		s.Roadmap, s.Capabilities = selected, capabilities
+	} else {
+		if s.Roadmap == "" {
+			selected, capabilities, err := selectRoadmap(repo, "")
+			if err != nil {
+				return s, err
+			}
+			s.Roadmap, s.Capabilities = selected, capabilities
+		}
+		if o.Roadmap != "" {
+			selected, err := resolvePath(repo, o.Roadmap)
+			if err != nil {
+				return s, fmt.Errorf("resolve roadmap %q: %w", o.Roadmap, err)
+			}
+			if selected != s.Roadmap {
+				return s, fmt.Errorf("active work uses roadmap %s; cannot switch to %s", s.Roadmap, selected)
+			}
+		}
+		if err := validateRoadmap(s.Roadmap, s.Capabilities); err != nil {
+			return s, err
+		}
+	}
 	if s.Phase != "" && (o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
 		return s, fmt.Errorf("role settings and limits cannot change an active run")
 	}
@@ -429,7 +553,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		if err != nil {
 			return s, err
 		}
-		s = State{Repository: repo, Parent: branch, Base: base, Phase: "engineering", Profiles: map[dispatch.Role]codexapp.RoleSettings{}, Threads: map[string]string{}, RoleTurns: map[string]bool{}, MaxAttempts: 12, MaxAssessments: 3, TurnTimeout: o.TurnTimeout, StallTimeout: o.StallTimeout}
+		s = State{Repository: repo, Roadmap: s.Roadmap, Capabilities: s.Capabilities, Parent: branch, Base: base, Phase: "engineering", Profiles: map[dispatch.Role]codexapp.RoleSettings{}, Threads: map[string]string{}, RoleTurns: map[string]bool{}, MaxAttempts: 12, MaxAssessments: 3, TurnTimeout: o.TurnTimeout, StallTimeout: o.StallTimeout}
 		if o.MaxAttempts > 0 {
 			s.MaxAttempts = o.MaxAttempts
 		}
@@ -725,9 +849,12 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		_ = save(dir, s)
 		return s, nil
 	}
+	prompt, err := promptForStep(s, dir, step)
+	if err != nil {
+		return s, err
+	}
 	settings := s.Profiles[role]
 	var thread codexapp.Thread
-	var err error
 	if id := s.Threads[string(role)]; id != "" {
 		thread, err = runner.ResumeThread(ctx, id, s.RoleTurns[string(role)], settings)
 	}
@@ -743,7 +870,6 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 	if err = save(dir, s); err != nil {
 		return s, err
 	}
-	prompt := promptForStep(s, dir, step)
 	turnCtx := ctx
 	var activity chan struct{}
 	cancel := func() {}

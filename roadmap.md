@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-10-29
+updated: 2026-11-01
 ---
 
 # Concoct implementation roadmap
@@ -181,38 +181,3 @@ Concoct coordinates one task through reagent implementation, independent iragent
 - Run applicable formatting, tests, vet, build and whitespace checks. No live provider trial is required solely for this change.
 
 **Scope boundary:** Keep task suitability and rejection reasoning in reagent instructions. Concoct handles the CLI argument, prompt context and deterministic result routing; it does not introduce a host-side eligibility engine.
-
-## CON-077 — Select the roadmap for a project run
-
-- Kind: task
-- Status: ready
-- Priority: high
-- Parent: none
-- Depends on: none
-
-**Objective:** Let the operator choose which roadmap agents work from when starting fresh work in a repository containing multiple roadmaps.
-
-**Acceptance criteria:**
-
-- Add `concoct run --roadmap PATH`. When omitted for fresh work, retain the existing default roadmap behavior.
-- Resolve relative paths against the selected repository root; accept absolute paths. Validate that the selected file exists, is readable and satisfies the supported roadmap format before agent dispatch. Report invalid inputs clearly without creating active work.
-- Supply the selected roadmap’s path and contents to reagent as the authoritative backlog for task selection. Reagent selects work from that roadmap while following applicable repository and directory-specific instructions.
-- Carry the selected roadmap through implementation, independent review, correction and integration context. Agents reconcile the selected roadmap and the capability documentation applicable to that work; they must not assume the repository-root roadmap is the delivery target.
-- Persist the resolved roadmap path with active work before dispatch. Subsequent `concoct run` invocations continue using that recorded roadmap when the flag is omitted.
-- An explicit roadmap argument on continuation must identify the recorded roadmap. Reject attempts to switch an active run to another roadmap before dispatch, preserving current work and explaining the mismatch.
-- Include the selected roadmap in status, run summaries and external task context. Task IDs must be interpreted within that roadmap’s context so identical IDs in different roadmaps are not confused.
-- Preserve `--roadmap` in generated continuation commands alongside executable, repository and evidence-root context.
-- Retain the existing repository execution lock and one-active-task workflow. Selecting another roadmap does not authorize concurrent work or redirect an active task.
-- Update CLI help and operator documentation with examples such as:
-  - `concoct run --roadmap roadmap.md`
-  - `concoct run --roadmap deploy/roadmap.md`
-
-**Verification:**
-
-- Use a disposable repository containing independent root and deployment roadmaps. Verify the selected path and backlog reach reagent, iragent and correction/integration prompts.
-- Cover default selection, relative and absolute paths, paths containing spaces, missing/unreadable files and invalid roadmap metadata.
-- Verify recorded roadmap context survives reopening and continuation without the flag; matching explicit paths are accepted and different roadmaps are rejected.
-- Verify identical task IDs in separate roadmaps retain distinct roadmap context, reconciliation targets the selected file, and generated commands preserve the selection.
-- Run applicable formatting, tests, vet, build and whitespace checks. No live provider trial is required solely for this change.
-
-**Scope boundary:** Select one roadmap for the existing sequential workflow. Cross-roadmap dependency resolution and concurrent execution remain separate work.

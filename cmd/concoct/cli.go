@@ -103,6 +103,11 @@ func parse(args []string) (handoff.Options, string, bool, bool, error) {
 			o.Repository = value
 		case "root":
 			o.Root = value
+		case "roadmap":
+			if value == "" {
+				return o, "", false, false, fmt.Errorf("roadmap path must not be empty")
+			}
+			o.Roadmap = value
 		case "codex":
 			o.Codex = value
 		case "approve":
@@ -153,7 +158,7 @@ func parse(args []string) (handoff.Options, string, bool, bool, error) {
 			return o, "", false, false, fmt.Errorf("unknown option --%s", key)
 		}
 	}
-	if command == "status" && (o.Codex != "" || o.Approve != "" || o.Answer != "" || o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.ApproveReviewLimitIncrease > 0 || o.ApproveInvocationLimitIncrease > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
+	if command == "status" && (o.Codex != "" || o.Roadmap != "" || o.Approve != "" || o.Answer != "" || o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.ApproveReviewLimitIncrease > 0 || o.ApproveInvocationLimitIncrease > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
 		return o, "", false, false, fmt.Errorf("execution options require run")
 	}
 	return o, command, jsonMode, quiet, nil
@@ -177,6 +182,9 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 		return
 	}
 	fmt.Fprintf(w, "Concoct: %s\n", strings.ReplaceAll(s.Phase, "_", "-"))
+	if s.Roadmap != "" {
+		fmt.Fprintf(w, "Roadmap: %s\n", s.Roadmap)
+	}
 	if s.TaskID != "" {
 		fmt.Fprintf(w, "Task: %s\n", s.TaskID)
 	}
@@ -229,17 +237,18 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 		fmt.Fprintf(w, "Independent assessments: %d/%d\n", s.Assessments, s.MaxAssessments)
 	}
 	if s.Phase == "awaiting_approval" {
-		fmt.Fprintf(w, "To authorize local integration of this exact commit: concoct run --approve %s\n", s.ApprovedCommit)
+		args := continuationArgs(command, s)
+		args = append(args, "--approve", s.ApprovedCommit)
+		fmt.Fprintln(w, "To authorize local integration of this exact commit:", shellCommand(command.executable, args...))
 	}
 	if s.Phase == "blocked" {
-		fmt.Fprintln(w, "To answer: concoct run --answer TEXT")
+		args := continuationArgs(command, s)
+		args = append(args, "--answer", "TEXT")
+		fmt.Fprintln(w, "To answer:", shellCommand(command.executable, args...))
 	}
 	if s.Phase == "limit_exhausted" {
-		args := []string{"run", "--repo", s.Repository}
+		args := continuationArgs(command, s)
 		hasIncrease := false
-		if command.options.Root != "" {
-			args = append(args, "--root", command.options.Root)
-		}
 		if s.Attempts >= s.MaxAttempts {
 			args = append(args, "--approve-invocation-limit-increase", strconv.Itoa(s.MaxAttempts+1))
 			hasIncrease = true
@@ -258,7 +267,21 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 	}
 }
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version")
+	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap.")
+}
+
+func continuationArgs(command commandContext, s handoff.State) []string {
+	args := []string{"run"}
+	if s.Repository != "" {
+		args = append(args, "--repo", s.Repository)
+	}
+	if command.options.Root != "" {
+		args = append(args, "--root", command.options.Root)
+	}
+	if s.Roadmap != "" {
+		args = append(args, "--roadmap", s.Roadmap)
+	}
+	return args
 }
 
 func shellCommand(executable string, args ...string) string {
