@@ -93,7 +93,7 @@ Concoct coordinates one task through reagent implementation, independent iragent
 
 - Kind: task
 - Status: ready
-- Priority: medium
+- Priority: high
 - Parent: none
 - Depends on: none
 
@@ -102,7 +102,7 @@ Concoct coordinates one task through reagent implementation, independent iragent
 **Acceptance criteria:**
 
 - Development builds report the base development version plus a Git revision identifier, for example `0.5.0-dev+819a7b1`.
-- Support the ordinary local build workflow, including `go build -o /tmp/concoct`, without requiring the operator to remember custom linker flags. Prefer available Go build/VCS metadata over a runtime Git lookup.
+- Support the ordinary local build workflows, including `go build -o /tmp/concoct` and `go install ./cmd/concoct`, without requiring the operator to remember custom linker flags. Prefer available Go build/VCS metadata over a runtime Git lookup.
 - Use a documented, consistent short revision length sufficient for the project. If revision metadata is unavailable, report that honestly with a documented fallback rather than inventing a hash.
 - Preserve release-version reporting and document how the development revision is obtained.
 
