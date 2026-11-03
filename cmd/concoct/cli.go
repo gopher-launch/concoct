@@ -25,7 +25,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 		return 0
 	}
 	if args[0] == "version" || args[0] == "--version" {
-		fmt.Fprintln(stdout, version)
+		fmt.Fprintln(stdout, currentVersion())
 		return 0
 	}
 	o, command, jsonMode, quiet, err := parse(args)

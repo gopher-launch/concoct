@@ -4,7 +4,7 @@ This document describes current delivered behavior, organized by capability. It 
 
 ## Build and operator interface
 
-- The Go 1.27.2 module retains the `github.com/gopher-launch/concoct` identity and license. The CLI builds and reports help and version.
+- The Go 1.27.2 module retains the `github.com/gopher-launch/concoct` identity and license. The CLI builds and reports help and version. Development versions identify the embedded Git revision using a documented 12-character suffix, flag modified checkouts, and report `unknown` when Go's VCS build metadata is unavailable; release strings remain unchanged.
 - A read-only Markdown parser validates bounded task, feature and epic metadata, references and dependency cycles. It reports ready tasks whose dependencies are delivered, without selecting work itself.
 - Concoct resolves supported reagent and iragent model/effort settings from explicit invocation choices over the provider-recommended model. Default efforts are medium and high respectively. Role settings are retained with active work.
 - Contributor guidance and agent prompts keep the roadmap prospective: a delivered task's behavior is summarized here, its roadmap entry and satisfied dependencies are removed, and newly eligible tasks can be promoted. The original task scope remains in external task evidence for independent review. The parser still accepts older delivered-entry forms for compatibility.

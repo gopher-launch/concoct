@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-11-01
+updated: 2026-11-03
 ---
 
 # Concoct implementation roadmap
@@ -88,25 +88,6 @@ Concoct coordinates one task through reagent implementation, independent iragent
 - Keep any compatibility handling bounded to the affected coordinator record shape. Conflicting or insufficient structured metadata must not be converted into invented review history or guessed consumption; explain the limitation clearly.
 
 **Verification:** Add a representative pre-count approval record showing `1/3`, a fresh requested-changes/approval record showing `2/3`, and repeated-load/continuation checks with no duplicate counting. Verify limit enforcement and incomplete/conflicting metadata. Use fixtures; do not restart or modify the original live trial.
-
-## CON-071 — Include the source revision in development versions
-
-- Kind: task
-- Status: ready
-- Priority: high
-- Parent: none
-- Depends on: none
-
-**Objective:** Make development binaries distinguishable by source revision through `concoct version`.
-
-**Acceptance criteria:**
-
-- Development builds report the base development version plus a Git revision identifier, for example `0.5.0-dev+819a7b1`.
-- Support the ordinary local build workflows, including `go build -o /tmp/concoct` and `go install ./cmd/concoct`, without requiring the operator to remember custom linker flags. Prefer available Go build/VCS metadata over a runtime Git lookup.
-- Use a documented, consistent short revision length sufficient for the project. If revision metadata is unavailable, report that honestly with a documented fallback rather than inventing a hash.
-- Preserve release-version reporting and document how the development revision is obtained.
-
-**Verification:** Test version formatting with development, release and missing-metadata fixtures. Build from a disposable Git checkout using the ordinary command and confirm the displayed revision corresponds to that checkout. Run applicable repository checks.
 
 ## CON-072 — Organize external artifacts by readable project and task identity
 
