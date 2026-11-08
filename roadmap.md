@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # Concoct implementation roadmap
@@ -162,3 +162,26 @@ Concoct coordinates one task through reagent implementation, independent iragent
 - Run applicable formatting, tests, vet, build and whitespace checks. No live provider trial is required solely for this change.
 
 **Scope boundary:** Keep task suitability and rejection reasoning in reagent instructions. Concoct handles the CLI argument, prompt context and deterministic result routing; it does not introduce a host-side eligibility engine.
+
+## CON-079 — Resume an interrupted agent turn on explicit request
+
+- Kind: task
+- Status: ready
+- Priority: high
+- Parent: none
+- Depends on: none
+
+**Objective:** Make explicit `run --recover` continue the current in-flight work by invoking its agent, preferably in the saved session, without requiring Concoct to reconstruct the interrupted turn.
+
+**Context:** A Curu reagent turn stopped after a provider usage-limit failure with an existing session and uncommitted task work. Its older coordinator record has no process identities, pending-step field or pre-turn checkpoint. `run --recover` refuses with `cannot verify prior owned processes: no recorded process identities`; the status summary also prints an empty pending step. Current recovery deliberately clears the saved session and starts a fresh one. The operator uses this command when they know the agent turn stopped and want the agent to inspect and continue preserved work.
+
+**Acceptance criteria:**
+
+- Keep explicit operator intent as the boundary for continuing a failed or uncertain in-flight turn. A plain `run` remains stopped; the continuation stays on the recorded task, roadmap, repository and role and retains consumed invocation and assessment counts.
+- Attempt to resume the saved agent session first. If the session is unavailable, create a new session for the same role and give it enough current workflow, source and external evidence context to continue the in-flight work. Do not clear a usable session solely because the prior turn failed.
+- Treat absent or incomplete process identities, an absent pre-turn checkpoint and older missing step fields as missing diagnostics, not reasons to refuse an explicit continuation. Derive the pending step from durable workflow fields when possible, including the initial engineering turn before a task ID is reported. Do not require a source-change comparison to dispatch the agent.
+- Prompt the agent to inspect the preserved checkout and evidence, continue unfinished work and return the ordinary structured result for the step. Do not reset or clean the checkout, discard work, assume the prior turn completed, or replay task selection as fresh work when a task branch already exists.
+- Preserve the host's deterministic handoff boundaries: count a replacement invocation once, count only a valid completed independent assessment, require the exact reviewed candidate for approval and retain explicit operator authorization of the exact commit before integration. Source or evidence uncertainty should be given to the agent as context rather than being treated as an engineering verdict by Concoct.
+- Show a useful pending step in failure and continuation summaries when it can be inferred. Update CLI help, operator guidance and capability documentation to describe continuation semantics accurately. If a clearer flag name is adopted, keep `--recover` working as a compatible spelling.
+
+**Verification:** Use deterministic runner fixtures for the observed older Curu record shape with a saved session, no process identities, no checkpoint, no step field and dirty task work. Verify same-session continuation, unavailable-session fallback, preserved work and counts, and a nonblank inferred pending step. Cover review and integration continuations so an interrupted turn cannot manufacture an assessment or bypass exact-commit authorization. Check applicable formatting, tests, vet, build and whitespace; no live provider trial is required.
