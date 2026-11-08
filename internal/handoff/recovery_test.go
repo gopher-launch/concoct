@@ -21,9 +21,11 @@ type recoveryRunner struct {
 	disposition       string
 	prompts           []string
 	threads           []string
+	resumed           []string
 	settings          []codexapp.RoleSettings
 	fail              bool
 	startErr          error
+	resumeOK          bool
 }
 
 func (r *recoveryRunner) Models(context.Context) ([]codexapp.Model, error) { return r.models, nil }
@@ -39,8 +41,13 @@ func (r *recoveryRunner) StartThread(_ context.Context, cwd string, settings cod
 	r.threads = append(r.threads, id)
 	return codexapp.Thread{ID: id}, nil
 }
-func (r *recoveryRunner) ResumeThread(context.Context, string, bool, codexapp.RoleSettings) (codexapp.Thread, error) {
-	return codexapp.Thread{}, errors.New("recovery must start a fresh thread")
+func (r *recoveryRunner) ResumeThread(_ context.Context, id string, _ bool, settings codexapp.RoleSettings) (codexapp.Thread, error) {
+	r.resumed = append(r.resumed, id)
+	if r.resumeOK {
+		r.settings = append(r.settings, settings)
+		return codexapp.Thread{ID: id}, nil
+	}
+	return codexapp.Thread{}, errors.New("saved session unavailable")
 }
 func (r *recoveryRunner) RunRoleTurn(_ context.Context, id, prompt string, settings codexapp.RoleSettings, _ func(codexapp.Event)) (codexapp.TurnOutcome, error) {
 	r.prompts = append(r.prompts, prompt)
@@ -121,6 +128,9 @@ func TestRecoverPreservesReagentWorkAndStartsFreshSession(t *testing.T) {
 	if err != nil || recovered.Phase != "blocked" || recovered.Attempts != 2 || len(recovered.Recoveries) != 1 || len(runner.threads) != 1 {
 		t.Fatalf("recovery: %+v %v threads=%v", recovered, err, runner.threads)
 	}
+	if len(runner.resumed) != 1 || runner.resumed[0] != "failed-thread" {
+		t.Fatalf("saved session was not attempted before fallback: %+v", runner.resumed)
+	}
 	if body, err := os.ReadFile(filepath.Join(repo, "unfinished.txt")); err != nil || string(body) != "preserve me\n" {
 		t.Fatalf("preserved work changed: %q %v", body, err)
 	}
@@ -130,6 +140,55 @@ func TestRecoverPreservesReagentWorkAndStartsFreshSession(t *testing.T) {
 	audit := recovered.Recoveries[0]
 	if audit.ReplacementThread != "replacement-reagent" || audit.ReplacementProfile.Model != "replacement-model" || audit.PriorProfile.Model != "test-model" {
 		t.Fatalf("recovery audit/profile: %+v", audit)
+	}
+}
+
+func TestRecoverOlderRecordResumesSavedSessionWithoutDiagnostics(t *testing.T) {
+	repo, root := testRepo(t), t.TempDir()
+	gitTest(repo, "switch", "-qc", "task/CURU-001")
+	if err := os.WriteFile(filepath.Join(repo, "unfinished.txt"), []byte("preserve dirty work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir, s := seedStoppedState(t, repo, root, "execution_failed", "engineering")
+	s.PendingStep = ""
+	s.TaskID = "CURU-001"
+	s.Branch = "task/CURU-001"
+	s.Assessments = 1
+	s.InFlight = &InFlight{Role: dispatch.Reagent, ThreadID: "failed-thread", Processes: []stop.Identity{{PID: 999999}}}
+	s.Threads[string(dispatch.Reagent)] = "failed-thread"
+	if err := save(dir, s); err != nil {
+		t.Fatal(err)
+	}
+
+	plain, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) {
+		t.Fatal("plain run dispatched an agent")
+		return nil, nil
+	})
+	if err != nil || plain.Phase != "execution_failed" || plain.PendingStep != "engineering" || plain.Attempts != 1 || plain.Assessments != 1 {
+		t.Fatalf("plain run changed stopped record: %+v %v", plain, err)
+	}
+	status, err := Status(Options{Repository: repo, Root: root})
+	if err != nil || status.PendingStep != "engineering" {
+		t.Fatalf("status did not infer pending step: %+v %v", status, err)
+	}
+
+	runner := &recoveryRunner{repo: repo, evidenceDir: dir, models: recoveryModels(), disposition: "decision_required", resumeOK: true}
+	recovered, err := Run(context.Background(), Options{Repository: repo, Root: root, Recover: true}, func(context.Context, string, io.Writer) (Runner, error) { return runner, nil })
+	if err != nil || recovered.Phase != "blocked" || recovered.Attempts != 2 || recovered.Assessments != 1 || len(runner.resumed) != 1 || len(runner.threads) != 0 {
+		t.Fatalf("older-record recovery: %+v %v resumed=%v starts=%v", recovered, err, runner.resumed, runner.threads)
+	}
+	if recovered.Recoveries[0].ReplacementThread != "failed-thread" || !strings.Contains(runner.prompts[0], "No pre-turn checkpoint was recorded") || !strings.Contains(runner.prompts[0], "unfinished.txt") {
+		t.Fatalf("recovery did not retain session/current context: audit=%+v prompt=%s", recovered.Recoveries[0], runner.prompts[0])
+	}
+	if body, err := os.ReadFile(filepath.Join(repo, "unfinished.txt")); err != nil || string(body) != "preserve dirty work\n" {
+		t.Fatalf("dirty work changed: %q %v", body, err)
+	}
+}
+
+func TestPendingRecoveryStepInfersInitialEngineeringBeforeTaskSelection(t *testing.T) {
+	step, err := pendingRecoveryStep(State{Phase: "execution_failed", Threads: map[string]string{"reagent": "saved-thread"}})
+	if err != nil || step != "engineering" {
+		t.Fatalf("initial engineering inference: %q %v", step, err)
 	}
 }
 

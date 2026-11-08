@@ -82,7 +82,7 @@ func displayRecoveryDispatch(w io.Writer, s handoff.State, jsonMode bool) {
 		})
 		return
 	}
-	fmt.Fprintf(w, "[Concoct] Recovering failed %s step %s with a fresh session.\n", r.Role, r.Step)
+	fmt.Fprintf(w, "[Concoct] Recovering failed %s step %s by resuming its saved session when available.\n", r.Role, r.Step)
 	fmt.Fprintf(w, "[Concoct] Consumed limits: %d/%d invocations, %d/%d independent assessments.\n", s.Attempts, s.MaxAttempts, s.Assessments, s.MaxAssessments)
 	if r.Diagnostic != "" {
 		fmt.Fprintln(w, "[Concoct] Prior diagnostics:", r.Diagnostic)
@@ -266,14 +266,18 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 	if s.Diagnostics != "" {
 		fmt.Fprintln(w, "Provider diagnostics:", s.Diagnostics)
 	}
-	if (s.Phase == "execution_failed" || s.Phase == "execution_uncertain") && s.InFlight != nil {
+	if s.Phase == "execution_failed" || s.Phase == "execution_uncertain" {
 		step := s.PendingStep
-		if step == "" {
+		role := handoffRoleForStep(step)
+		if s.InFlight != nil && step == "" {
 			step = s.InFlight.Step
 		}
-		fmt.Fprintf(w, "Failed role: %s\n", s.InFlight.Role)
+		if s.InFlight != nil && s.InFlight.Role != "" {
+			role = string(s.InFlight.Role)
+		}
+		fmt.Fprintf(w, "Failed role: %s\n", role)
 		fmt.Fprintf(w, "Pending step: %s\n", strings.ReplaceAll(step, "_", "-"))
-		fmt.Fprintln(w, "Proposed recovery: inspect preserved source and evidence, verify prior processes ended, then dispatch a fresh session for the failed role.")
+		fmt.Fprintln(w, "Proposed recovery: inspect preserved source and evidence, then continue the failed role in its saved session or a contextual replacement.")
 	}
 	if s.Phase == "recovering" && s.ActiveRecovery != nil {
 		fmt.Fprintf(w, "Failed role: %s\n", s.ActiveRecovery.Role)
@@ -281,7 +285,7 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 		if s.ActiveRecovery.Diagnostic != "" && s.ActiveRecovery.Diagnostic != s.Diagnostics {
 			fmt.Fprintln(w, "Prior provider diagnostics:", s.ActiveRecovery.Diagnostic)
 		}
-		fmt.Fprintln(w, "Proposed recovery: resume the recorded recovery request and dispatch its fresh replacement session.")
+		fmt.Fprintln(w, "Proposed recovery: resume the saved session when available, otherwise dispatch a contextual replacement session.")
 	}
 	fmt.Fprintf(w, "Invocations: %d/%d\n", s.Attempts, s.MaxAttempts)
 	if s.MaxAssessments > 0 {
@@ -324,7 +328,14 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 	}
 }
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --recover [replacement role model/effort option] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap. --recover explicitly replaces a failed or uncertain agent turn while preserving its source, evidence and consumed limits.")
+	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --recover [continued role model/effort option] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap. --recover explicitly continues a failed or uncertain agent turn, resuming its saved session when available and preserving source, evidence and consumed limits.")
+}
+
+func handoffRoleForStep(step string) string {
+	if step == "reviewing" {
+		return "iragent"
+	}
+	return "reagent"
 }
 
 func continuationArgs(command commandContext, s handoff.State) []string {

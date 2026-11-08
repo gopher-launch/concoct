@@ -445,6 +445,11 @@ func Status(o Options) (State, error) {
 	if s.Phase == "" {
 		return latestCompletion(dir, repo)
 	}
+	if s.PendingStep == "" && (s.Phase == "execution_failed" || s.Phase == "execution_uncertain" || s.Phase == "recovering") {
+		if step, stepErr := pendingRecoveryStep(s); stepErr == nil {
+			s.PendingStep = step
+		}
+	}
 	return s, nil
 }
 
@@ -606,6 +611,17 @@ func pendingRecoveryStep(s State) (string, error) {
 	return "", fmt.Errorf("stopped state does not identify one pending workflow step")
 }
 
+func hasCheckpoint(c Checkpoint) bool {
+	return c.Branch != "" || c.Head != "" || c.Worktree != "" || c.GitVisibleSHA256 != "" || len(c.Evidence) > 0
+}
+
+func recoveryChanges(before, observed Checkpoint) string {
+	if !hasCheckpoint(before) {
+		return "No pre-turn checkpoint was recorded. Treat the preserved checkout and external evidence as current context; do not infer what the interrupted turn completed.\nCurrent preserved context:\n" + checkpointChanges(before, observed)
+	}
+	return checkpointChanges(before, observed)
+}
+
 func recoveryRole(step string) dispatch.Role {
 	if step == "reviewing" {
 		return dispatch.Iragent
@@ -700,6 +716,12 @@ func refreshPreparedRecovery(dir string, s State) (State, error) {
 	if s.ActiveRecovery == nil || s.Phase != "recovering" {
 		return s, fmt.Errorf("no prepared recovery to refresh")
 	}
+	if s.Threads == nil {
+		s.Threads = make(map[string]string)
+	}
+	if s.Threads[string(s.ActiveRecovery.Role)] == "" && s.ActiveRecovery.PriorThread != "" {
+		s.Threads[string(s.ActiveRecovery.Role)] = s.ActiveRecovery.PriorThread
+	}
 	partialOriginal, archive := "", ""
 	var err error
 	if s.ActiveRecovery.Step == "reviewing" {
@@ -719,7 +741,7 @@ func refreshPreparedRecovery(dir string, s State) (State, error) {
 		return s, fmt.Errorf("observe prepared recovery source and evidence: %w", err)
 	}
 	s.ActiveRecovery.Observed = observed
-	s.ActiveRecovery.Changes = checkpointChanges(s.ActiveRecovery.Before, observed)
+	s.ActiveRecovery.Changes = recoveryChanges(s.ActiveRecovery.Before, observed)
 	var bindingErr error
 	switch s.ActiveRecovery.Step {
 	case "reviewing":
@@ -760,22 +782,28 @@ func prepareRecovery(dir string, s State) (State, error) {
 	if err != nil {
 		return s, err
 	}
-	if s.InFlight == nil {
-		return s, fmt.Errorf("stopped turn lacks its pre-turn checkpoint and process identities; inspect and resolve it manually")
-	}
-	if s.InFlight.Step != "" && s.InFlight.Step != step {
+	if s.InFlight != nil && s.InFlight.Step != "" && s.InFlight.Step != step {
 		return s, fmt.Errorf("stopped turn step %q conflicts with pending step %q", s.InFlight.Step, step)
 	}
-	if s.InFlight.Role != "" && s.InFlight.Role != recoveryRole(step) {
+	if s.InFlight != nil && s.InFlight.Role != "" && s.InFlight.Role != recoveryRole(step) {
 		return s, fmt.Errorf("stopped turn role %q conflicts with pending %s step", s.InFlight.Role, step)
 	}
-	if !s.InFlight.Terminated {
-		inactive, err := stop.Inactive(s.InFlight.Processes)
+	if s.InFlight != nil && !s.InFlight.Terminated {
+		validProcesses := make([]stop.Identity, 0, len(s.InFlight.Processes))
+		for _, identity := range s.InFlight.Processes {
+			if identity.PID > 0 && identity.Start > 0 {
+				validProcesses = append(validProcesses, identity)
+			}
+		}
+		inactive, err := true, error(nil)
+		if len(validProcesses) > 0 {
+			inactive, err = stop.Inactive(validProcesses)
+		}
 		if err != nil {
 			return s, fmt.Errorf("cannot verify prior owned processes: %w", err)
 		}
 		if !inactive {
-			return s, fmt.Errorf("prior %s turn or an owned process remains active; recovery refused", s.InFlight.Role)
+			return s, fmt.Errorf("prior %s turn or an owned process remains active; recovery refused", recoveryRole(step))
 		}
 	}
 	observed, err := checkpoint(s, dir)
@@ -794,8 +822,16 @@ func prepareRecovery(dir string, s State) (State, error) {
 			return s, err
 		}
 	}
-	recovery := Recovery{RequestedAt: time.Now().UTC(), PriorPhase: s.Phase, Role: recoveryRole(step), Step: step, Diagnostic: s.Diagnostics, PriorError: s.LastError, Before: s.InFlight.Checkpoint, Observed: observed, PriorThread: s.InFlight.ThreadID, IntegrationParent: recoveryParent}
-	recovery.Changes = checkpointChanges(recovery.Before, recovery.Observed)
+	before := Checkpoint{}
+	priorThread := s.Threads[string(recoveryRole(step))]
+	if s.InFlight != nil {
+		before = s.InFlight.Checkpoint
+		if s.InFlight.ThreadID != "" {
+			priorThread = s.InFlight.ThreadID
+		}
+	}
+	recovery := Recovery{RequestedAt: time.Now().UTC(), PriorPhase: s.Phase, Role: recoveryRole(step), Step: step, Diagnostic: s.Diagnostics, PriorError: s.LastError, Before: before, Observed: observed, PriorThread: priorThread, IntegrationParent: recoveryParent}
+	recovery.Changes = recoveryChanges(recovery.Before, recovery.Observed)
 	partialOriginal := ""
 	if step == "reviewing" && s.TaskID != "" {
 		partialOriginal, recovery.ArchivedEvidence, err = archivePartialReview(dir, s, recovery.RequestedAt)
@@ -814,8 +850,9 @@ func prepareRecovery(dir string, s State) (State, error) {
 	if s.RoleTurns == nil {
 		s.RoleTurns = make(map[string]bool)
 	}
-	s.Threads[string(recovery.Role)] = ""
-	s.RoleTurns[string(recovery.Role)] = false
+	if recovery.PriorThread != "" {
+		s.Threads[string(recovery.Role)] = recovery.PriorThread
+	}
 	s.InFlight = nil
 	if err := save(dir, s); err != nil {
 		if partialOriginal != "" {
@@ -941,6 +978,14 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		}
 		if !o.Recover {
 			return s, nil
+		}
+	}
+	if s.PendingStep == "" && (s.Phase == "execution_failed" || s.Phase == "execution_uncertain" || s.Phase == "recovering") {
+		if step, stepErr := pendingRecoveryStep(s); stepErr == nil {
+			s.PendingStep = step
+			if err := save(dir, s); err != nil {
+				return s, err
+			}
 		}
 	}
 	if s.MaxAssessments == 0 {
