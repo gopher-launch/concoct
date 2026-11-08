@@ -1133,6 +1133,13 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	}
 	if s.ActiveRecovery != nil {
 		role := s.ActiveRecovery.Role
+		// Provider setup can fail after a replacement profile is saved. Keep the
+		// profile from before the first setup attempt as the recovery's audit
+		// baseline instead of replacing it with the already-selected replacement
+		// on an explicit retry.
+		if s.ActiveRecovery.PriorProfile == (codexapp.RoleSettings{}) {
+			s.ActiveRecovery.PriorProfile = s.Profiles[role]
+		}
 		if s.ActiveRecovery.RequestedModel != "" || s.ActiveRecovery.RequestedEffort != "" {
 			models, err := runner.Models(ctx)
 			if err != nil {
@@ -1146,7 +1153,6 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 			if err != nil {
 				return recoverySetupError(dir, s, err)
 			}
-			s.ActiveRecovery.PriorProfile = s.Profiles[role]
 			s.Profiles[role] = resolved[role]
 			s.ActiveRecovery.ReplacementProfile = resolved[role]
 			s.Recoveries[len(s.Recoveries)-1] = *s.ActiveRecovery
@@ -1154,7 +1160,6 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 				return s, err
 			}
 		} else {
-			s.ActiveRecovery.PriorProfile = s.Profiles[role]
 			s.ActiveRecovery.ReplacementProfile = s.Profiles[role]
 			s.Recoveries[len(s.Recoveries)-1] = *s.ActiveRecovery
 			if err := save(dir, s); err != nil {

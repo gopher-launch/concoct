@@ -260,6 +260,34 @@ func TestRecoveryValidatesOverrideBeforeReplacementDispatch(t *testing.T) {
 	}
 }
 
+func TestRecoverySetupRetryPreservesOriginalProfileAudit(t *testing.T) {
+	repo, root := testRepo(t), t.TempDir()
+	dir, s := seedStoppedState(t, repo, root, "execution_failed", "engineering")
+	originalReagent := s.Profiles[dispatch.Reagent]
+	originalIragent := s.Profiles[dispatch.Iragent]
+	if err := save(dir, s); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recoveryRunner{repo: repo, evidenceDir: dir, models: recoveryModels(), disposition: "decision_required", startErr: errors.New("start thread failed")}
+	failed, err := Run(context.Background(), Options{Repository: repo, Root: root, Recover: true, ReagentModel: "replacement-model", ReagentEffort: "high"}, func(context.Context, string, io.Writer) (Runner, error) { return runner, nil })
+	if err == nil || failed.Phase != "recovering" || failed.ActiveRecovery == nil || failed.Profiles[dispatch.Reagent].Model != "replacement-model" {
+		t.Fatalf("initial setup failure: %+v %v", failed, err)
+	}
+
+	runner.startErr = nil
+	recovered, err := Run(context.Background(), Options{Repository: repo, Root: root, Recover: true}, func(context.Context, string, io.Writer) (Runner, error) { return runner, nil })
+	if err != nil || recovered.Phase != "blocked" || recovered.Attempts != 2 || len(recovered.Recoveries) != 1 {
+		t.Fatalf("successful setup retry: %+v %v", recovered, err)
+	}
+	audit := recovered.Recoveries[0]
+	if audit.PriorProfile != originalReagent || audit.ReplacementProfile.Model != "replacement-model" || audit.ReplacementProfile.Effort != "high" {
+		t.Fatalf("retry corrupted profile audit: %+v", audit)
+	}
+	if recovered.Profiles[dispatch.Iragent] != originalIragent {
+		t.Fatalf("retry changed other role: got %+v want %+v", recovered.Profiles[dispatch.Iragent], originalIragent)
+	}
+}
+
 func TestRecoverySetupFailuresRemainDurablyStopped(t *testing.T) {
 	for _, tc := range []struct {
 		name string
