@@ -45,7 +45,37 @@ func promptForStep(s State, root, step string) (string, error) {
 	if s.Answer != "" && s.Question != nil {
 		prompt += fmt.Sprintf("\nOperator answer to your question %q: %q\nContinue the same step using this answer.\n", s.Question.Text, s.Answer)
 	}
+	if s.ActiveRecovery != nil {
+		r := s.ActiveRecovery
+		prompt += fmt.Sprintf(`
+This is an explicit operator-authorized recovery of a stopped %s turn. Start from the preserved checkout and evidence; do not reset, clean, discard, overwrite or infer a prior result. The pending workflow step is %s. The failed invocation remains consumed. Produce the ordinary structured result for this step before the workflow advances.
+
+Prior diagnostic: %s
+Prior failure: %s
+Prior thread: %s
+Base commit: %s
+Candidate commit: %s
+Last completed result: %s
+Task evidence: %s
+Review evidence: %s
+Observed changes since the pre-turn checkpoint:
+%s
+`, r.Role, r.Step, r.Diagnostic, r.PriorError, r.PriorThread, s.Base, s.Candidate, recoveryLastResult(s), s.Evidence, s.ReviewEvidence, r.Changes)
+		if r.ArchivedEvidence != "" {
+			prompt += fmt.Sprintf("Partial review prose was retained separately at %s. It is not an assessment or verdict. Write the replacement assessment to the ordinary review path named above.\n", r.ArchivedEvidence)
+		}
+		if r.Step == "integrating" {
+			prompt += "Reconcile the actual parent and task refs before any Git action. If the parent already names the authorized commit, verify the completed integration and report the ordinary result without repeating it. Never infer success from unfinished prose.\n"
+		}
+	}
 	return prompt, nil
+}
+
+func recoveryLastResult(s State) string {
+	if s.LastResult == nil {
+		return "none"
+	}
+	return fmt.Sprintf("%s by %s: %s", s.LastResult.Disposition, s.LastRole, s.LastResult.Summary)
 }
 
 // These templates give engineering judgment to the agents. Concoct routes

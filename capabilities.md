@@ -32,8 +32,8 @@ This document describes current delivered behavior, organized by capability. It 
 
 ## External state, continuation and execution limits
 
-- Atomic external state retains repository/roadmap/task context, role settings, current phase, latest result, invocation count and an in-flight turn marker saved before dispatch. An execution lock prevents concurrent runs.
-- Completed handoff boundaries can continue in a later `run`. An unrecorded or uncertain in-flight outcome stops later runs for inspection rather than automatically replaying work.
+- Atomic external state retains repository/roadmap/task context, role settings, current and pending steps, latest result, invocation count and an in-flight turn marker saved before dispatch. The marker binds the role/session to a pre-turn branch, HEAD, Git-visible source/evidence checkpoint and exact provider/owned-process identities. An execution lock prevents concurrent runs.
+- Completed handoff boundaries can continue in a later `run`. An unrecorded or uncertain in-flight outcome stops later plain runs for inspection rather than automatically replaying work. `run --recover` explicitly verifies process cessation and workflow/source bindings, records observed changes and starts a fresh failed-role session without resetting or cleaning preserved work. It archives partial review prose, counts only verified assessment results, safely reconciles integration refs and permits a provider-validated replacement-role model/effort override. Ambiguous or older unbound records remain stopped.
 - Generated approval, blocker-answer and execution-limit continuation commands retain the active roadmap together with executable, repository and explicitly selected external-root context.
 - Invocation and assessment limits stop further launches without resetting consumption. Limit-exhausted output identifies each exhausted allowance and suggests an explicitly authorized higher total ceiling. An operator can increase either or both ceilings for active work; Concoct atomically records the old and new totals, retains all consumption and workflow context, and resumes the pending step only when every applicable allowance permits it. Startup limit and role-setting flags remain immutable during active work.
 - Optional elapsed and inactivity limits apply to each turn; timeout stopping invokes provider cleanup and owned-process cessation checks.
@@ -44,6 +44,7 @@ This document describes current delivered behavior, organized by capability. It 
 - Structured commentary across supported phases displays its human summary without showing control fields or treating intermediate dispositions as workflow decisions. A completed result is announced only after handoff accepts its routing and evidence bindings, including phase-less final results.
 - Explicit JSON output and quiet progress suppression remain available.
 - Each provider execution retains startup and execution stderr in an external diagnostic file whose path appears in status. Recoverable stderr messages do not turn a successful agent result into failure. Execution failures produce concise terminal text and a retained diagnostic location.
+- Failed/uncertain status and recovery output identify the failed role, pending step, diagnostics, consumed limits, observed changes and proposed replacement action. Context-preserving `--recover` guidance explains safety refusals; JSON recovery dispatch records remain machine-readable.
 
 ## Demonstrated workflow and limits
 

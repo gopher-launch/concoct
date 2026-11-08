@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,10 +43,49 @@ func TestApprovalAndAnswerOptions(t *testing.T) {
 	if _, _, _, _, err := parse([]string{"run", "--roadmap", ""}); err == nil {
 		t.Fatal("accepted empty roadmap path")
 	}
+	o, command, _, _, err := parse([]string{"run", "--recover", "--iragent-model", "replacement"})
+	if err != nil || command != "run" || !o.Recover || o.IragentModel != "replacement" {
+		t.Fatalf("parse recovery: %+v %s %v", o, command, err)
+	}
+	if _, _, _, _, err := parse([]string{"status", "--recover"}); err == nil {
+		t.Fatal("status accepted recovery")
+	}
 	for _, args := range [][]string{{"run", "--approve-review-limit-increase", "0"}, {"run", "--approve-invocation-limit-increase", "bad"}, {"status", "--approve-review-limit-increase", "5"}} {
 		if _, _, _, _, err := parse(args); err == nil {
 			t.Fatalf("accepted invalid increase args %v", args)
 		}
+	}
+}
+
+func TestRecoveryPresentationIncludesContextualCommand(t *testing.T) {
+	var out bytes.Buffer
+	s := handoff.State{
+		Phase: "execution_failed", Repository: "/tmp/repo with space", Roadmap: "/tmp/repo with space/roadmap.md",
+		PendingStep: "reviewing", Diagnostics: "/tmp/provider.log", Attempts: 2, MaxAttempts: 12, Assessments: 0, MaxAssessments: 3,
+		InFlight: &handoff.InFlight{Role: "iragent", ThreadID: "failed-thread", Step: "reviewing"},
+	}
+	displayWithContext(&out, s, false, commandContext{executable: "/tmp/concoct tool", options: handoff.Options{Root: "/tmp/root;literal"}})
+	for _, want := range []string{"Failed role: iragent", "Pending step: reviewing", "Provider diagnostics: /tmp/provider.log", "Invocations: 2/12", "'/tmp/concoct tool' run --repo '/tmp/repo with space' --root '/tmp/root;literal' --roadmap '/tmp/repo with space/roadmap.md' --recover"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in %s", want, out.String())
+		}
+	}
+}
+
+func TestRecoveryDispatchPresentationIsReadableAndJSONSafe(t *testing.T) {
+	s := handoff.State{Attempts: 2, MaxAttempts: 12, Assessments: 1, MaxAssessments: 3, ActiveRecovery: &handoff.Recovery{Role: "iragent", Step: "reviewing", Diagnostic: "/tmp/prior.log", PriorError: "capacity unavailable", Changes: "external evidence: review-03.md (new)", ArchivedEvidence: "/tmp/review-03-partial.md"}}
+	var out bytes.Buffer
+	displayRecoveryDispatch(&out, s, false)
+	for _, want := range []string{"Recovering failed iragent step reviewing", "2/12 invocations", "1/3 independent assessments", "/tmp/prior.log", "capacity unavailable", "review-03-partial.md"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in recovery dispatch %s", want, out.String())
+		}
+	}
+	out.Reset()
+	displayRecoveryDispatch(&out, s, true)
+	var record map[string]any
+	if err := json.Unmarshal(out.Bytes(), &record); err != nil || record["type"] != "recovery-dispatch" || record["role"] != "iragent" {
+		t.Fatalf("JSON recovery dispatch: %#v %v output=%q", record, err, out.String())
 	}
 }
 

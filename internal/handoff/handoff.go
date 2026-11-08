@@ -2,6 +2,7 @@ package handoff
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -52,6 +55,9 @@ type State struct {
 	Threads          map[string]string                       `json:"threads,omitempty"`
 	RoleTurns        map[string]bool                         `json:"role_turns,omitempty"`
 	InFlight         *InFlight                               `json:"in_flight,omitempty"`
+	PendingStep      string                                  `json:"pending_step,omitempty"`
+	Recoveries       []Recovery                              `json:"recoveries,omitempty"`
+	ActiveRecovery   *Recovery                               `json:"active_recovery,omitempty"`
 	Attempts         int                                     `json:"attempts"`
 	MaxAttempts      int                                     `json:"max_attempts"`
 	TurnTimeout      time.Duration                           `json:"turn_timeout,omitempty"`
@@ -77,8 +83,45 @@ type LimitIncrease struct {
 // InFlight is saved with the invocation count before dispatch. A later run
 // cannot assume an unrecorded provider outcome means the turn never ran.
 type InFlight struct {
-	Role     dispatch.Role `json:"role"`
-	ThreadID string        `json:"thread_id"`
+	Role       dispatch.Role   `json:"role"`
+	ThreadID   string          `json:"thread_id"`
+	Step       string          `json:"step,omitempty"`
+	TurnID     string          `json:"turn_id,omitempty"`
+	Processes  []stop.Identity `json:"processes,omitempty"`
+	Checkpoint Checkpoint      `json:"checkpoint,omitempty"`
+	Terminated bool            `json:"terminated,omitempty"`
+}
+
+type Checkpoint struct {
+	Branch           string             `json:"branch,omitempty"`
+	Head             string             `json:"head,omitempty"`
+	Worktree         string             `json:"worktree,omitempty"`
+	GitVisibleSHA256 string             `json:"git_visible_sha256,omitempty"`
+	Evidence         []EvidenceSnapshot `json:"evidence,omitempty"`
+}
+
+type EvidenceSnapshot struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+type Recovery struct {
+	RequestedAt        time.Time             `json:"requested_at"`
+	PriorPhase         string                `json:"prior_phase"`
+	Role               dispatch.Role         `json:"role"`
+	Step               string                `json:"step"`
+	Diagnostic         string                `json:"diagnostic,omitempty"`
+	PriorError         string                `json:"prior_error,omitempty"`
+	Before             Checkpoint            `json:"before"`
+	Observed           Checkpoint            `json:"observed"`
+	Changes            string                `json:"changes"`
+	ArchivedEvidence   string                `json:"archived_evidence,omitempty"`
+	PriorThread        string                `json:"prior_thread,omitempty"`
+	ReplacementThread  string                `json:"replacement_thread,omitempty"`
+	PriorProfile       codexapp.RoleSettings `json:"prior_profile"`
+	ReplacementProfile codexapp.RoleSettings `json:"replacement_profile"`
+	DispatchAttempt    int                   `json:"dispatch_attempt,omitempty"`
 }
 
 type Options struct {
@@ -88,8 +131,14 @@ type Options struct {
 	MaxAttempts, MaxAssessments                                int
 	ApproveInvocationLimitIncrease, ApproveReviewLimitIncrease int
 	TurnTimeout, StallTimeout                                  time.Duration
+	Recover                                                    bool
 	OnEvent                                                    func(string, codexapp.Event)
 	OnResult                                                   func(string, codexapp.RoleResult)
+	OnRecovery                                                 func(State)
+}
+
+type processRecorder interface {
+	RecoveryProcesses() []stop.Identity
 }
 
 type Runner interface {
@@ -172,6 +221,13 @@ func (p *Provider) Stop(ctx context.Context, id, turn string) stop.Result {
 	return result
 }
 func (p *Provider) Close() error { return p.process.Close() }
+func (p *Provider) RecoveryProcesses() []stop.Identity {
+	ids := []stop.Identity{p.probe.Root()}
+	if owned, err := p.probe.Capture(); err == nil {
+		ids = append(ids, owned...)
+	}
+	return ids
+}
 
 func git(repo string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
@@ -388,6 +444,276 @@ func Status(o Options) (State, error) {
 	return s, nil
 }
 
+func checkpoint(s State, root string) (Checkpoint, error) {
+	var c Checkpoint
+	c.Branch, _ = git(s.Repository, "symbolic-ref", "--quiet", "--short", "HEAD")
+	var err error
+	c.Head, err = git(s.Repository, "rev-parse", "HEAD")
+	if err != nil {
+		return c, err
+	}
+	c.Worktree, err = git(s.Repository, "status", "--porcelain=v1", "--untracked-files=all")
+	if err != nil {
+		return c, err
+	}
+	c.GitVisibleSHA256, err = gitVisibleHash(s.Repository)
+	if err != nil {
+		return c, err
+	}
+	evidenceRoot := filepath.Join(root, "evidence", "roadmap-"+shaPath(s.Roadmap))
+	if s.TaskID != "" {
+		evidenceRoot = filepath.Join(evidenceRoot, s.TaskID)
+	}
+	err = filepath.WalkDir(evidenceRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if errors.Is(walkErr, os.ErrNotExist) {
+			return nil
+		}
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(body)
+		rel, err := filepath.Rel(evidenceRoot, path)
+		if err != nil {
+			return err
+		}
+		c.Evidence = append(c.Evidence, EvidenceSnapshot{Path: rel, Size: info.Size(), SHA256: fmt.Sprintf("%x", sum)})
+		return nil
+	})
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return c, err
+	}
+	sort.Slice(c.Evidence, func(i, j int) bool { return c.Evidence[i].Path < c.Evidence[j].Path })
+	return c, nil
+}
+
+func gitVisibleHash(repo string) (string, error) {
+	diff, err := exec.Command("git", "-C", repo, "diff", "--binary", "HEAD").Output()
+	if err != nil {
+		return "", err
+	}
+	untracked, err := exec.Command("git", "-C", repo, "ls-files", "--others", "--exclude-standard", "-z").Output()
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	hash.Write(diff)
+	for _, raw := range strings.Split(string(untracked), "\x00") {
+		if raw == "" {
+			continue
+		}
+		hash.Write([]byte("\x00" + raw + "\x00"))
+		path := filepath.Join(repo, raw)
+		info, err := os.Lstat(path)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode().IsRegular() {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return "", err
+			}
+			hash.Write(body)
+		} else if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return "", err
+			}
+			hash.Write([]byte(target))
+		} else {
+			hash.Write([]byte(info.Mode().String()))
+		}
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+func checkpointChanges(before, after Checkpoint) string {
+	var changes []string
+	if before.Branch != after.Branch {
+		changes = append(changes, fmt.Sprintf("branch changed from %q to %q", before.Branch, after.Branch))
+	}
+	if before.Head != after.Head {
+		changes = append(changes, fmt.Sprintf("HEAD changed from %s to %s", before.Head, after.Head))
+	}
+	if before.Worktree != after.Worktree || before.GitVisibleSHA256 != after.GitVisibleSHA256 {
+		changes = append(changes, fmt.Sprintf("Git-visible worktree changed; current status:\n%s", after.Worktree))
+	}
+	beforeEvidence := make(map[string]EvidenceSnapshot, len(before.Evidence))
+	for _, item := range before.Evidence {
+		beforeEvidence[item.Path] = item
+	}
+	var evidence []string
+	for _, item := range after.Evidence {
+		prior, ok := beforeEvidence[item.Path]
+		if !ok {
+			evidence = append(evidence, item.Path+" (new)")
+		} else if prior.SHA256 != item.SHA256 || prior.Size != item.Size {
+			evidence = append(evidence, item.Path+" (changed)")
+		}
+		delete(beforeEvidence, item.Path)
+	}
+	for path := range beforeEvidence {
+		evidence = append(evidence, path+" (missing)")
+	}
+	sort.Strings(evidence)
+	if len(evidence) > 0 {
+		changes = append(changes, "external evidence: "+strings.Join(evidence, ", "))
+	}
+	if len(changes) == 0 {
+		return "No source or external evidence changes were observed."
+	}
+	return strings.Join(changes, "\n")
+}
+
+func pendingRecoveryStep(s State) (string, error) {
+	if s.PendingStep != "" {
+		return s.PendingStep, nil
+	}
+	if s.InFlight != nil && s.InFlight.Step != "" {
+		return s.InFlight.Step, nil
+	}
+	// Compatibility for older records is deliberately based only on durable
+	// workflow bindings, never on narrative or repository guesses.
+	if s.AuthorizedCommit != "" && s.AuthorizedCommit == s.ApprovedCommit {
+		return "integrating", nil
+	}
+	if s.Verdict == "changes_requested" && s.Candidate != "" {
+		return "correcting", nil
+	}
+	if s.Candidate != "" && s.TaskID != "" && s.Verdict == "" {
+		return "reviewing", nil
+	}
+	if s.Candidate == "" && s.Verdict == "" {
+		return "engineering", nil
+	}
+	return "", fmt.Errorf("stopped state does not identify one pending workflow step")
+}
+
+func recoveryRole(step string) dispatch.Role {
+	if step == "reviewing" {
+		return dispatch.Iragent
+	}
+	return dispatch.Reagent
+}
+
+func validateRecoveryOverrideRole(s State, o Options) error {
+	step, err := pendingRecoveryStep(s)
+	if err != nil {
+		return err
+	}
+	role := recoveryRole(step)
+	if (role == dispatch.Reagent && (o.IragentModel != "" || o.IragentEffort != "")) || (role == dispatch.Iragent && (o.ReagentModel != "" || o.ReagentEffort != "")) {
+		return fmt.Errorf("recovery overrides must target the replacement %s role", role)
+	}
+	return nil
+}
+
+func prepareRecovery(dir string, s State) (State, error) {
+	step, err := pendingRecoveryStep(s)
+	if err != nil {
+		return s, err
+	}
+	if s.InFlight == nil {
+		return s, fmt.Errorf("stopped turn lacks its pre-turn checkpoint and process identities; inspect and resolve it manually")
+	}
+	if s.InFlight.Step != "" && s.InFlight.Step != step {
+		return s, fmt.Errorf("stopped turn step %q conflicts with pending step %q", s.InFlight.Step, step)
+	}
+	if s.InFlight.Role != "" && s.InFlight.Role != recoveryRole(step) {
+		return s, fmt.Errorf("stopped turn role %q conflicts with pending %s step", s.InFlight.Role, step)
+	}
+	if !s.InFlight.Terminated {
+		inactive, err := stop.Inactive(s.InFlight.Processes)
+		if err != nil {
+			return s, fmt.Errorf("cannot verify prior owned processes: %w", err)
+		}
+		if !inactive {
+			return s, fmt.Errorf("prior %s turn or an owned process remains active; recovery refused", s.InFlight.Role)
+		}
+	}
+	observed, err := checkpoint(s, dir)
+	if err != nil {
+		return s, fmt.Errorf("observe recovery source and evidence: %w", err)
+	}
+	if step == "reviewing" {
+		if err := verifyCandidate(s); err != nil {
+			return s, fmt.Errorf("review recovery requires the exact candidate in a clean checkout: %w", err)
+		}
+	}
+	if step == "integrating" {
+		parent, err := git(s.Repository, "rev-parse", s.Parent)
+		if err != nil {
+			return s, err
+		}
+		task, err := git(s.Repository, "rev-parse", s.Branch)
+		if err != nil {
+			return s, err
+		}
+		if task != s.AuthorizedCommit || (parent != s.Base && parent != s.AuthorizedCommit) {
+			return s, fmt.Errorf("integration refs are not safely reconcilable: parent=%s task=%s expected parent %s or %s and task %s", parent, task, s.Base, s.AuthorizedCommit, s.AuthorizedCommit)
+		}
+	}
+	recovery := Recovery{RequestedAt: time.Now().UTC(), PriorPhase: s.Phase, Role: recoveryRole(step), Step: step, Diagnostic: s.Diagnostics, PriorError: s.LastError, Before: s.InFlight.Checkpoint, Observed: observed, PriorThread: s.InFlight.ThreadID}
+	recovery.Changes = checkpointChanges(recovery.Before, recovery.Observed)
+	partialOriginal := ""
+	if step == "reviewing" && s.TaskID != "" {
+		partial := reviewPath(dir, s.Roadmap, s.TaskID, s.Assessments+1)
+		if info, statErr := os.Stat(partial); statErr == nil && info.Mode().IsRegular() {
+			base := strings.TrimSuffix(partial, ".md") + "-partial-" + recovery.RequestedAt.Format("20060102T150405.000000000Z")
+			archive := base + ".md"
+			for collision := 2; ; collision++ {
+				if _, err := os.Lstat(archive); errors.Is(err, os.ErrNotExist) {
+					break
+				} else if err != nil {
+					return s, fmt.Errorf("inspect partial review archive: %w", err)
+				}
+				archive = fmt.Sprintf("%s-%d.md", base, collision)
+			}
+			if err := os.Rename(partial, archive); err != nil {
+				return s, fmt.Errorf("archive partial review evidence: %w", err)
+			}
+			partialOriginal = partial
+			recovery.ArchivedEvidence = archive
+		}
+	}
+	s.Recoveries = append(s.Recoveries, recovery)
+	s.ActiveRecovery = &s.Recoveries[len(s.Recoveries)-1]
+	s.PendingStep = step
+	s.Phase = step
+	s.LastError = ""
+	if s.Threads == nil {
+		s.Threads = make(map[string]string)
+	}
+	if s.RoleTurns == nil {
+		s.RoleTurns = make(map[string]bool)
+	}
+	s.Threads[string(recovery.Role)] = ""
+	s.RoleTurns[string(recovery.Role)] = false
+	s.InFlight = nil
+	if err := save(dir, s); err != nil {
+		if partialOriginal != "" {
+			if rollbackErr := os.Rename(recovery.ArchivedEvidence, partialOriginal); rollbackErr != nil {
+				return s, fmt.Errorf("save recovery: %v; restore partial review evidence: %w", err, rollbackErr)
+			}
+		}
+		return s, err
+	}
+	return s, nil
+}
+
 func Run(ctx context.Context, o Options, open func(context.Context, string, io.Writer) (Runner, error)) (State, error) {
 	repo, err := canonical(o.Repository)
 	if err != nil {
@@ -422,6 +748,9 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	}
 	if hasLimitIncrease && (o.Approve != "" || o.Answer != "") {
 		return s, fmt.Errorf("limit increases cannot be combined with approval or blocker answer")
+	}
+	if o.Recover && (o.Approve != "" || o.Answer != "" || hasLimitIncrease) {
+		return s, fmt.Errorf("recovery cannot be combined with approval, blocker answer or limit increase")
 	}
 	if hasLimitIncrease && (s.Phase == "" || s.Phase == "no_suitable_work" || s.Phase == "completed" || s.Phase == "integrated") {
 		return s, fmt.Errorf("no active work has execution limits to increase")
@@ -465,16 +794,39 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 			return s, err
 		}
 	}
-	if s.Phase != "" && (o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
+	if s.Phase != "" && !o.Recover && (o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
 		return s, fmt.Errorf("role settings and limits cannot change an active run")
 	}
+	if o.Recover && (o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
+		return s, fmt.Errorf("recovery may override only the replacement role model and effort")
+	}
+	if s.ActiveRecovery != nil && s.InFlight == nil && (s.Phase == "engineering" || s.Phase == "reviewing" || s.Phase == "correcting" || s.Phase == "integrating") {
+		if !o.Recover {
+			s.Phase = "execution_failed"
+			s.LastError = "recovery was recorded but its replacement turn was not dispatched; use --recover to resume that recorded request"
+			if err := save(dir, s); err != nil {
+				return s, err
+			}
+			return s, nil
+		}
+		if err := validateRecoveryOverrideRole(s, o); err != nil {
+			return s, err
+		}
+		s.Phase = s.ActiveRecovery.Step
+		s.PendingStep = s.ActiveRecovery.Step
+	}
 	if s.InFlight != nil && (s.Phase == "engineering" || s.Phase == "reviewing" || s.Phase == "correcting" || s.Phase == "integrating") {
+		if s.PendingStep == "" {
+			s.PendingStep = s.Phase
+		}
 		s.Phase = "execution_uncertain"
 		s.LastError = fmt.Sprintf("%s turn in thread %s has no recorded outcome; inspect source and external evidence before any further dispatch", s.InFlight.Role, s.InFlight.ThreadID)
 		if err := save(dir, s); err != nil {
 			return s, err
 		}
-		return s, nil
+		if !o.Recover {
+			return s, nil
+		}
 	}
 	if s.MaxAssessments == 0 {
 		s.MaxAssessments = 3
@@ -529,13 +881,30 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	}
 	switch s.Phase {
 	case "integration_failed", "execution_failed", "execution_uncertain", "invalid_result", "source_changed", "limit_exhausted":
+		if o.Recover {
+			if s.Phase != "execution_failed" && s.Phase != "execution_uncertain" {
+				return s, fmt.Errorf("--recover applies only to execution-failed or execution-uncertain turns")
+			}
+			if err := validateRecoveryOverrideRole(s, o); err != nil {
+				return s, err
+			}
+			if s.ActiveRecovery != nil && s.InFlight == nil && s.PendingStep == s.ActiveRecovery.Step {
+				s.Phase = s.ActiveRecovery.Step
+			} else {
+				s, err = prepareRecovery(dir, s)
+				if err != nil {
+					return s, err
+				}
+			}
+			break
+		}
 		if o.Approve != "" || o.Answer != "" {
 			return s, fmt.Errorf("active run is stopped at %s", s.Phase)
 		}
 		return s, nil
 	}
 	if s.Phase == "" {
-		if o.Approve != "" || o.Answer != "" || hasLimitIncrease {
+		if o.Approve != "" || o.Answer != "" || hasLimitIncrease || o.Recover {
 			return s, fmt.Errorf("no active work to approve or answer")
 		}
 		branch, err := git(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
@@ -634,6 +1003,40 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 			return s, err
 		}
 	}
+	if s.ActiveRecovery != nil {
+		role := s.ActiveRecovery.Role
+		if o.ReagentModel != "" || o.ReagentEffort != "" || o.IragentModel != "" || o.IragentEffort != "" {
+			models, err := runner.Models(ctx)
+			if err != nil {
+				return s, err
+			}
+			project := make(map[dispatch.Role]dispatch.Choice, len(s.Profiles))
+			for configuredRole, profile := range s.Profiles {
+				project[configuredRole] = dispatch.Choice{Model: profile.Model, Effort: profile.Effort}
+			}
+			resolved, err := dispatch.ResolveProfiles(models, dispatch.ProfileSources{Project: project, Invocation: map[dispatch.Role]dispatch.Choice{dispatch.Reagent: {Model: o.ReagentModel, Effort: o.ReagentEffort}, dispatch.Iragent: {Model: o.IragentModel, Effort: o.IragentEffort}}})
+			if err != nil {
+				return s, err
+			}
+			s.ActiveRecovery.PriorProfile = s.Profiles[role]
+			s.Profiles[role] = resolved[role]
+			s.ActiveRecovery.ReplacementProfile = resolved[role]
+			s.Recoveries[len(s.Recoveries)-1] = *s.ActiveRecovery
+			if err := save(dir, s); err != nil {
+				return s, err
+			}
+		} else {
+			s.ActiveRecovery.PriorProfile = s.Profiles[role]
+			s.ActiveRecovery.ReplacementProfile = s.Profiles[role]
+			s.Recoveries[len(s.Recoveries)-1] = *s.ActiveRecovery
+			if err := save(dir, s); err != nil {
+				return s, err
+			}
+		}
+	}
+	if o.Recover && o.OnRecovery != nil {
+		o.OnRecovery(s)
+	}
 	for {
 		if limitsExhausted(s, s.Phase) {
 			setLimitExhausted(&s, s.Phase)
@@ -663,6 +1066,19 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		}
 		if s.Phase != "reviewing" && s.Phase != "correcting" {
 			return s, nil
+		}
+	}
+}
+
+func recordRecoveryProcesses(inFlight *InFlight, identities []stop.Identity) {
+	seen := make(map[stop.Identity]bool, len(inFlight.Processes)+len(identities))
+	for _, identity := range inFlight.Processes {
+		seen[identity] = true
+	}
+	for _, identity := range identities {
+		if identity.PID > 0 && identity.Start > 0 && !seen[identity] {
+			inFlight.Processes = append(inFlight.Processes, identity)
+			seen[identity] = true
 		}
 	}
 }
@@ -853,6 +1269,10 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 	if err != nil {
 		return s, err
 	}
+	preTurn, err := checkpoint(s, dir)
+	if err != nil {
+		return s, fmt.Errorf("record pre-turn checkpoint: %w", err)
+	}
 	settings := s.Profiles[role]
 	var thread codexapp.Thread
 	if id := s.Threads[string(role)]; id != "" {
@@ -866,7 +1286,16 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 	}
 	s.Threads[string(role)] = thread.ID
 	s.Attempts++
-	s.InFlight = &InFlight{Role: role, ThreadID: thread.ID}
+	s.PendingStep = step
+	s.InFlight = &InFlight{Role: role, ThreadID: thread.ID, Step: step, Checkpoint: preTurn}
+	if recorder, ok := runner.(processRecorder); ok {
+		recordRecoveryProcesses(s.InFlight, recorder.RecoveryProcesses())
+	}
+	if s.ActiveRecovery != nil {
+		s.ActiveRecovery.ReplacementThread = thread.ID
+		s.ActiveRecovery.DispatchAttempt = s.Attempts
+		s.Recoveries[len(s.Recoveries)-1] = *s.ActiveRecovery
+	}
 	if err = save(dir, s); err != nil {
 		return s, err
 	}
@@ -905,10 +1334,59 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		}()
 	}
 	turnID := ""
-	outcome, runErr := runner.RunRoleTurn(turnCtx, thread.ID, prompt, settings, func(event codexapp.Event) {
-		if event.TurnID != "" {
-			turnID = event.TurnID
+	var inFlightMu sync.Mutex
+	sampleDone := make(chan struct{})
+	sampleStopped := make(chan struct{})
+	if recorder, ok := runner.(processRecorder); ok {
+		go func() {
+			defer close(sampleStopped)
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-sampleDone:
+					return
+				case <-ticker.C:
+					identities := recorder.RecoveryProcesses()
+					inFlightMu.Lock()
+					before := len(s.InFlight.Processes)
+					recordRecoveryProcesses(s.InFlight, identities)
+					if len(s.InFlight.Processes) != before {
+						_ = save(dir, s)
+					}
+					inFlightMu.Unlock()
+				}
+			}
+		}()
+	} else {
+		close(sampleStopped)
+	}
+	samplingStopped := false
+	stopSampling := func() {
+		if !samplingStopped {
+			close(sampleDone)
+			<-sampleStopped
+			samplingStopped = true
 		}
+	}
+	defer stopSampling()
+	outcome, runErr := runner.RunRoleTurn(turnCtx, thread.ID, prompt, settings, func(event codexapp.Event) {
+		inFlightMu.Lock()
+		changed := false
+		if event.TurnID != "" && event.TurnID != s.InFlight.TurnID {
+			turnID = event.TurnID
+			s.InFlight.TurnID = turnID
+			changed = true
+		}
+		if recorder, ok := runner.(processRecorder); ok {
+			before := len(s.InFlight.Processes)
+			recordRecoveryProcesses(s.InFlight, recorder.RecoveryProcesses())
+			changed = changed || len(s.InFlight.Processes) != before
+		}
+		if changed {
+			_ = save(dir, s)
+		}
+		inFlightMu.Unlock()
 		if activity != nil {
 			select {
 			case activity <- struct{}{}:
@@ -919,11 +1397,16 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 			o.OnEvent(string(role), event)
 		}
 	})
+	stopSampling()
 	if runErr != nil {
 		s.Phase = "execution_failed"
 		_ = recordDiagnostic(s.Diagnostics, string(role), runErr)
 		if turnID == "" {
 			turnID = outcome.TurnID
+		}
+		s.InFlight.TurnID = turnID
+		if recorder, ok := runner.(processRecorder); ok {
+			recordRecoveryProcesses(s.InFlight, recorder.RecoveryProcesses())
 		}
 		if errors.Is(turnCtx.Err(), context.DeadlineExceeded) || errors.Is(turnCtx.Err(), context.Canceled) {
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 12*time.Second)
@@ -933,6 +1416,7 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 			if stopped.Problem != "" {
 				s.LastError += ": " + stopped.Problem
 			}
+			s.InFlight.Terminated = stopped.Status == "stopped_safely"
 		} else if errors.Is(runErr, codexapp.ErrInvalidResponseSchema) {
 			s.LastError = "Concoct supplied an invalid response schema; correct Concoct's code before retrying"
 		} else {
@@ -942,6 +1426,8 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		return s, fmt.Errorf("%s", s.LastError)
 	}
 	s.InFlight = nil
+	s.PendingStep = ""
+	s.ActiveRecovery = nil
 	if s.RoleTurns == nil {
 		s.RoleTurns = make(map[string]bool)
 	}

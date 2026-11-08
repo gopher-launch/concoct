@@ -45,6 +45,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 	stream := newMessageStream(stdout, jsonMode, quiet)
 	o.OnEvent = func(role string, event codexapp.Event) { stream.event(event, func(string) string { return role }) }
 	o.OnResult = stream.result
+	o.OnRecovery = func(state handoff.State) { displayRecoveryDispatch(stdout, state, jsonMode) }
 	state, err := handoff.Run(ctx, o, open)
 	stream.finish()
 	if err != nil {
@@ -63,6 +64,35 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 		return 18
 	default:
 		return 0
+	}
+}
+
+func displayRecoveryDispatch(w io.Writer, s handoff.State, jsonMode bool) {
+	if s.ActiveRecovery == nil {
+		return
+	}
+	r := s.ActiveRecovery
+	if jsonMode {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"type": "recovery-dispatch", "role": r.Role, "step": r.Step, "diagnostics": r.Diagnostic,
+			"prior_error":          r.PriorError,
+			"invocations_consumed": s.Attempts, "invocations_total": s.MaxAttempts,
+			"assessments_completed": s.Assessments, "assessments_total": s.MaxAssessments,
+			"changes": r.Changes, "archived_evidence": r.ArchivedEvidence,
+		})
+		return
+	}
+	fmt.Fprintf(w, "[Concoct] Recovering failed %s step %s with a fresh session.\n", r.Role, r.Step)
+	fmt.Fprintf(w, "[Concoct] Consumed limits: %d/%d invocations, %d/%d independent assessments.\n", s.Attempts, s.MaxAttempts, s.Assessments, s.MaxAssessments)
+	if r.Diagnostic != "" {
+		fmt.Fprintln(w, "[Concoct] Prior diagnostics:", r.Diagnostic)
+	}
+	if r.PriorError != "" {
+		fmt.Fprintln(w, "[Concoct] Prior failure:", r.PriorError)
+	}
+	fmt.Fprintln(w, "[Concoct] Preserved changes:", r.Changes)
+	if r.ArchivedEvidence != "" {
+		fmt.Fprintln(w, "[Concoct] Archived partial review evidence:", r.ArchivedEvidence)
 	}
 }
 func parse(args []string) (handoff.Options, string, bool, bool, error) {
@@ -91,6 +121,10 @@ func parse(args []string) (handoff.Options, string, bool, bool, error) {
 		}
 		if key == "quiet" {
 			quiet = true
+			continue
+		}
+		if key == "recover" {
+			o.Recover = true
 			continue
 		}
 		if i+1 >= len(args) {
@@ -158,7 +192,7 @@ func parse(args []string) (handoff.Options, string, bool, bool, error) {
 			return o, "", false, false, fmt.Errorf("unknown option --%s", key)
 		}
 	}
-	if command == "status" && (o.Codex != "" || o.Roadmap != "" || o.Approve != "" || o.Answer != "" || o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.ApproveReviewLimitIncrease > 0 || o.ApproveInvocationLimitIncrease > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
+	if command == "status" && (o.Recover || o.Codex != "" || o.Roadmap != "" || o.Approve != "" || o.Answer != "" || o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.ApproveReviewLimitIncrease > 0 || o.ApproveInvocationLimitIncrease > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
 		return o, "", false, false, fmt.Errorf("execution options require run")
 	}
 	return o, command, jsonMode, quiet, nil
@@ -232,6 +266,15 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 	if s.Diagnostics != "" {
 		fmt.Fprintln(w, "Provider diagnostics:", s.Diagnostics)
 	}
+	if (s.Phase == "execution_failed" || s.Phase == "execution_uncertain") && s.InFlight != nil {
+		step := s.PendingStep
+		if step == "" {
+			step = s.InFlight.Step
+		}
+		fmt.Fprintf(w, "Failed role: %s\n", s.InFlight.Role)
+		fmt.Fprintf(w, "Pending step: %s\n", strings.ReplaceAll(step, "_", "-"))
+		fmt.Fprintln(w, "Proposed recovery: inspect preserved source and evidence, verify prior processes ended, then dispatch a fresh session for the failed role.")
+	}
 	fmt.Fprintf(w, "Invocations: %d/%d\n", s.Attempts, s.MaxAttempts)
 	if s.MaxAssessments > 0 {
 		fmt.Fprintf(w, "Independent assessments: %d/%d\n", s.Assessments, s.MaxAssessments)
@@ -262,12 +305,18 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 			fmt.Fprintln(w, "The supplied values are new total ceilings; completed work and consumed counts are retained.")
 		}
 	}
+	if s.Phase == "execution_failed" || s.Phase == "execution_uncertain" {
+		args := continuationArgs(command, s)
+		args = append(args, "--recover")
+		fmt.Fprintln(w, "To explicitly recover the stopped turn after inspecting its diagnostics and preserved work:", shellCommand(command.executable, args...))
+		fmt.Fprintln(w, "Recovery is refused while prior owned processes remain uncertain, when the pending step is ambiguous, or when review/integration source bindings are unsafe.")
+	}
 	if s.Phase == "completed" {
 		fmt.Fprintln(w, "No active work. Run concoct run to start the next ready task from the current clean checkout.")
 	}
 }
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap.")
+	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --recover [replacement role model/effort option] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap. --recover explicitly replaces a failed or uncertain agent turn while preserving its source, evidence and consumed limits.")
 }
 
 func continuationArgs(command commandContext, s handoff.State) []string {

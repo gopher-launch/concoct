@@ -172,6 +172,27 @@ func processTable() (map[int]processRow, error) {
 	return rows, nil
 }
 
+// Inactive verifies that none of the exact recorded process identities remain
+// live. Start ticks prevent a recycled PID from being mistaken for prior work.
+func Inactive(identities []Identity) (bool, error) {
+	if len(identities) == 0 {
+		return false, fmt.Errorf("no recorded process identities")
+	}
+	rows, err := processTable()
+	if err != nil {
+		return false, err
+	}
+	for _, id := range identities {
+		if id.PID <= 0 || id.Start == 0 {
+			return false, fmt.Errorf("invalid recorded process identity")
+		}
+		if row, ok := rows[id.PID]; ok && row.Start == id.Start && row.State != 'Z' {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // TerminateOwned signals only captured child identities that still match their
 // Linux start ticks. It is the fallback when provider cleanup cannot establish
 // cessation. The app-server root itself is closed by its Process owner.

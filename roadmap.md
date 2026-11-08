@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-11-03
+updated: 2026-11-07
 ---
 
 # Concoct implementation roadmap
@@ -162,30 +162,3 @@ Concoct coordinates one task through reagent implementation, independent iragent
 - Run applicable formatting, tests, vet, build and whitespace checks. No live provider trial is required solely for this change.
 
 **Scope boundary:** Keep task suitability and rejection reasoning in reagent instructions. Concoct handles the CLI argument, prompt context and deterministic result routing; it does not introduce a host-side eligibility engine.
-
-## CON-077 — Recover an agent turn that ended without a valid result
-
-- Kind: task
-- Status: ready
-- Priority: high
-- Parent: none
-- Depends on: none
-
-**Objective:** Let the operator explicitly resume a stopped Concoct task after an agent dies or the provider fails before Concoct records a valid final result, including when the agent left commits, working-tree changes or partial external evidence.
-
-**Context:** Today `execution_failed` and `execution_uncertain` retain the task but reject a plain `concoct run`. Recovery requires editing `state.json` by hand. A failed turn may have changed files before dying, so simply replaying its prompt is unsafe.
-
-**Acceptance criteria:**
-
-- Add a documented `concoct run --recover` command for a failed or uncertain agent turn. A plain `concoct run` remains stopped. Show the failed role, pending workflow step, diagnostic location, consumed limits and proposed recovery action before dispatch.
-- Persist the pending step and a pre-turn checkpoint sufficient to compare the current branch, HEAD, Git-visible working-tree changes and external evidence with the state before the failed turn. Support existing active records where the pending step can be established unambiguously; stop with a clear explanation otherwise.
-- Under Concoct’s execution lock, verify the prior turn and its owned processes are no longer active before dispatching another turn. Refuse recovery when their status remains uncertain or another Concoct run is active.
-- Preserve all source changes, commits, untracked files, diagnostics and partial evidence. Never reset, clean, overwrite, merge or discard them as a side effect of recovery. Retain partial review files separately so a replacement assessment cannot silently overwrite them.
-- Start a fresh session for the failed role with a recovery prompt containing the original task and step, last completed result, candidate and base commits, relevant evidence and diagnostics, and a summary of changes made during the failed turn. For reagent work, allow the replacement agent to inspect and finish preserved work; require it to produce the ordinary structured result before the workflow advances.
-- For independent review, require the exact candidate and a clean checkout before dispatch. Do not treat partial review prose as an assessment or approval. For an interrupted integration, reconcile the actual parent and task branch refs before any further Git action; never repeat an integration blindly or infer success solely from an agent’s unfinished prose.
-- Preserve the failed invocation in the consumed invocation count. Count an independent assessment only after a valid, verified review result. Preserve prior approvals and evidence, but never invent a verdict, approved commit or integration result.
-- Permit an explicit model/effort override for the replacement role on `--recover`, validate it against provider capabilities, and record the change. Keep other active-run role settings unchanged.
-- Make recovery atomic and auditable: record the operator request, prior failure, source/evidence observations and replacement session. A second recovery command must not dispatch twice for the same stopped turn. If the replacement fails, retain its work and allow another explicit recovery within the configured limits.
-- Update CLI help, `status`, README, capability documentation and continuation guidance. Explain when recovery is refused and what the operator must inspect or resolve.
-
-**Verification:** Use scripted provider failures and filesystem/Git fixtures for a capacity error with a clean reviewer checkout; a reagent that leaves uncommitted and untracked work; a reagent that commits before dying; a partial `review-03.md`; an uncertain live turn; and an integration that moved a ref before dying. Verify unchanged work and evidence, accurate counts, no invented approval, one replacement dispatch per recovery request, model override validation, and repeated failure recovery. Run applicable tests, vet, build and whitespace checks. No billable live provider trial is required.
