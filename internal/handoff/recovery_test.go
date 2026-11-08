@@ -22,12 +22,16 @@ type recoveryRunner struct {
 	prompts           []string
 	threads           []string
 	fail              bool
+	startErr          error
 }
 
 func (r *recoveryRunner) Models(context.Context) ([]codexapp.Model, error) { return r.models, nil }
 func (r *recoveryRunner) StartThread(_ context.Context, cwd string, settings codexapp.RoleSettings, _ []codexapp.ToolSpec) (codexapp.Thread, error) {
 	if cwd != r.repo {
 		return codexapp.Thread{}, errors.New("wrong repository")
+	}
+	if r.startErr != nil {
+		return codexapp.Thread{}, r.startErr
 	}
 	id := "replacement-" + settings.Role
 	r.threads = append(r.threads, id)
@@ -244,9 +248,55 @@ func TestRecoveryValidatesOverrideBeforeReplacementDispatch(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unavailable") || len(runner.threads) != 0 || state.Attempts != 1 || len(state.Recoveries) != 1 {
 		t.Fatalf("invalid override dispatched: %+v %v threads=%v", state, err, runner.threads)
 	}
+	status, err := Status(Options{Repository: repo, Root: root})
+	if err != nil || status.Phase != "recovering" || status.ActiveRecovery == nil || status.PendingStep != "engineering" || !strings.Contains(status.LastError, "missing-model") {
+		t.Fatalf("invalid override lost stopped recovery state: %+v %v", status, err)
+	}
 	state, err = Run(context.Background(), Options{Repository: repo, Root: root, Recover: true, ReagentModel: "replacement-model", ReagentEffort: "high"}, func(context.Context, string, io.Writer) (Runner, error) { return runner, nil })
 	if err != nil || state.Phase != "blocked" || state.Attempts != 2 || len(state.Recoveries) != 1 || len(runner.threads) != 1 {
 		t.Fatalf("validated retry duplicated recovery: %+v %v threads=%v", state, err, runner.threads)
+	}
+}
+
+func TestRecoverySetupFailuresRemainDurablyStopped(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*recoveryRunner) func(context.Context, string, io.Writer) (Runner, error)
+	}{
+		{"provider open", func(_ *recoveryRunner) func(context.Context, string, io.Writer) (Runner, error) {
+			return func(context.Context, string, io.Writer) (Runner, error) {
+				return nil, errors.New("provider unavailable")
+			}
+		}},
+		{"fresh session", func(runner *recoveryRunner) func(context.Context, string, io.Writer) (Runner, error) {
+			runner.startErr = errors.New("start thread failed")
+			return func(context.Context, string, io.Writer) (Runner, error) { return runner, nil }
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, root := testRepo(t), t.TempDir()
+			dir, s := seedStoppedState(t, repo, root, "execution_failed", "engineering")
+			if err := save(dir, s); err != nil {
+				t.Fatal(err)
+			}
+			runner := &recoveryRunner{repo: repo, evidenceDir: dir, models: recoveryModels(), disposition: "decision_required"}
+			state, err := Run(context.Background(), Options{Repository: repo, Root: root, Recover: true}, tc.open(runner))
+			if err == nil || state.Phase != "recovering" || state.ActiveRecovery == nil || state.Attempts != 1 || len(state.Recoveries) != 1 {
+				t.Fatalf("setup failure state: %+v %v", state, err)
+			}
+			status, statusErr := Status(Options{Repository: repo, Root: root})
+			if statusErr != nil || status.Phase != "recovering" || status.ActiveRecovery == nil || status.PendingStep != "engineering" || status.Attempts != 1 || !strings.Contains(status.LastError, err.Error()) {
+				t.Fatalf("durable setup failure: %+v %v", status, statusErr)
+			}
+			opens := 0
+			plain, plainErr := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) {
+				opens++
+				return runner, nil
+			})
+			if plainErr != nil || plain.Phase != "recovering" || opens != 0 {
+				t.Fatalf("plain run dispatched prepared recovery: %+v %v opens=%d", plain, plainErr, opens)
+			}
+		})
 	}
 }
 
@@ -273,7 +323,16 @@ func TestIntegrationRecoveryReconcilesAlreadyMovedParentWithoutHostGitAction(t *
 	if err != nil || recovered.Phase != "blocked" || gitTest(repo, "rev-parse", "main") != candidate || gitTest(repo, "rev-parse", "task/APP-002") != candidate {
 		t.Fatalf("integration reconciliation: %+v %v", recovered, err)
 	}
-	if !strings.Contains(runner.prompts[0], "parent already names the authorized commit") {
-		t.Fatalf("integration recovery prompt omitted moved-ref handling: %s", runner.prompts[0])
+	prompt := runner.prompts[0]
+	if !strings.Contains(prompt, "was already observed at authorized commit") || !strings.Contains(prompt, "Do not fast-forward") || strings.Contains(prompt, "still points to base") || strings.Contains(prompt, "Perform local fast-forward") {
+		t.Fatalf("integration recovery prompt is contradictory: %s", prompt)
+	}
+}
+
+func TestIntegrationRecoveryPromptAtBaseOnlyOrdersGuardedFastForward(t *testing.T) {
+	s := State{TaskID: "APP-002", Roadmap: "/repo/roadmap.md", Repository: "/repo", Branch: "task/APP-002", Parent: "main", Base: "base", Candidate: "candidate", AuthorizedCommit: "candidate", ReviewEvidence: "/evidence/review.md", Evidence: "/evidence/task.md", ActiveRecovery: &Recovery{Step: "integrating", IntegrationParent: "base"}}
+	prompt, err := RecoveryIntegrationPrompt(s, "roadmap context")
+	if err != nil || !strings.Contains(prompt, "was observed at recorded base") || !strings.Contains(prompt, "perform the local fast-forward") || strings.Contains(prompt, "already observed at authorized commit") || strings.Contains(prompt, "Do not fast-forward") {
+		t.Fatalf("base integration recovery prompt: %v %s", err, prompt)
 	}
 }

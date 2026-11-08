@@ -122,6 +122,7 @@ type Recovery struct {
 	PriorProfile       codexapp.RoleSettings `json:"prior_profile"`
 	ReplacementProfile codexapp.RoleSettings `json:"replacement_profile"`
 	DispatchAttempt    int                   `json:"dispatch_attempt,omitempty"`
+	IntegrationParent  string                `json:"integration_parent,omitempty"`
 }
 
 type Options struct {
@@ -653,6 +654,7 @@ func prepareRecovery(dir string, s State) (State, error) {
 			return s, fmt.Errorf("review recovery requires the exact candidate in a clean checkout: %w", err)
 		}
 	}
+	recoveryParent := ""
 	if step == "integrating" {
 		parent, err := git(s.Repository, "rev-parse", s.Parent)
 		if err != nil {
@@ -665,8 +667,13 @@ func prepareRecovery(dir string, s State) (State, error) {
 		if task != s.AuthorizedCommit || (parent != s.Base && parent != s.AuthorizedCommit) {
 			return s, fmt.Errorf("integration refs are not safely reconcilable: parent=%s task=%s expected parent %s or %s and task %s", parent, task, s.Base, s.AuthorizedCommit, s.AuthorizedCommit)
 		}
+		if parent == s.AuthorizedCommit {
+			recoveryParent = "authorized"
+		} else {
+			recoveryParent = "base"
+		}
 	}
-	recovery := Recovery{RequestedAt: time.Now().UTC(), PriorPhase: s.Phase, Role: recoveryRole(step), Step: step, Diagnostic: s.Diagnostics, PriorError: s.LastError, Before: s.InFlight.Checkpoint, Observed: observed, PriorThread: s.InFlight.ThreadID}
+	recovery := Recovery{RequestedAt: time.Now().UTC(), PriorPhase: s.Phase, Role: recoveryRole(step), Step: step, Diagnostic: s.Diagnostics, PriorError: s.LastError, Before: s.InFlight.Checkpoint, Observed: observed, PriorThread: s.InFlight.ThreadID, IntegrationParent: recoveryParent}
 	recovery.Changes = checkpointChanges(recovery.Before, recovery.Observed)
 	partialOriginal := ""
 	if step == "reviewing" && s.TaskID != "" {
@@ -692,8 +699,8 @@ func prepareRecovery(dir string, s State) (State, error) {
 	s.Recoveries = append(s.Recoveries, recovery)
 	s.ActiveRecovery = &s.Recoveries[len(s.Recoveries)-1]
 	s.PendingStep = step
-	s.Phase = step
-	s.LastError = ""
+	s.Phase = "recovering"
+	s.LastError = fmt.Sprintf("recovery requested for failed %s step; replacement turn is not yet dispatched", step)
 	if s.Threads == nil {
 		s.Threads = make(map[string]string)
 	}
@@ -801,19 +808,20 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		return s, fmt.Errorf("recovery may override only the replacement role model and effort")
 	}
 	if s.ActiveRecovery != nil && s.InFlight == nil && (s.Phase == "engineering" || s.Phase == "reviewing" || s.Phase == "correcting" || s.Phase == "integrating") {
+		// Normalize records written by the initial CON-077 candidate before the
+		// dedicated stopped recovery phase was introduced.
+		s.Phase = "recovering"
+		s.PendingStep = s.ActiveRecovery.Step
+		s.LastError = fmt.Sprintf("recovery requested for failed %s step; replacement turn is not yet dispatched", s.ActiveRecovery.Step)
+		if err := save(dir, s); err != nil {
+			return s, err
+		}
 		if !o.Recover {
-			s.Phase = "execution_failed"
-			s.LastError = "recovery was recorded but its replacement turn was not dispatched; use --recover to resume that recorded request"
-			if err := save(dir, s); err != nil {
-				return s, err
-			}
 			return s, nil
 		}
 		if err := validateRecoveryOverrideRole(s, o); err != nil {
 			return s, err
 		}
-		s.Phase = s.ActiveRecovery.Step
-		s.PendingStep = s.ActiveRecovery.Step
 	}
 	if s.InFlight != nil && (s.Phase == "engineering" || s.Phase == "reviewing" || s.Phase == "correcting" || s.Phase == "integrating") {
 		if s.PendingStep == "" {
@@ -880,17 +888,15 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		}
 	}
 	switch s.Phase {
-	case "integration_failed", "execution_failed", "execution_uncertain", "invalid_result", "source_changed", "limit_exhausted":
+	case "integration_failed", "execution_failed", "execution_uncertain", "invalid_result", "source_changed", "limit_exhausted", "recovering":
 		if o.Recover {
-			if s.Phase != "execution_failed" && s.Phase != "execution_uncertain" {
+			if s.Phase != "execution_failed" && s.Phase != "execution_uncertain" && s.Phase != "recovering" {
 				return s, fmt.Errorf("--recover applies only to execution-failed or execution-uncertain turns")
 			}
 			if err := validateRecoveryOverrideRole(s, o); err != nil {
 				return s, err
 			}
-			if s.ActiveRecovery != nil && s.InFlight == nil && s.PendingStep == s.ActiveRecovery.Step {
-				s.Phase = s.ActiveRecovery.Step
-			} else {
+			if s.Phase != "recovering" {
 				s, err = prepareRecovery(dir, s)
 				if err != nil {
 					return s, err
@@ -959,11 +965,15 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	if s.Phase == "blocked" || s.Phase == "awaiting_approval" {
 		return s, nil
 	}
-	if s.Phase != "engineering" && s.Phase != "reviewing" && s.Phase != "correcting" && s.Phase != "integrating" {
+	if s.Phase != "engineering" && s.Phase != "reviewing" && s.Phase != "correcting" && s.Phase != "integrating" && !(s.Phase == "recovering" && s.ActiveRecovery != nil) {
 		return s, fmt.Errorf("unsupported active phase %q", s.Phase)
 	}
-	if limitsExhausted(s, s.Phase) {
-		setLimitExhausted(&s, s.Phase)
+	pendingPhase := s.Phase
+	if s.Phase == "recovering" {
+		pendingPhase = s.ActiveRecovery.Step
+	}
+	if limitsExhausted(s, pendingPhase) {
+		setLimitExhausted(&s, pendingPhase)
 		_ = save(dir, s)
 		return s, nil
 	}
@@ -987,17 +997,17 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	runner, err := open(ctx, o.Codex, diagnosticFile)
 	if err != nil {
 		_ = recordDiagnostic(s.Diagnostics, "provider", err)
-		return s, err
+		return recoverySetupError(dir, s, err)
 	}
 	defer runner.Close()
 	if len(s.Profiles) == 0 {
 		models, err := runner.Models(ctx)
 		if err != nil {
-			return s, err
+			return recoverySetupError(dir, s, err)
 		}
 		s.Profiles, err = dispatch.ResolveProfiles(models, dispatch.ProfileSources{Invocation: map[dispatch.Role]dispatch.Choice{dispatch.Reagent: {Model: o.ReagentModel, Effort: o.ReagentEffort}, dispatch.Iragent: {Model: o.IragentModel, Effort: o.IragentEffort}}})
 		if err != nil {
-			return s, err
+			return recoverySetupError(dir, s, err)
 		}
 		if err = save(dir, s); err != nil {
 			return s, err
@@ -1008,7 +1018,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		if o.ReagentModel != "" || o.ReagentEffort != "" || o.IragentModel != "" || o.IragentEffort != "" {
 			models, err := runner.Models(ctx)
 			if err != nil {
-				return s, err
+				return recoverySetupError(dir, s, err)
 			}
 			project := make(map[dispatch.Role]dispatch.Choice, len(s.Profiles))
 			for configuredRole, profile := range s.Profiles {
@@ -1016,7 +1026,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 			}
 			resolved, err := dispatch.ResolveProfiles(models, dispatch.ProfileSources{Project: project, Invocation: map[dispatch.Role]dispatch.Choice{dispatch.Reagent: {Model: o.ReagentModel, Effort: o.ReagentEffort}, dispatch.Iragent: {Model: o.IragentModel, Effort: o.IragentEffort}}})
 			if err != nil {
-				return s, err
+				return recoverySetupError(dir, s, err)
 			}
 			s.ActiveRecovery.PriorProfile = s.Profiles[role]
 			s.Profiles[role] = resolved[role]
@@ -1038,12 +1048,15 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		o.OnRecovery(s)
 	}
 	for {
-		if limitsExhausted(s, s.Phase) {
-			setLimitExhausted(&s, s.Phase)
+		step := s.Phase
+		if s.Phase == "recovering" && s.ActiveRecovery != nil {
+			step = s.ActiveRecovery.Step
+		}
+		if limitsExhausted(s, step) {
+			setLimitExhausted(&s, step)
 			_ = save(dir, s)
 			return s, nil
 		}
-		step := s.Phase
 		role := dispatch.Reagent
 		if step == "reviewing" {
 			role = dispatch.Iragent
@@ -1081,6 +1094,19 @@ func recordRecoveryProcesses(inFlight *InFlight, identities []stop.Identity) {
 			seen[identity] = true
 		}
 	}
+}
+
+func recoverySetupError(dir string, s State, err error) (State, error) {
+	if s.ActiveRecovery == nil || s.InFlight != nil {
+		return s, err
+	}
+	s.Phase = "recovering"
+	s.PendingStep = s.ActiveRecovery.Step
+	s.LastError = "recovery setup failed before replacement dispatch: " + err.Error()
+	if saveErr := save(dir, s); saveErr != nil {
+		return s, fmt.Errorf("%v; save stopped recovery state: %w", err, saveErr)
+	}
+	return s, err
 }
 
 func validateLimitIncreases(s State, o Options) error {
@@ -1267,11 +1293,11 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 	}
 	prompt, err := promptForStep(s, dir, step)
 	if err != nil {
-		return s, err
+		return recoverySetupError(dir, s, err)
 	}
 	preTurn, err := checkpoint(s, dir)
 	if err != nil {
-		return s, fmt.Errorf("record pre-turn checkpoint: %w", err)
+		return recoverySetupError(dir, s, fmt.Errorf("record pre-turn checkpoint: %w", err))
 	}
 	settings := s.Profiles[role]
 	var thread codexapp.Thread
@@ -1282,11 +1308,13 @@ func turn(ctx context.Context, runner Runner, dir string, s State, role dispatch
 		thread, err = runner.StartThread(ctx, s.Repository, settings, nil)
 	}
 	if err != nil {
-		return s, err
+		return recoverySetupError(dir, s, err)
 	}
 	s.Threads[string(role)] = thread.ID
 	s.Attempts++
 	s.PendingStep = step
+	s.Phase = step
+	s.LastError = ""
 	s.InFlight = &InFlight{Role: role, ThreadID: thread.ID, Step: step, Checkpoint: preTurn}
 	if recorder, ok := runner.(processRecorder); ok {
 		recordRecoveryProcesses(s.InFlight, recorder.RecoveryProcesses())

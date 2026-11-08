@@ -60,7 +60,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, open open
 		return 12
 	case "blocked", "limit_exhausted":
 		return 10
-	case "execution_uncertain", "execution_failed", "invalid_result", "source_changed", "integration_failed":
+	case "execution_uncertain", "execution_failed", "recovering", "invalid_result", "source_changed", "integration_failed":
 		return 18
 	default:
 		return 0
@@ -275,6 +275,14 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 		fmt.Fprintf(w, "Pending step: %s\n", strings.ReplaceAll(step, "_", "-"))
 		fmt.Fprintln(w, "Proposed recovery: inspect preserved source and evidence, verify prior processes ended, then dispatch a fresh session for the failed role.")
 	}
+	if s.Phase == "recovering" && s.ActiveRecovery != nil {
+		fmt.Fprintf(w, "Failed role: %s\n", s.ActiveRecovery.Role)
+		fmt.Fprintf(w, "Pending step: %s\n", strings.ReplaceAll(s.ActiveRecovery.Step, "_", "-"))
+		if s.ActiveRecovery.Diagnostic != "" && s.ActiveRecovery.Diagnostic != s.Diagnostics {
+			fmt.Fprintln(w, "Prior provider diagnostics:", s.ActiveRecovery.Diagnostic)
+		}
+		fmt.Fprintln(w, "Proposed recovery: resume the recorded recovery request and dispatch its fresh replacement session.")
+	}
 	fmt.Fprintf(w, "Invocations: %d/%d\n", s.Attempts, s.MaxAttempts)
 	if s.MaxAssessments > 0 {
 		fmt.Fprintf(w, "Independent assessments: %d/%d\n", s.Assessments, s.MaxAssessments)
@@ -305,7 +313,7 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 			fmt.Fprintln(w, "The supplied values are new total ceilings; completed work and consumed counts are retained.")
 		}
 	}
-	if s.Phase == "execution_failed" || s.Phase == "execution_uncertain" {
+	if s.Phase == "execution_failed" || s.Phase == "execution_uncertain" || s.Phase == "recovering" {
 		args := continuationArgs(command, s)
 		args = append(args, "--recover")
 		fmt.Fprintln(w, "To explicitly recover the stopped turn after inspecting its diagnostics and preserved work:", shellCommand(command.executable, args...))

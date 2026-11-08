@@ -38,7 +38,11 @@ func promptForStep(s State, root, step string) (string, error) {
 	case "reviewing":
 		prompt = IragentPrompt(s, root, context)
 	case "integrating":
-		prompt = IntegrationPrompt(s, context)
+		if s.ActiveRecovery != nil {
+			prompt, err = RecoveryIntegrationPrompt(s, context)
+		} else {
+			prompt = IntegrationPrompt(s, context)
+		}
 	default:
 		return "", fmt.Errorf("unsupported prompt step %q", step)
 	}
@@ -63,9 +67,6 @@ Observed changes since the pre-turn checkpoint:
 `, r.Role, r.Step, r.Diagnostic, r.PriorError, r.PriorThread, s.Base, s.Candidate, recoveryLastResult(s), s.Evidence, s.ReviewEvidence, r.Changes)
 		if r.ArchivedEvidence != "" {
 			prompt += fmt.Sprintf("Partial review prose was retained separately at %s. It is not an assessment or verdict. Write the replacement assessment to the ordinary review path named above.\n", r.ArchivedEvidence)
-		}
-		if r.Step == "integrating" {
-			prompt += "Reconcile the actual parent and task refs before any Git action. If the parent already names the authorized commit, verify the completed integration and report the ordinary result without repeating it. Never infer success from unfinished prose.\n"
 		}
 	}
 	return prompt, nil
@@ -121,4 +122,25 @@ func IntegrationPrompt(s State, roadmapContext string) string {
 
 Perform local fast-forward integration of that exact commit onto %s using an expected-old-ref guard, then switch to the parent checkout and verify it is clean at the approved commit. Record the action in external task evidence. Do not push or publish. Return integrated with task_id %s, candidate %s, evidence path and a clear summary only after completing those checks. If a genuine missing operator decision blocks safe progress, return decision_required with a concise question. Concoct will report your result without performing its own Git transaction.
 `, s.TaskID, s.Roadmap, s.AuthorizedCommit, s.ReviewEvidence, s.Evidence, s.ReviewEvidence, s.Repository, s.Branch, s.Parent, s.Base, roadmapContext, s.Parent, s.TaskID, s.AuthorizedCommit)
+}
+
+func RecoveryIntegrationPrompt(s State, roadmapContext string) (string, error) {
+	if s.ActiveRecovery == nil || s.ActiveRecovery.Step != "integrating" {
+		return "", fmt.Errorf("integration recovery requires an active integrating recovery")
+	}
+	intro := fmt.Sprintf(`Continue as reagent for task %s in selected roadmap %s. The operator explicitly requested recovery of an interrupted integration for exact independently approved commit %s after assessment %s. Read the current source, task evidence %s and review evidence %s. Follow applicable repository and directory-specific instructions. Work in %s. The host has reconciled task branch %s to the authorized commit and classified the parent ref before dispatch. Independently recheck every binding before any Git action; never infer success from unfinished prose.
+
+%s
+`, s.TaskID, s.Roadmap, s.AuthorizedCommit, s.ReviewEvidence, s.Evidence, s.ReviewEvidence, s.Repository, s.Branch, roadmapContext)
+	var action string
+	switch s.ActiveRecovery.IntegrationParent {
+	case "base":
+		action = fmt.Sprintf(`The parent branch %s was observed at recorded base %s. Require it still to equal that base, require task branch %s still to equal authorized commit %s, and require the task checkout to be clean. If any binding fails, stop and report integration_failed; do not substitute another commit or invent a merge. Otherwise perform the local fast-forward of that exact commit using an expected-old-ref guard, switch to the parent checkout and verify it is clean at the authorized commit.`, s.Parent, s.Base, s.Branch, s.AuthorizedCommit)
+	case "authorized":
+		action = fmt.Sprintf(`The parent branch %s was already observed at authorized commit %s. Do not fast-forward, update or move either branch ref. Require both parent branch %s and task branch %s still to equal that exact commit, then switch to or confirm the parent checkout and verify it is clean at the authorized commit. If any binding fails, stop and report integration_failed.`, s.Parent, s.AuthorizedCommit, s.Parent, s.Branch)
+	default:
+		return "", fmt.Errorf("integration recovery lacks a reconciled parent classification")
+	}
+	return intro + "\n" + action + fmt.Sprintf(` Record the verified action in external task evidence. Do not push or publish. Return integrated with task_id %s, candidate %s, evidence path and a clear summary only after completing the applicable checks. If a genuine missing operator decision blocks safe progress, return decision_required with a concise question. Concoct will report your result without performing its own Git transaction.
+`, s.TaskID, s.AuthorizedCommit), nil
 }

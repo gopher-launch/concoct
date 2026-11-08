@@ -70,6 +70,16 @@ func TestRecoveryPresentationIncludesContextualCommand(t *testing.T) {
 			t.Fatalf("missing %q in %s", want, out.String())
 		}
 	}
+	out.Reset()
+	s.Phase = "recovering"
+	s.InFlight = nil
+	s.ActiveRecovery = &handoff.Recovery{Role: "iragent", Step: "reviewing", Diagnostic: "/tmp/prior-provider.log"}
+	displayWithContext(&out, s, false, commandContext{executable: "/tmp/concoct tool", options: handoff.Options{Root: "/tmp/root;literal"}})
+	for _, want := range []string{"Concoct: recovering", "Failed role: iragent", "Pending step: reviewing", "Prior provider diagnostics: /tmp/prior-provider.log", "--recover"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("recovering status missing %q in %s", want, out.String())
+		}
+	}
 }
 
 func TestRecoveryDispatchPresentationIsReadableAndJSONSafe(t *testing.T) {
