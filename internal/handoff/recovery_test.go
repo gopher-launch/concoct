@@ -21,6 +21,7 @@ type recoveryRunner struct {
 	disposition       string
 	prompts           []string
 	threads           []string
+	settings          []codexapp.RoleSettings
 	fail              bool
 	startErr          error
 }
@@ -33,6 +34,7 @@ func (r *recoveryRunner) StartThread(_ context.Context, cwd string, settings cod
 	if r.startErr != nil {
 		return codexapp.Thread{}, r.startErr
 	}
+	r.settings = append(r.settings, settings)
 	id := "replacement-" + settings.Role
 	r.threads = append(r.threads, id)
 	return codexapp.Thread{ID: id}, nil
@@ -297,6 +299,133 @@ func TestRecoverySetupFailuresRemainDurablyStopped(t *testing.T) {
 				t.Fatalf("plain run dispatched prepared recovery: %+v %v opens=%d", plain, plainErr, opens)
 			}
 		})
+	}
+}
+
+func TestPreparedReviewRecoveryRevalidatesBeforeEveryRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		first  func(*recoveryRunner) (Options, func(context.Context, string, io.Writer) (Runner, error))
+		mutate func(*testing.T, string)
+	}{
+		{
+			name: "provider open then tracked change",
+			first: func(_ *recoveryRunner) (Options, func(context.Context, string, io.Writer) (Runner, error)) {
+				return Options{}, func(context.Context, string, io.Writer) (Runner, error) {
+					return nil, errors.New("provider unavailable")
+				}
+			},
+			mutate: func(t *testing.T, repo string) {
+				if err := os.WriteFile(filepath.Join(repo, "feature.txt"), []byte("dirty candidate\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "override validation then untracked change",
+			first: func(r *recoveryRunner) (Options, func(context.Context, string, io.Writer) (Runner, error)) {
+				return Options{IragentModel: "missing-model"}, func(context.Context, string, io.Writer) (Runner, error) { return r, nil }
+			},
+			mutate: func(t *testing.T, repo string) {
+				if err := os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("preserve\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "fresh session then branch change",
+			first: func(r *recoveryRunner) (Options, func(context.Context, string, io.Writer) (Runner, error)) {
+				r.startErr = errors.New("start thread failed")
+				return Options{}, func(context.Context, string, io.Writer) (Runner, error) { return r, nil }
+			},
+			mutate: func(t *testing.T, repo string) { gitTest(repo, "switch", "-q", "main") },
+		},
+		{
+			name: "provider open then head change",
+			first: func(_ *recoveryRunner) (Options, func(context.Context, string, io.Writer) (Runner, error)) {
+				return Options{}, func(context.Context, string, io.Writer) (Runner, error) {
+					return nil, errors.New("provider unavailable")
+				}
+			},
+			mutate: func(t *testing.T, repo string) {
+				if err := os.WriteFile(filepath.Join(repo, "later.txt"), []byte("later commit\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				gitTest(repo, "add", "later.txt")
+				gitTest(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "later")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, root := testRepo(t), t.TempDir()
+			gitTest(repo, "switch", "-qc", "task/APP-002")
+			if err := os.WriteFile(filepath.Join(repo, "feature.txt"), []byte("candidate\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			gitTest(repo, "add", "feature.txt")
+			gitTest(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "candidate")
+			candidate := gitTest(repo, "rev-parse", "HEAD")
+			dir, s := seedStoppedState(t, repo, root, "execution_failed", "reviewing")
+			s.Branch, s.TaskID, s.Candidate = "task/APP-002", "APP-002", candidate
+			s.InFlight.Checkpoint, _ = checkpoint(s, dir)
+			if err := save(dir, s); err != nil {
+				t.Fatal(err)
+			}
+			runner := &recoveryRunner{repo: repo, evidenceDir: dir, models: recoveryModels()}
+			opts, open := tc.first(runner)
+			opts.Repository, opts.Root, opts.Recover = repo, root, true
+			state, err := Run(context.Background(), opts, open)
+			if err == nil || state.Phase != "recovering" || state.Attempts != 1 {
+				t.Fatalf("initial setup failure: %+v %v", state, err)
+			}
+			tc.mutate(t, repo)
+			partial := reviewPath(dir, s.Roadmap, s.TaskID, 1)
+			writeEvidence(partial)
+			opens := 0
+			state, err = Run(context.Background(), Options{Repository: repo, Root: root, Recover: true}, func(context.Context, string, io.Writer) (Runner, error) {
+				opens++
+				return runner, nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "exact candidate in a clean checkout") || state.Phase != "recovering" || state.Attempts != 1 || opens != 0 {
+				t.Fatalf("mutated retry dispatched: %+v %v opens=%d", state, err, opens)
+			}
+			if len(state.ActiveRecovery.AdditionalArchives) != 1 {
+				t.Fatalf("retry partial review not archived: %+v", state.ActiveRecovery)
+			}
+			if _, err := os.Stat(state.ActiveRecovery.AdditionalArchives[0]); err != nil {
+				t.Fatalf("retry archive missing: %v", err)
+			}
+		})
+	}
+}
+
+func TestRecoveryLimitIncreaseRetainsStoppedBoundaryAndOverride(t *testing.T) {
+	repo, root := testRepo(t), t.TempDir()
+	dir, s := seedStoppedState(t, repo, root, "execution_failed", "engineering")
+	s.MaxAttempts, s.Attempts = 1, 1
+	if err := save(dir, s); err != nil {
+		t.Fatal(err)
+	}
+	opens := 0
+	limited, err := Run(context.Background(), Options{Repository: repo, Root: root, Recover: true, ReagentModel: "replacement-model", ReagentEffort: "high"}, func(context.Context, string, io.Writer) (Runner, error) {
+		opens++
+		return nil, errors.New("must not open")
+	})
+	if err != nil || limited.Phase != "limit_exhausted" || limited.ActiveRecovery == nil || limited.ActiveRecovery.RequestedModel != "replacement-model" || limited.ActiveRecovery.RequestedEffort != "high" || opens != 0 {
+		t.Fatalf("limited recovery: %+v %v opens=%d", limited, err, opens)
+	}
+	authorized, err := Run(context.Background(), Options{Repository: repo, Root: root, ApproveInvocationLimitIncrease: 2}, func(context.Context, string, io.Writer) (Runner, error) {
+		opens++
+		return nil, errors.New("must not open")
+	})
+	if err != nil || authorized.Phase != "recovering" || authorized.Attempts != 1 || opens != 0 || !strings.Contains(authorized.LastError, "run --recover") {
+		t.Fatalf("limit authorization dispatched recovery: %+v %v opens=%d", authorized, err, opens)
+	}
+	runner := &recoveryRunner{repo: repo, evidenceDir: dir, models: recoveryModels(), disposition: "decision_required"}
+	presented := 0
+	recovered, err := Run(context.Background(), Options{Repository: repo, Root: root, Recover: true, OnRecovery: func(State) { presented++ }}, func(context.Context, string, io.Writer) (Runner, error) { return runner, nil })
+	if err != nil || recovered.Phase != "blocked" || recovered.Attempts != 2 || len(runner.settings) != 1 || runner.settings[0].Model != "replacement-model" || runner.settings[0].Effort != "high" || presented != 1 {
+		t.Fatalf("recovery after limit authorization: %+v %v settings=%+v presented=%d", recovered, err, runner.settings, presented)
 	}
 }
 

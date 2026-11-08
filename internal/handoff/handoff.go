@@ -117,6 +117,9 @@ type Recovery struct {
 	Observed           Checkpoint            `json:"observed"`
 	Changes            string                `json:"changes"`
 	ArchivedEvidence   string                `json:"archived_evidence,omitempty"`
+	AdditionalArchives []string              `json:"additional_archives,omitempty"`
+	RequestedModel     string                `json:"requested_model,omitempty"`
+	RequestedEffort    string                `json:"requested_effort,omitempty"`
 	PriorThread        string                `json:"prior_thread,omitempty"`
 	ReplacementThread  string                `json:"replacement_thread,omitempty"`
 	PriorProfile       codexapp.RoleSettings `json:"prior_profile"`
@@ -622,6 +625,136 @@ func validateRecoveryOverrideRole(s State, o Options) error {
 	return nil
 }
 
+func recordRecoveryOverride(s *State, o Options) {
+	if s.ActiveRecovery == nil {
+		return
+	}
+	if s.ActiveRecovery.Role == dispatch.Iragent {
+		if o.IragentModel != "" {
+			s.ActiveRecovery.RequestedModel = o.IragentModel
+		}
+		if o.IragentEffort != "" {
+			s.ActiveRecovery.RequestedEffort = o.IragentEffort
+		}
+	} else {
+		if o.ReagentModel != "" {
+			s.ActiveRecovery.RequestedModel = o.ReagentModel
+		}
+		if o.ReagentEffort != "" {
+			s.ActiveRecovery.RequestedEffort = o.ReagentEffort
+		}
+	}
+	s.Recoveries[len(s.Recoveries)-1] = *s.ActiveRecovery
+}
+
+func integrationRecoveryParent(s State) (string, error) {
+	parent, err := git(s.Repository, "rev-parse", s.Parent)
+	if err != nil {
+		return "", err
+	}
+	task, err := git(s.Repository, "rev-parse", s.Branch)
+	if err != nil {
+		return "", err
+	}
+	if task != s.AuthorizedCommit || (parent != s.Base && parent != s.AuthorizedCommit) {
+		return "", fmt.Errorf("integration refs are not safely reconcilable: parent=%s task=%s expected parent %s or %s and task %s", parent, task, s.Base, s.AuthorizedCommit, s.AuthorizedCommit)
+	}
+	if parent == s.AuthorizedCommit {
+		return "authorized", nil
+	}
+	return "base", nil
+}
+
+func archivePartialReview(dir string, s State, at time.Time) (string, string, error) {
+	if s.TaskID == "" {
+		return "", "", nil
+	}
+	partial := reviewPath(dir, s.Roadmap, s.TaskID, s.Assessments+1)
+	info, err := os.Stat(partial)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("inspect partial review evidence: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", "", fmt.Errorf("partial review evidence is not a regular file: %s", partial)
+	}
+	base := strings.TrimSuffix(partial, ".md") + "-partial-" + at.Format("20060102T150405.000000000Z")
+	archive := base + ".md"
+	for collision := 2; ; collision++ {
+		if _, err := os.Lstat(archive); errors.Is(err, os.ErrNotExist) {
+			break
+		} else if err != nil {
+			return "", "", fmt.Errorf("inspect partial review archive: %w", err)
+		}
+		archive = fmt.Sprintf("%s-%d.md", base, collision)
+	}
+	if err := os.Rename(partial, archive); err != nil {
+		return "", "", fmt.Errorf("archive partial review evidence: %w", err)
+	}
+	return partial, archive, nil
+}
+
+func refreshPreparedRecovery(dir string, s State) (State, error) {
+	if s.ActiveRecovery == nil || s.Phase != "recovering" {
+		return s, fmt.Errorf("no prepared recovery to refresh")
+	}
+	partialOriginal, archive := "", ""
+	var err error
+	if s.ActiveRecovery.Step == "reviewing" {
+		partialOriginal, archive, err = archivePartialReview(dir, s, time.Now().UTC())
+		if err != nil {
+			return s, err
+		}
+		if archive != "" {
+			s.ActiveRecovery.AdditionalArchives = append(s.ActiveRecovery.AdditionalArchives, archive)
+		}
+	}
+	observed, err := checkpoint(s, dir)
+	if err != nil {
+		if archive != "" {
+			_ = os.Rename(archive, partialOriginal)
+		}
+		return s, fmt.Errorf("observe prepared recovery source and evidence: %w", err)
+	}
+	s.ActiveRecovery.Observed = observed
+	s.ActiveRecovery.Changes = checkpointChanges(s.ActiveRecovery.Before, observed)
+	var bindingErr error
+	switch s.ActiveRecovery.Step {
+	case "reviewing":
+		if err := verifyCandidate(s); err != nil {
+			bindingErr = fmt.Errorf("review recovery requires the exact candidate in a clean checkout: %w", err)
+		}
+	case "integrating":
+		parent, err := integrationRecoveryParent(s)
+		if err != nil {
+			bindingErr = err
+		} else if parent != s.ActiveRecovery.IntegrationParent {
+			bindingErr = fmt.Errorf("integration refs changed after recovery preparation: observed %s parent, prepared for %s parent", parent, s.ActiveRecovery.IntegrationParent)
+		}
+	}
+	s.Recoveries[len(s.Recoveries)-1] = *s.ActiveRecovery
+	if bindingErr != nil {
+		s.LastError = bindingErr.Error()
+		if err := save(dir, s); err != nil {
+			if archive != "" {
+				_ = os.Rename(archive, partialOriginal)
+			}
+			return s, fmt.Errorf("%v; save stopped recovery: %w", bindingErr, err)
+		}
+		return s, bindingErr
+	}
+	s.LastError = fmt.Sprintf("recovery requested for failed %s step; replacement turn is not yet dispatched", s.ActiveRecovery.Step)
+	if err := save(dir, s); err != nil {
+		if archive != "" {
+			_ = os.Rename(archive, partialOriginal)
+		}
+		return s, err
+	}
+	return s, nil
+}
+
 func prepareRecovery(dir string, s State) (State, error) {
 	step, err := pendingRecoveryStep(s)
 	if err != nil {
@@ -656,44 +789,18 @@ func prepareRecovery(dir string, s State) (State, error) {
 	}
 	recoveryParent := ""
 	if step == "integrating" {
-		parent, err := git(s.Repository, "rev-parse", s.Parent)
+		recoveryParent, err = integrationRecoveryParent(s)
 		if err != nil {
 			return s, err
-		}
-		task, err := git(s.Repository, "rev-parse", s.Branch)
-		if err != nil {
-			return s, err
-		}
-		if task != s.AuthorizedCommit || (parent != s.Base && parent != s.AuthorizedCommit) {
-			return s, fmt.Errorf("integration refs are not safely reconcilable: parent=%s task=%s expected parent %s or %s and task %s", parent, task, s.Base, s.AuthorizedCommit, s.AuthorizedCommit)
-		}
-		if parent == s.AuthorizedCommit {
-			recoveryParent = "authorized"
-		} else {
-			recoveryParent = "base"
 		}
 	}
 	recovery := Recovery{RequestedAt: time.Now().UTC(), PriorPhase: s.Phase, Role: recoveryRole(step), Step: step, Diagnostic: s.Diagnostics, PriorError: s.LastError, Before: s.InFlight.Checkpoint, Observed: observed, PriorThread: s.InFlight.ThreadID, IntegrationParent: recoveryParent}
 	recovery.Changes = checkpointChanges(recovery.Before, recovery.Observed)
 	partialOriginal := ""
 	if step == "reviewing" && s.TaskID != "" {
-		partial := reviewPath(dir, s.Roadmap, s.TaskID, s.Assessments+1)
-		if info, statErr := os.Stat(partial); statErr == nil && info.Mode().IsRegular() {
-			base := strings.TrimSuffix(partial, ".md") + "-partial-" + recovery.RequestedAt.Format("20060102T150405.000000000Z")
-			archive := base + ".md"
-			for collision := 2; ; collision++ {
-				if _, err := os.Lstat(archive); errors.Is(err, os.ErrNotExist) {
-					break
-				} else if err != nil {
-					return s, fmt.Errorf("inspect partial review archive: %w", err)
-				}
-				archive = fmt.Sprintf("%s-%d.md", base, collision)
-			}
-			if err := os.Rename(partial, archive); err != nil {
-				return s, fmt.Errorf("archive partial review evidence: %w", err)
-			}
-			partialOriginal = partial
-			recovery.ArchivedEvidence = archive
+		partialOriginal, recovery.ArchivedEvidence, err = archivePartialReview(dir, s, recovery.RequestedAt)
+		if err != nil {
+			return s, err
 		}
 	}
 	s.Recoveries = append(s.Recoveries, recovery)
@@ -877,9 +984,15 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		}
 		authorizeLimitIncreases(&s, o)
 		if s.Phase == "limit_exhausted" {
-			s.Phase, s.LimitPhase, s.LastError = pending, "", ""
+			next := pending
+			if s.ActiveRecovery != nil && s.ActiveRecovery.Step == pending {
+				next = "recovering"
+			}
+			s.Phase, s.LimitPhase, s.LastError = next, "", ""
 			if limitsExhausted(s, pending) {
 				setLimitExhausted(&s, pending)
+			} else if next == "recovering" {
+				s.LastError = fmt.Sprintf("recovery limit increase authorized for failed %s step; run --recover to revalidate and dispatch the replacement turn", pending)
 			}
 		}
 		// Authorization is durable before any provider is opened or turn dispatched.
@@ -901,6 +1014,11 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 				if err != nil {
 					return s, err
 				}
+			}
+			recordRecoveryOverride(&s, o)
+			s, err = refreshPreparedRecovery(dir, s)
+			if err != nil {
+				return s, err
 			}
 			break
 		}
@@ -1015,7 +1133,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	}
 	if s.ActiveRecovery != nil {
 		role := s.ActiveRecovery.Role
-		if o.ReagentModel != "" || o.ReagentEffort != "" || o.IragentModel != "" || o.IragentEffort != "" {
+		if s.ActiveRecovery.RequestedModel != "" || s.ActiveRecovery.RequestedEffort != "" {
 			models, err := runner.Models(ctx)
 			if err != nil {
 				return recoverySetupError(dir, s, err)
@@ -1024,7 +1142,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 			for configuredRole, profile := range s.Profiles {
 				project[configuredRole] = dispatch.Choice{Model: profile.Model, Effort: profile.Effort}
 			}
-			resolved, err := dispatch.ResolveProfiles(models, dispatch.ProfileSources{Project: project, Invocation: map[dispatch.Role]dispatch.Choice{dispatch.Reagent: {Model: o.ReagentModel, Effort: o.ReagentEffort}, dispatch.Iragent: {Model: o.IragentModel, Effort: o.IragentEffort}}})
+			resolved, err := dispatch.ResolveProfiles(models, dispatch.ProfileSources{Project: project, Invocation: map[dispatch.Role]dispatch.Choice{role: {Model: s.ActiveRecovery.RequestedModel, Effort: s.ActiveRecovery.RequestedEffort}}})
 			if err != nil {
 				return recoverySetupError(dir, s, err)
 			}

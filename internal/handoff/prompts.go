@@ -68,6 +68,9 @@ Observed changes since the pre-turn checkpoint:
 		if r.ArchivedEvidence != "" {
 			prompt += fmt.Sprintf("Partial review prose was retained separately at %s. It is not an assessment or verdict. Write the replacement assessment to the ordinary review path named above.\n", r.ArchivedEvidence)
 		}
+		for _, archive := range r.AdditionalArchives {
+			prompt += fmt.Sprintf("Additional partial review prose observed before retry was retained separately at %s. It is not an assessment or verdict.\n", archive)
+		}
 	}
 	return prompt, nil
 }
