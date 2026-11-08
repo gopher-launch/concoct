@@ -321,7 +321,7 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 		args := continuationArgs(command, s)
 		args = append(args, "--recover")
 		fmt.Fprintln(w, "To explicitly recover the stopped turn after inspecting its diagnostics and preserved work:", shellCommand(command.executable, args...))
-		fmt.Fprintln(w, "Recovery is refused while prior owned processes remain uncertain, when the pending step is ambiguous, or when review/integration source bindings are unsafe.")
+		fmt.Fprintln(w, "Recovery is refused when a complete recorded process identity is live or cannot be inspected, when the pending step is ambiguous, or when review/integration source bindings are unsafe. Missing or incomplete legacy process identities are treated as missing diagnostics and do not by themselves prevent explicit recovery.")
 	}
 	if s.Phase == "completed" {
 		fmt.Fprintln(w, "No active work. Run concoct run to start the next ready task from the current clean checkout.")

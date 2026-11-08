@@ -767,7 +767,7 @@ func refreshPreparedRecovery(dir string, s State) (State, error) {
 		}
 		return s, bindingErr
 	}
-	s.LastError = fmt.Sprintf("recovery requested for failed %s step; replacement turn is not yet dispatched", s.ActiveRecovery.Step)
+	s.LastError = fmt.Sprintf("recovery requested for failed %s step; continuation turn is not yet dispatched", s.ActiveRecovery.Step)
 	if err := save(dir, s); err != nil {
 		if archive != "" {
 			_ = os.Rename(archive, partialOriginal)
@@ -843,7 +843,7 @@ func prepareRecovery(dir string, s State) (State, error) {
 	s.ActiveRecovery = &s.Recoveries[len(s.Recoveries)-1]
 	s.PendingStep = step
 	s.Phase = "recovering"
-	s.LastError = fmt.Sprintf("recovery requested for failed %s step; replacement turn is not yet dispatched", step)
+	s.LastError = fmt.Sprintf("recovery requested for failed %s step; continuation turn is not yet dispatched", step)
 	if s.Threads == nil {
 		s.Threads = make(map[string]string)
 	}
@@ -949,14 +949,14 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		return s, fmt.Errorf("role settings and limits cannot change an active run")
 	}
 	if o.Recover && (o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
-		return s, fmt.Errorf("recovery may override only the replacement role model and effort")
+		return s, fmt.Errorf("recovery may override only the continued role model and effort")
 	}
 	if s.ActiveRecovery != nil && s.InFlight == nil && (s.Phase == "engineering" || s.Phase == "reviewing" || s.Phase == "correcting" || s.Phase == "integrating") {
 		// Normalize records written by the initial CON-077 candidate before the
 		// dedicated stopped recovery phase was introduced.
 		s.Phase = "recovering"
 		s.PendingStep = s.ActiveRecovery.Step
-		s.LastError = fmt.Sprintf("recovery requested for failed %s step; replacement turn is not yet dispatched", s.ActiveRecovery.Step)
+		s.LastError = fmt.Sprintf("recovery requested for failed %s step; continuation turn is not yet dispatched", s.ActiveRecovery.Step)
 		if err := save(dir, s); err != nil {
 			return s, err
 		}
@@ -1037,7 +1037,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 			if limitsExhausted(s, pending) {
 				setLimitExhausted(&s, pending)
 			} else if next == "recovering" {
-				s.LastError = fmt.Sprintf("recovery limit increase authorized for failed %s step; run --recover to revalidate and dispatch the replacement turn", pending)
+				s.LastError = fmt.Sprintf("recovery limit increase authorized for failed %s step; run --recover to revalidate and dispatch the continuation turn", pending)
 			}
 		}
 		// Authorization is durable before any provider is opened or turn dispatched.
@@ -1270,7 +1270,7 @@ func recoverySetupError(dir string, s State, err error) (State, error) {
 	}
 	s.Phase = "recovering"
 	s.PendingStep = s.ActiveRecovery.Step
-	s.LastError = "recovery setup failed before replacement dispatch: " + err.Error()
+	s.LastError = "recovery setup failed before continuation dispatch: " + err.Error()
 	if saveErr := save(dir, s); saveErr != nil {
 		return s, fmt.Errorf("%v; save stopped recovery state: %w", err, saveErr)
 	}

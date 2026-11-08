@@ -44,7 +44,7 @@ This document describes current delivered behavior, organized by capability. It 
 - Structured commentary across supported phases displays its human summary without showing control fields or treating intermediate dispositions as workflow decisions. A completed result is announced only after handoff accepts its routing and evidence bindings, including phase-less final results.
 - Explicit JSON output and quiet progress suppression remain available.
 - Each provider execution retains startup and execution stderr in an external diagnostic file whose path appears in status. Recoverable stderr messages do not turn a successful agent result into failure. Execution failures produce concise terminal text and a retained diagnostic location.
-- Failed/uncertain status and recovery output identify the failed role, pending step, diagnostics, consumed limits, observed changes and proposed replacement action. Context-preserving `--recover` guidance explains safety refusals; JSON recovery dispatch records remain machine-readable.
+- Failed/uncertain status and recovery output identify the failed role, pending step, diagnostics, consumed limits, observed changes and proposed continuation action. Context-preserving `--recover` guidance distinguishes a recorded live or uninspectable process from missing legacy process diagnostics; JSON recovery dispatch records remain machine-readable.
 
 ## Demonstrated workflow and limits
 

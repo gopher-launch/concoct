@@ -65,10 +65,13 @@ func TestRecoveryPresentationIncludesContextualCommand(t *testing.T) {
 		InFlight: &handoff.InFlight{Role: "iragent", ThreadID: "failed-thread", Step: "reviewing"},
 	}
 	displayWithContext(&out, s, false, commandContext{executable: "/tmp/concoct tool", options: handoff.Options{Root: "/tmp/root;literal"}})
-	for _, want := range []string{"Failed role: iragent", "Pending step: reviewing", "Provider diagnostics: /tmp/provider.log", "Invocations: 2/12", "'/tmp/concoct tool' run --repo '/tmp/repo with space' --root '/tmp/root;literal' --roadmap '/tmp/repo with space/roadmap.md' --recover"} {
+	for _, want := range []string{"Failed role: iragent", "Pending step: reviewing", "Provider diagnostics: /tmp/provider.log", "Invocations: 2/12", "complete recorded process identity is live or cannot be inspected", "Missing or incomplete legacy process identities are treated as missing diagnostics", "'/tmp/concoct tool' run --repo '/tmp/repo with space' --root '/tmp/root;literal' --roadmap '/tmp/repo with space/roadmap.md' --recover"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %s", want, out.String())
 		}
+	}
+	if strings.Contains(out.String(), "prior owned processes remain uncertain") {
+		t.Fatalf("legacy diagnostic gaps were presented as a recovery refusal: %s", out.String())
 	}
 	out.Reset()
 	s.Phase = "recovering"
