@@ -205,7 +205,7 @@ func TestSuggestedCommandExecutesWithExactContextAndAction(t *testing.T) {
 		MaxAttempts:    12,
 	}
 	var out bytes.Buffer
-	displayWithContext(&out, state, false, commandContext{executable: executable, options: handoff.Options{Root: "/tmp/root;$(false)"}})
+	displayWithContext(&out, state, false, commandContext{executable: executable, options: handoff.Options{Root: "/tmp/root;$(false)", Codex: "/tmp/provider with space;$(false)"}})
 	line := "To authorize local integration of this exact commit: "
 	start := strings.Index(out.String(), line)
 	if start == -1 {
@@ -221,7 +221,7 @@ func TestSuggestedCommandExecutesWithExactContextAndAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"run", "--repo", state.Repository, "--root", "/tmp/root;$(false)", "--roadmap", state.Roadmap, "--approve", state.ApprovedCommit}
+	want := []string{"run", "--repo", state.Repository, "--root", "/tmp/root;$(false)", "--codex", "/tmp/provider with space;$(false)", "--roadmap", state.Roadmap, "--approve", state.ApprovedCommit}
 	if got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"); strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("suggested arguments changed: got %#v want %#v", got, want)
 	}

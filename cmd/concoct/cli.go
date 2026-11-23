@@ -328,7 +328,7 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 	}
 }
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run --recover [continued role model/effort option] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap. --recover explicitly continues a failed or uncertain agent turn, resuming its saved session when available and preserving source, evidence and consumed limits.")
+	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run --recover [continued role model/effort option] [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap. --recover explicitly continues a failed or uncertain agent turn, resuming its saved session when available and preserving source, evidence and consumed limits. Explicit --codex PATH is repeated in generated run commands because provider selection is invocation-only.")
 }
 
 func handoffRoleForStep(step string) string {
@@ -345,6 +345,9 @@ func continuationArgs(command commandContext, s handoff.State) []string {
 	}
 	if command.options.Root != "" {
 		args = append(args, "--root", command.options.Root)
+	}
+	if command.options.Codex != "" {
+		args = append(args, "--codex", command.options.Codex)
 	}
 	if s.Roadmap != "" {
 		args = append(args, "--roadmap", s.Roadmap)
