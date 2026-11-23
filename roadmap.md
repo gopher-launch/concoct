@@ -112,7 +112,7 @@ Concoct coordinates one task through reagent implementation, independent iragent
 
 - Kind: task
 - Status: ready
-- Priority: medium
+- Priority: high
 - Parent: none
 - Depends on: none
 
