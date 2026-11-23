@@ -1,7 +1,7 @@
 ---
 version: 1
 project: concoct
-updated: 2026-11-08
+updated: 2026-11-23
 ---
 
 # Concoct implementation roadmap
@@ -20,29 +20,6 @@ Concoct coordinates one task through reagent implementation, independent iragent
 - `Depends on` names unfinished tasks still present in this roadmap. Remove a prerequisite reference only when delivery has satisfied it. Missing or misspelled references remain errors, never implicit evidence of completion. Retire epic/feature entries when they no longer organize unfinished work.
 - `capabilities.md` describes current behavior and practical limits, organized by capability. It does not accumulate completed-task acceptance criteria, obsolete mechanisms or a chronological delivery log. Source remains the authority for implemented behavior.
 - Keep trial output, investigations, diagnostics and review records outside the project. Use focused deterministic checks for these follow-ups; another billable live trial is not required solely for presentation or bookkeeping changes.
-
-## CON-068 — Preserve execution context in suggested continuation commands
-
-- Kind: task
-- Status: ready
-- Priority: medium
-- Parent: none
-- Depends on: none
-
-**Objective:** Make a copied continuation command use the same executable, repository and evidence root as the invocation that produced it.
-
-**Context:** A trial invoked `/tmp/concoct` with an explicit `--root`, but the suggested `concoct run --approve COMMIT` selected a different installed binary and evidence directory.
-
-**Acceptance criteria:**
-
-- Generate continuation commands using the executable used for the current invocation. Preserve an explicit executable path such as `/tmp/concoct`; do not replace it with an unqualified `concoct`.
-- Preserve relevant explicit context, including `--root` and `--repo`, and any invocation-only settings required for the proposed continuation. Reuse durably retained settings where that is already the continuation contract; avoid silently reverting invocation-only choices to defaults.
-- Quote executable paths and argument values correctly for the documented shell. Handle spaces and shell metacharacters as literal argument content.
-- Apply the same command construction to run summaries, `status` suggestions and other continuation hints. A separate `status` invocation uses its current executable and selected repository/root context.
-- Preserve the specific next action and its exact identifier or approved commit. Do not carry an obsolete action flag into the suggested command.
-- Update operator examples and help where needed.
-
-**Verification:** Capture generated commands for an absolute executable path, explicit root/repository, paths with spaces/metacharacters, and a continuation from `status`. Verify parsed argument values with a harmless executable fixture rather than starting a provider. Check applicable tests, build and whitespace validation.
 
 ## CON-069 — Timestamp terminal messages and standardize run summaries
 
@@ -117,7 +94,7 @@ Concoct coordinates one task through reagent implementation, independent iragent
 - Status: planned
 - Priority: low
 - Parent: none
-- Depends on: CON-068, CON-069, CON-072
+- Depends on: CON-069, CON-072
 
 **Objective:** Package the viable Concoct workflow as a reusable skill after its command-context, output and artifact-location changes settle.
 

@@ -104,8 +104,8 @@ func TestRecoveryDispatchPresentationIsReadableAndJSONSafe(t *testing.T) {
 
 func TestCompletedPresentationOffersNextRunAndHistory(t *testing.T) {
 	var out bytes.Buffer
-	display(&out, handoff.State{Phase: "completed", TaskID: "APP-002", Candidate: "abc123", CompletionRecord: "/tmp/completion.json", Attempts: 5, MaxAttempts: 12}, false)
-	for _, want := range []string{"Concoct: completed", "Task: APP-002", "Completion record: /tmp/completion.json", "No active work.", "concoct run"} {
+	displayWithContext(&out, handoff.State{Phase: "completed", Repository: "/tmp/repo with space", Roadmap: "/tmp/repo with space/roadmap.md", TaskID: "APP-002", Candidate: "abc123", CompletionRecord: "/tmp/completion.json", Attempts: 5, MaxAttempts: 12}, false, commandContext{executable: "/tmp/concoct tool", options: handoff.Options{Root: "/tmp/external root"}})
+	for _, want := range []string{"Concoct: completed", "Task: APP-002", "Completion record: /tmp/completion.json", "No active work.", "'/tmp/concoct tool' run --repo '/tmp/repo with space' --root '/tmp/external root' --roadmap '/tmp/repo with space/roadmap.md'"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %s", want, out.String())
 		}
@@ -187,5 +187,47 @@ func TestShellCommandPreservesLiteralArguments(t *testing.T) {
 	}
 	if got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"); strings.Join(got, "\x00") != strings.Join(values, "\x00") {
 		t.Fatalf("arguments changed: got %#v want %#v", got, values)
+	}
+}
+
+func TestSuggestedCommandExecutesWithExactContextAndAction(t *testing.T) {
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "harmless command's")
+	output := filepath.Join(dir, "arguments.txt")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARGS_OUT\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	state := handoff.State{
+		Phase:          "awaiting_approval",
+		Repository:     "/tmp/repo with space;literal",
+		Roadmap:        "/tmp/repo with space;literal/deploy's/roadmap.md",
+		ApprovedCommit: "commit;$(false)",
+		MaxAttempts:    12,
+	}
+	var out bytes.Buffer
+	displayWithContext(&out, state, false, commandContext{executable: executable, options: handoff.Options{Root: "/tmp/root;$(false)"}})
+	line := "To authorize local integration of this exact commit: "
+	start := strings.Index(out.String(), line)
+	if start == -1 {
+		t.Fatalf("approval command missing from %s", out.String())
+	}
+	generated := strings.SplitN(out.String()[start+len(line):], "\n", 2)[0]
+	cmd := exec.Command("sh", "-c", generated)
+	cmd.Env = append(os.Environ(), "ARGS_OUT="+output)
+	if data, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("execute suggested command: %v: %s\ncommand: %s", err, data, generated)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"run", "--repo", state.Repository, "--root", "/tmp/root;$(false)", "--roadmap", state.Roadmap, "--approve", state.ApprovedCommit}
+	if got := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"); strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("suggested arguments changed: got %#v want %#v", got, want)
+	}
+	for _, obsolete := range []string{"--answer", "--recover", "--approve-review-limit-increase", "--approve-invocation-limit-increase"} {
+		if strings.Contains(generated, obsolete) {
+			t.Fatalf("approval command retained obsolete action %s: %s", obsolete, generated)
+		}
 	}
 }
