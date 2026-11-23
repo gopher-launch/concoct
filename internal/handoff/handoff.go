@@ -1676,6 +1676,9 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 			if result.TaskID == "" || result.Candidate == "" {
 				return halt(dir, s, "invalid_result", fmt.Errorf("ready result requires task ID and candidate commit"))
 			}
+			if step == "engineering" && s.PreferredTask != "" && result.TaskID != s.PreferredTask {
+				return halt(dir, s, "invalid_result", fmt.Errorf("ready result task %s does not match preferred task %s", result.TaskID, s.PreferredTask))
+			}
 			if step == "correcting" && (result.TaskID != s.TaskID || result.Candidate == s.Candidate) {
 				return halt(dir, s, "invalid_result", fmt.Errorf("correction requires same task and a distinct candidate"))
 			}

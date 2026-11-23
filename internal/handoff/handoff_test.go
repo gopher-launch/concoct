@@ -180,6 +180,20 @@ func TestPreferredTaskAcceptedAndContinuesOrdinaryWorkflow(t *testing.T) {
 	}
 }
 
+func TestPreferredTaskCannotSilentlySelectDifferentTask(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("ready_for_review", "Different candidate ready", "APP-002", "CANDIDATE"), result("approved", "Must not review", "APP-002", "CANDIDATE")}}
+	fake.evidenceDir, _ = storage(repo, root)
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root, PreferTask: "APP-999"}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
+	if err == nil || !strings.Contains(err.Error(), "does not match preferred task") || s.Phase != "invalid_result" || s.Attempts != 1 || fake.turns != 1 {
+		t.Fatalf("mismatched preferred task reached review: %+v %v turns=%d", s, err, fake.turns)
+	}
+	if s.TaskID != "" || s.Candidate != "" {
+		t.Fatalf("mismatched result claimed task or candidate: %+v", s)
+	}
+}
+
 func TestPreferredTaskRejectionRetiresSelectionAndAllowsFreshRun(t *testing.T) {
 	repo := testRepo(t)
 	root := t.TempDir()
