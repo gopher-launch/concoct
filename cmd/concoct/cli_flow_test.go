@@ -18,9 +18,10 @@ import (
 )
 
 type rejectedReviewRunner struct {
-	repo, evidence string
-	turns          int
-	phaseLess      bool
+	repo, evidence     string
+	turns              int
+	phaseLess          bool
+	preferenceRejected bool
 }
 
 func (r *rejectedReviewRunner) Models(context.Context) ([]codexapp.Model, error) {
@@ -46,10 +47,14 @@ func (r *rejectedReviewRunner) RunRoleTurn(_ context.Context, id, prompt string,
 	turnID := fmt.Sprintf("turn-%d", r.turns)
 	emit(codexapp.Event{Kind: "turn/started", ThreadID: id, TurnID: turnID})
 	candidate := "wrong-candidate"
+	taskID := "APP-002"
 	disposition, summary := "approved", "Approved wrong candidate"
 	phase := "final_answer"
 	if r.phaseLess {
-		candidate, disposition, summary, phase = "", "no_suitable_work", "Nothing ready", ""
+		taskID, candidate, disposition, summary, phase = "", "", "no_suitable_work", "Nothing ready", ""
+	} else if r.preferenceRejected && settings.Role == "reagent" {
+		taskID, candidate, disposition, summary = "", "", "task_preference_rejected", "APP-999 is planned and not eligible"
+		r.evidence = ""
 	} else if settings.Role == "reagent" {
 		gitFlow(r.repo, "switch", "-qc", "task/APP-002")
 		if err := os.WriteFile(filepath.Join(r.repo, "feature.txt"), []byte("ready\n"), 0600); err != nil {
@@ -73,7 +78,7 @@ func (r *rejectedReviewRunner) RunRoleTurn(_ context.Context, id, prompt string,
 		}
 		disposition, summary = "ready_for_review", "Candidate ready"
 	}
-	result, _ := json.Marshal(map[string]any{"disposition": disposition, "summary": summary, "task_id": "APP-002", "candidate": candidate, "findings": nil, "evidence": r.evidence, "question": nil})
+	result, _ := json.Marshal(map[string]any{"disposition": disposition, "summary": summary, "task_id": taskID, "candidate": candidate, "findings": nil, "evidence": r.evidence, "question": nil})
 	item, _ := json.Marshal(map[string]any{"item": map[string]any{"id": "final", "type": "agentMessage", "phase": phase, "text": string(result)}})
 	emit(codexapp.Event{Kind: "item/completed", ThreadID: id, TurnID: turnID, Raw: item})
 	emit(codexapp.Event{Kind: "turn/completed", ThreadID: id, TurnID: turnID, Raw: []byte(`{"turn":{"status":"completed"}}`)})
@@ -121,6 +126,21 @@ func TestPhaseLessFinalResultIsLabeledAfterSuccessfulRun(t *testing.T) {
 	exit := run(context.Background(), []string{"run", "--repo", repo, "--root", root}, &stdout, &stderr, func(context.Context, string, io.Writer) (handoff.Runner, error) { return runner, nil })
 	if exit != 0 || runner.turns != 1 || !strings.Contains(stdout.String(), "[reagent result] no-suitable-work: Nothing ready") || strings.Contains(stdout.String(), "[reagent] Nothing ready") || stderr.Len() != 0 {
 		t.Fatalf("phase-less final presentation: exit=%d turns=%d stdout=%q stderr=%q", exit, runner.turns, stdout.String(), stderr.String())
+	}
+}
+
+func TestPreferredTaskDeclineIsDisplayedAsSuccessfulNormalOutcome(t *testing.T) {
+	repo, root := flowRepo(t)
+	runner := &rejectedReviewRunner{repo: repo, preferenceRejected: true}
+	var stdout, stderr bytes.Buffer
+	exit := run(context.Background(), []string{"run", "--repo", repo, "--root", root, "--prefer-task", "APP-999"}, &stdout, &stderr, func(context.Context, string, io.Writer) (handoff.Runner, error) { return runner, nil })
+	for _, want := range []string{"[reagent result] task-preference-rejected: APP-999 is planned and not eligible", "Concoct: task-preference-rejected", "Invocations: 1/12"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("decline output lacks %q: exit=%d stdout=%q stderr=%q", want, exit, stdout.String(), stderr.String())
+		}
+	}
+	if exit != 0 || runner.turns != 1 || stderr.Len() != 0 {
+		t.Fatalf("decline was not a successful single-turn outcome: exit=%d turns=%d stdout=%q stderr=%q", exit, runner.turns, stdout.String(), stderr.String())
 	}
 }
 

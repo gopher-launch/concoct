@@ -8,6 +8,14 @@ Build with Go 1.27.2 or newer on Linux, with Codex CLI 0.147.0 available as `cod
 
 For a repository with multiple roadmaps, select the authoritative backlog for fresh work with `concoct run --roadmap roadmap.md` or, for example, `concoct run --roadmap deploy/roadmap.md`. Relative paths resolve from the selected repository; absolute paths are accepted. Concoct validates the roadmap before dispatch, records its resolved path with active work, supplies its contents throughout implementation and review, and rejects attempts to switch roadmaps while that work remains active. A `capabilities.md` beside the selected roadmap applies when present; otherwise the repository-root capability document applies. Task and review evidence is stored under a compact namespace derived from the canonical roadmap path, so the same task ID in another roadmap remains distinct. Run summaries and `status` show the recorded roadmap.
 
+To suggest a particular task during fresh selection, use `concoct run --prefer-task TASK-ID`. Reagent still inspects the selected roadmap and repository guidance and decides whether the suggestion satisfies readiness, dependencies, scope and other selection requirements. An accepted suggestion continues through implementation and review in the same turn without another confirmation:
+
+```sh
+/tmp/concoct run --repo /path/to/checkout --prefer-task APP-002
+```
+
+If reagent declines the suggestion, Concoct displays its concrete reason, for example `task-preference-rejected: APP-002 has an unsatisfied dependency`, returns successfully, retains that invocation's diagnostics and usage for inspection with `status`, and leaves the next plain `concoct run` free to start fresh selection. It does not silently choose another task or retry. `--prefer-task` is invocation-only and is rejected while active work must be continued or resolved.
+
 If iragent requests changes, Concoct sends its assessment and findings to reagent, then requests another independent assessment of the corrected commit. An approval displays the task, exact reviewed commit, role summaries and external review location. When an invocation remains, inspect the candidate and evidence before explicitly authorizing local integration with the generated command, such as `/tmp/concoct run --repo /path/to/checkout --root /path/to/external-root --codex /path/to/codex --approve COMMIT`. Concoct passes that exact authorization to reagent, which checks Git state, integrates locally and reports its result. A successful integration is retained in an external completion record and active state is released. `concoct status` shows the latest completed handoff; a later generated run command can start the next ready task from the current clean named checkout, including a descendant commit added by the operator after integration. Concoct does not decide whether the engineering or review narrative is correct.
 
 The default role model is the provider recommendation; reagent uses medium effort and iragent high effort. Fresh runs can set `--reagent-model`, `--iragent-model`, `--reagent-effort`, `--iragent-effort`, `--dispatch-limit`, `--review-limit`, `--turn-timeout` and `--stall-timeout`. Timeouts use Go durations such as `20m`. A new run defaults to twelve agent invocations and three completed independent assessments. Consumption continues across correction, replacement sessions and integration. No integration starts without exact operator approval.
@@ -38,6 +46,7 @@ go build -o /tmp/concoct ./cmd/concoct
 /tmp/concoct version
 /tmp/concoct status
 /tmp/concoct run
+/tmp/concoct run --prefer-task APP-002
 /tmp/concoct run --recover
 /tmp/concoct run --approve REVIEWED_COMMIT
 ```

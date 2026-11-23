@@ -142,6 +142,11 @@ func parse(args []string) (handoff.Options, string, bool, bool, error) {
 				return o, "", false, false, fmt.Errorf("roadmap path must not be empty")
 			}
 			o.Roadmap = value
+		case "prefer-task":
+			if strings.TrimSpace(value) == "" {
+				return o, "", false, false, fmt.Errorf("preferred task must not be empty")
+			}
+			o.PreferTask = value
 		case "codex":
 			o.Codex = value
 		case "approve":
@@ -192,7 +197,7 @@ func parse(args []string) (handoff.Options, string, bool, bool, error) {
 			return o, "", false, false, fmt.Errorf("unknown option --%s", key)
 		}
 	}
-	if command == "status" && (o.Recover || o.Codex != "" || o.Roadmap != "" || o.Approve != "" || o.Answer != "" || o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.ApproveReviewLimitIncrease > 0 || o.ApproveInvocationLimitIncrease > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
+	if command == "status" && (o.Recover || o.Codex != "" || o.Roadmap != "" || o.PreferTask != "" || o.Approve != "" || o.Answer != "" || o.ReagentModel != "" || o.IragentModel != "" || o.ReagentEffort != "" || o.IragentEffort != "" || o.MaxAttempts > 0 || o.MaxAssessments > 0 || o.ApproveReviewLimitIncrease > 0 || o.ApproveInvocationLimitIncrease > 0 || o.TurnTimeout > 0 || o.StallTimeout > 0) {
 		return o, "", false, false, fmt.Errorf("execution options require run")
 	}
 	return o, command, jsonMode, quiet, nil
@@ -328,7 +333,7 @@ func displayWithContext(w io.Writer, s handoff.State, jsonMode bool, command com
 	}
 }
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: concoct run [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run --recover [continued role model/effort option] [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap. --recover explicitly continues a failed or uncertain agent turn, resuming its saved session when available and preserving source, evidence and consumed limits. Explicit --codex PATH is repeated in generated run commands because provider selection is invocation-only.")
+	fmt.Fprintln(w, "Usage: concoct run [--prefer-task TASK-ID] [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH] [--reagent-model MODEL] [--iragent-model MODEL] [--reagent-effort EFFORT] [--iragent-effort EFFORT] [--dispatch-limit N] [--review-limit N] [--turn-timeout DURATION] [--stall-timeout DURATION] [--json] [--quiet]\n       concoct run --answer TEXT [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run --approve COMMIT [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run --recover [continued role model/effort option] [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct run [--approve-review-limit-increase TOTAL] [--approve-invocation-limit-increase TOTAL] [--repo PATH] [--root PATH] [--roadmap PATH] [--codex PATH]\n       concoct status [--repo PATH] [--root PATH] [--json]\n       concoct help | version\n\n--prefer-task TASK-ID suggests one task during fresh selection; reagent still decides eligibility after inspecting the roadmap and repository guidance. It cannot be used while work is active. --roadmap PATH selects the authoritative roadmap for fresh work; relative paths resolve from --repo. Active work retains its recorded roadmap. --recover explicitly continues a failed or uncertain agent turn, resuming its saved session when available and preserving source, evidence and consumed limits. Explicit --codex PATH is repeated in generated run commands because provider selection is invocation-only.")
 }
 
 func handoffRoleForStep(step string) string {

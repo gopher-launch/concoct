@@ -179,6 +179,7 @@ func TestSchemaProducedRoleResults(t *testing.T) {
 		question                 bool
 	}{
 		{"no work", `{"disposition":"no_suitable_work","summary":"nothing ready","task_id":null,"candidate":null,"findings":null,"evidence":null,"question":null}`, "no_suitable_work", false},
+		{"preference rejected", `{"disposition":"task_preference_rejected","summary":"suggested task is planned","task_id":null,"candidate":null,"findings":null,"evidence":null,"question":null}`, "task_preference_rejected", false},
 		{"engineering", `{"disposition":"engineering","summary":"work in progress","task_id":"APP-002","candidate":null,"findings":null,"evidence":null,"question":null}`, "engineering", false},
 		{"ready", `{"disposition":"ready_for_review","summary":"ready","task_id":"APP-002","candidate":null,"findings":null,"evidence":null,"question":null}`, "ready_for_review", false},
 		{"approved", `{"disposition":"approved","summary":"checked","task_id":"APP-002","candidate":"abc123","findings":null,"evidence":null,"question":null}`, "approved", false},

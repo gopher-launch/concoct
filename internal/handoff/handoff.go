@@ -69,6 +69,7 @@ type State struct {
 	CompletionRecord string                                  `json:"completion_record,omitempty"`
 	CompletedAt      time.Time                               `json:"completed_at,omitempty"`
 	Updated          time.Time                               `json:"updated"`
+	PreferredTask    string                                  `json:"-"`
 }
 
 // LimitIncrease records an operator-authorized change to a total execution
@@ -129,7 +130,7 @@ type Recovery struct {
 }
 
 type Options struct {
-	Repository, Root, Codex, Roadmap                           string
+	Repository, Root, Codex, Roadmap, PreferTask               string
 	Approve, Answer                                            string
 	ReagentModel, IragentModel, ReagentEffort, IragentEffort   string
 	MaxAttempts, MaxAssessments                                int
@@ -893,6 +894,9 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 	if s.Repository != "" && s.Repository != repo {
 		return s, fmt.Errorf("state belongs to %s", s.Repository)
 	}
+	if o.PreferTask != "" && s.Phase != "" && s.Phase != "no_suitable_work" && s.Phase != "task_preference_rejected" {
+		return s, fmt.Errorf("--prefer-task is only valid for fresh selection; continue or resolve the existing active work first")
+	}
 	hasLimitIncrease := o.ApproveInvocationLimitIncrease > 0 || o.ApproveReviewLimitIncrease > 0
 	if o.Approve != "" && o.Answer != "" {
 		return s, fmt.Errorf("approval and blocker answer cannot be combined")
@@ -915,7 +919,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		}
 		return completed, nil
 	}
-	if s.Phase == "no_suitable_work" {
+	if s.Phase == "no_suitable_work" || s.Phase == "task_preference_rejected" {
 		s = State{}
 	}
 	if s.Phase == "" {
@@ -1091,7 +1095,7 @@ func Run(ctx context.Context, o Options, open func(context.Context, string, io.W
 		if err != nil {
 			return s, err
 		}
-		s = State{Repository: repo, Roadmap: s.Roadmap, Capabilities: s.Capabilities, Parent: branch, Base: base, Phase: "engineering", Profiles: map[dispatch.Role]codexapp.RoleSettings{}, Threads: map[string]string{}, RoleTurns: map[string]bool{}, MaxAttempts: 12, MaxAssessments: 3, TurnTimeout: o.TurnTimeout, StallTimeout: o.StallTimeout}
+		s = State{Repository: repo, Roadmap: s.Roadmap, Capabilities: s.Capabilities, Parent: branch, Base: base, Phase: "engineering", PreferredTask: o.PreferTask, Profiles: map[dispatch.Role]codexapp.RoleSettings{}, Threads: map[string]string{}, RoleTurns: map[string]bool{}, MaxAttempts: 12, MaxAssessments: 3, TurnTimeout: o.TurnTimeout, StallTimeout: o.StallTimeout}
 		if o.MaxAttempts > 0 {
 			s.MaxAttempts = o.MaxAttempts
 		}
@@ -1655,6 +1659,14 @@ func routeResult(dir string, s State, role dispatch.Role, step string, result co
 	switch step {
 	case "engineering", "correcting":
 		switch result.Disposition {
+		case "task_preference_rejected":
+			if step != "engineering" || s.PreferredTask == "" {
+				return halt(dir, s, "invalid_result", fmt.Errorf("task preference rejection requires a fresh preferred-task selection"))
+			}
+			if result.TaskID != "" || result.Candidate != "" || result.Evidence != "" {
+				return halt(dir, s, "invalid_result", fmt.Errorf("task preference rejection cannot claim task, candidate or task evidence"))
+			}
+			s.Phase = "task_preference_rejected"
 		case "no_suitable_work":
 			if step != "engineering" {
 				return halt(dir, s, "invalid_result", fmt.Errorf("correction cannot report no suitable work"))

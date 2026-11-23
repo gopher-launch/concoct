@@ -85,14 +85,22 @@ func recoveryLastResult(s State) string {
 // These templates give engineering judgment to the agents. Concoct routes
 // their completed structured results without reading or grading evidence.
 func ReagentPrompt(s State, root, roadmapContext string) string {
+	preference := ""
+	if s.PreferredTask != "" {
+		preference = fmt.Sprintf(`
+The operator suggests task %q for this selection invocation. Treat this only as an advisory preference. Inspect the current selected roadmap and all applicable repository guidance before deciding; the suggestion does not override dependencies, readiness, scope or any other selection requirement, and eligibility remains your judgment. If the suggested task is eligible and suitable, select it and continue implementation in this same turn through the ordinary workflow without asking for confirmation. If you reject it, do not select or implement another task: return disposition task_preference_rejected with a concrete explanation in summary, and set task_id, candidate, findings, evidence and question to null.
+`, s.PreferredTask)
+	}
 	return fmt.Sprintf(`Act as reagent for one bounded roadmap task in %s. Follow applicable repository and directory-specific instructions, read relevant design sections and current source, and use the selected roadmap and capability document identified below. Treat the supplied selected-roadmap contents as the authoritative backlog for task selection; do not select from another roadmap. For new work, inspect repository identity, branch, commit and status. Require a clean parent at %s (%s), then select one ready task whose dependencies are delivered. Create and switch to its task branch in this checkout. If continuing, inspect the existing branch and evidence; do not create another branch. Work only on that task.
+
+%s
 
 %s
 
 Keep a concise active task checkpoint outside the product repository under %s/<task-id>/task.md. This namespace is bound to the selected roadmap; use it exactly so an identical task ID from another roadmap retains separate evidence. Before editing, retain the selected task's original scope and acceptance criteria there so review can assess them after the roadmap entry is removed. Record the selected roadmap, repository, branch, base commit, decisions, checks, candidate commit and next action. Use ordinary tools. Implement, validate and self-review (at most three passes per candidate). Reconcile the selected roadmap and the applicable capability document identified above for the intended post-integration state: summarize delivered behavior in that capability document when one applies, remove the completed task from the selected roadmap, remove its satisfied dependency references, and promote newly eligible tasks when appropriate. Do not edit another roadmap in its place. Preserve unfinished task IDs and scope. Commit the finished candidate and leave its branch clean. Do not use historical task archives or the old Concoct workflow. Do not merge, push, publish or start another task. Stream concise prose as you work.
 
 Return one structured result. For readiness use disposition ready_for_review, the selected task_id, exact candidate commit and a brief summary. For no suitable task use no_suitable_work with a concrete summary. For a genuine blocker use decision_required with an explicit question. Set evidence to the task.md path. Null unused fields. The result is routing data; maintain engineering detail in task.md.
-`, s.Repository, s.Parent, s.Base, roadmapContext, filepath.Join(root, "evidence", "roadmap-"+shaPath(s.Roadmap)))
+`, s.Repository, s.Parent, s.Base, preference, roadmapContext, filepath.Join(root, "evidence", "roadmap-"+shaPath(s.Roadmap)))
 }
 
 func IragentPrompt(s State, root, roadmapContext string) string {

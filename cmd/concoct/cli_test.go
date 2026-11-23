@@ -37,6 +37,16 @@ func TestApprovalAndAnswerOptions(t *testing.T) {
 	if err != nil || o.Roadmap != "deploy/roadmap.md" {
 		t.Fatalf("parse roadmap: %+v %v", o, err)
 	}
+	o, _, _, _, err = parse([]string{"run", "--prefer-task", "APP-002"})
+	if err != nil || o.PreferTask != "APP-002" {
+		t.Fatalf("parse preferred task: %+v %v", o, err)
+	}
+	if _, _, _, _, err := parse([]string{"run", "--prefer-task", ""}); err == nil {
+		t.Fatal("accepted empty preferred task")
+	}
+	if _, _, _, _, err := parse([]string{"status", "--prefer-task", "APP-002"}); err == nil {
+		t.Fatal("status accepted preferred task")
+	}
 	if _, _, _, _, err := parse([]string{"status", "--roadmap", "roadmap.md"}); err == nil {
 		t.Fatal("status accepted run-only roadmap selection")
 	}
@@ -53,6 +63,16 @@ func TestApprovalAndAnswerOptions(t *testing.T) {
 	for _, args := range [][]string{{"run", "--approve-review-limit-increase", "0"}, {"run", "--approve-invocation-limit-increase", "bad"}, {"status", "--approve-review-limit-increase", "5"}} {
 		if _, _, _, _, err := parse(args); err == nil {
 			t.Fatalf("accepted invalid increase args %v", args)
+		}
+	}
+}
+
+func TestHelpDocumentsPreferredTask(t *testing.T) {
+	var out bytes.Buffer
+	usage(&out)
+	for _, want := range []string{"--prefer-task TASK-ID", "suggests one task during fresh selection", "reagent still decides eligibility", "cannot be used while work is active"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("help lacks %q: %s", want, out.String())
 		}
 	}
 }

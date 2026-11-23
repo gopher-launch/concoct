@@ -57,7 +57,9 @@ func (f *fakeRunner) RunRoleTurn(ctx context.Context, id, prompt string, s codex
 		<-ctx.Done()
 		return codexapp.TurnOutcome{ThreadID: id, TurnID: s.Role + "-turn"}, ctx.Err()
 	}
-	if s.Role == "reagent" {
+	result := f.output[f.turns-1]
+	parsed, _ := codexapp.ParseRoleResult(result)
+	if s.Role == "reagent" && parsed.Disposition == "ready_for_review" {
 		gitTest(f.repo, "switch", "-qc", "task/APP-002")
 		os.WriteFile(filepath.Join(f.repo, "feature.txt"), []byte("done\n"), 0600)
 		gitTest(f.repo, "add", "feature.txt")
@@ -66,13 +68,13 @@ func (f *fakeRunner) RunRoleTurn(ctx context.Context, id, prompt string, s codex
 		for i := range f.output {
 			f.output[i] = strings.ReplaceAll(f.output[i], "CANDIDATE", head)
 		}
+		result = f.output[f.turns-1]
 		if f.evidenceDir != "" && !f.skipTaskEvidence {
 			writeEvidence(taskEvidencePath(f.evidenceDir, selectedRoadmapInPrompt(prompt), "APP-002"))
 		}
 	} else if f.evidenceDir != "" && !f.skipReviewEvidence {
 		writeEvidence(reviewPath(f.evidenceDir, selectedRoadmapInPrompt(prompt), "APP-002", 1))
 	}
-	result := f.output[f.turns-1]
 	return codexapp.TurnOutcome{ThreadID: id, TurnID: s.Role + "-turn", Status: "completed", FinalText: result}, nil
 }
 
@@ -156,6 +158,102 @@ func TestSelectionToIndependentReview(t *testing.T) {
 	}
 	if s.Roadmap != filepath.Join(repo, "roadmap.md") {
 		t.Fatalf("default roadmap was not recorded: %+v", s)
+	}
+}
+
+func TestPreferredTaskAcceptedAndContinuesOrdinaryWorkflow(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("ready_for_review", "Preferred candidate ready", "APP-002", "CANDIDATE"), result("approved", "Looks good", "APP-002", "CANDIDATE")}}
+	fake.evidenceDir, _ = storage(repo, root)
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root, PreferTask: "APP-002"}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
+	if err != nil || s.Phase != "awaiting_approval" || s.TaskID != "APP-002" || fake.turns != 2 {
+		t.Fatalf("preferred task workflow: %+v %v turns=%d", s, err, fake.turns)
+	}
+	for _, want := range []string{`operator suggests task "APP-002"`, "advisory preference", "Inspect the current selected roadmap", "does not override dependencies, readiness, scope", "eligibility remains your judgment", "continue implementation in this same turn", "task_preference_rejected", "do not select or implement another task"} {
+		if !strings.Contains(fake.prompts[0], want) {
+			t.Fatalf("selection prompt lacks %q: %s", want, fake.prompts[0])
+		}
+	}
+	if strings.Contains(fake.prompts[1], "advisory preference") {
+		t.Fatalf("preference leaked into review prompt: %s", fake.prompts[1])
+	}
+}
+
+func TestPreferredTaskRejectionRetiresSelectionAndAllowsFreshRun(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	declined := &fakeRunner{repo: repo, models: model(), output: []string{result("task_preference_rejected", "APP-999 is unavailable in the selected roadmap", "", "")}}
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root, PreferTask: "APP-999"}, func(context.Context, string, io.Writer) (Runner, error) { return declined, nil })
+	if err != nil || s.Phase != "task_preference_rejected" || s.Attempts != 1 || declined.turns != 1 || s.Summary == "" || s.Diagnostics == "" {
+		t.Fatalf("preference rejection: %+v %v turns=%d", s, err, declined.turns)
+	}
+	if branch := gitTest(repo, "branch", "--show-current"); branch != "main" {
+		t.Fatalf("rejection changed branch: %s", branch)
+	}
+	status, err := Status(Options{Repository: repo, Root: root})
+	if err != nil || status.Phase != "task_preference_rejected" || status.Attempts != 1 || status.Diagnostics == "" {
+		t.Fatalf("rejection evidence or usage was not retained: %+v %v", status, err)
+	}
+	fresh := &fakeRunner{repo: repo, models: model(), output: []string{result("no_suitable_work", "Nothing ready", "", "")}}
+	next, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) { return fresh, nil })
+	if err != nil || next.Phase != "no_suitable_work" || next.Attempts != 1 || fresh.turns != 1 {
+		t.Fatalf("fresh run after rejection: %+v %v turns=%d", next, err, fresh.turns)
+	}
+	if strings.Contains(fresh.prompts[0], "advisory preference") || strings.Contains(fresh.prompts[0], "APP-999") {
+		t.Fatalf("invocation-only preference leaked into fresh run: %s", fresh.prompts[0])
+	}
+}
+
+func TestPreferredTaskRejectedWhileWorkIsActive(t *testing.T) {
+	repo := testRepo(t)
+	root := t.TempDir()
+	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("ready_for_review", "Candidate ready", "APP-002", "CANDIDATE"), result("approved", "Looks good", "APP-002", "CANDIDATE")}}
+	fake.evidenceDir, _ = storage(repo, root)
+	s, err := Run(context.Background(), Options{Repository: repo, Root: root}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
+	if err != nil || s.Phase != "awaiting_approval" {
+		t.Fatalf("setup active work: %+v %v", s, err)
+	}
+	opened := false
+	continued, err := Run(context.Background(), Options{Repository: repo, Root: root, PreferTask: "APP-003"}, func(context.Context, string, io.Writer) (Runner, error) {
+		opened = true
+		return nil, errors.New("must not open")
+	})
+	if err == nil || !strings.Contains(err.Error(), "fresh selection") || !strings.Contains(err.Error(), "existing active work") || opened || continued.Candidate != s.Candidate {
+		t.Fatalf("active preference handling: %+v %v opened=%v", continued, err, opened)
+	}
+}
+
+func TestPreferredTaskMalformedAndProviderFailuresRemainFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		runner    func(string) *fakeRunner
+		wantPhase string
+	}{
+		{"malformed result", func(repo string) *fakeRunner {
+			return &fakeRunner{repo: repo, models: model(), output: []string{`{"summary":"declined without disposition"}`}}
+		}, "invalid_result"},
+		{"provider failure", func(repo string) *fakeRunner {
+			return &fakeRunner{repo: repo, models: model(), immediate: errors.New("provider unavailable")}
+		}, "execution_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := testRepo(t)
+			runner := tc.runner(repo)
+			s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir(), PreferTask: "APP-999"}, func(context.Context, string, io.Writer) (Runner, error) { return runner, nil })
+			if err == nil || s.Phase != tc.wantPhase || s.Attempts != 1 {
+				t.Fatalf("failure was converted to rejection: %+v %v", s, err)
+			}
+		})
+	}
+}
+
+func TestTaskPreferenceRejectionWithoutPreferenceIsInvalid(t *testing.T) {
+	repo := testRepo(t)
+	fake := &fakeRunner{repo: repo, models: model(), output: []string{result("task_preference_rejected", "No preference existed", "", "")}}
+	s, err := Run(context.Background(), Options{Repository: repo, Root: t.TempDir()}, func(context.Context, string, io.Writer) (Runner, error) { return fake, nil })
+	if err == nil || s.Phase != "invalid_result" || !strings.Contains(err.Error(), "fresh preferred-task selection") {
+		t.Fatalf("unprompted rejection accepted: %+v %v", s, err)
 	}
 }
 
